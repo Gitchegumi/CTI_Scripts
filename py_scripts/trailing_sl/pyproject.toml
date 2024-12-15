@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "trailing-sl"
+version = "0.1.0"
+description = "This is a python script to automate trailing my stop-loss in the CTI match-trader platform"
+authors = ["Gitchegumi <mat@gitchegumi.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+selenium = "^4.27.1"
+python-dotenv = "^1.0.1"
+requests = "^2.32.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -28,7 +28,7 @@ load_dotenv()
 log.basicConfig(
     level=log.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[log.FileHandler("./logs/trailing_SL.log"), log.StreamHandler()],
+    handlers=[log.FileHandler("./logs/trailing_sl.log"), log.StreamHandler()],
 )
 
 # Configuration
