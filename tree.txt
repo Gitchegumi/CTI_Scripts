@@ -1,0 +1,19 @@
+📦CTI_Scripts
+ ┣ 📂.git [truncated]
+ ┣ 📂py_scripts
+ ┃ ┣ 📂api
+ ┃ ┃ ┣ 📜__init__.py
+ ┃ ┃ ┣ 📜login.py
+ ┃ ┃ ┣ 📜open_positions.py
+ ┃ ┃ ┗ 📜price_data.py
+ ┃ ┣ 📂logs
+ ┃ ┃ ┗ 📜debug.log
+ ┃ ┣ 📂strategies
+ ┃ ┃ ┗ 📜trailing_sl.py
+ ┃ ┣ 📜.env
+ ┃ ┣ 📜main.py
+ ┃ ┣ 📜README.md
+ ┃ ┣ 📜poetry.lock
+ ┃ ┗ 📜pyproject.toml
+ ┣ 📜.gitignore
+ ┗ 📜get_info.ipynb
