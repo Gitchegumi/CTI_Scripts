@@ -34,12 +34,10 @@ class OpenPositionsAPI:
             "Origin": utils.PLATFORM_URL,
             "Referer": utils.PLATFORM_URL,
         }
-        # log.debug("Open positions request headers: %s", headers)
         try:
             response = requests.request("GET", url, headers=headers, data=payload, timeout=10)
             response.raise_for_status()
             open_positions = response.json()
-            # log.info("Retrieved open positions: %s", open_positions)
             return open_positions
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch open positions: %s", e)
