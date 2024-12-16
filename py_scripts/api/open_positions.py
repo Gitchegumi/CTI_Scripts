@@ -1,13 +1,6 @@
-from api.login import LoginManager
 import api.utils as utils
 import requests
 import logging as log
-
-log.basicConfig(
-    level=log.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[log.FileHandler("./logs/debug.log"), log.StreamHandler()],
-)
 
 class OpenPositionsAPI:
     """Class to interact with open positions API."""

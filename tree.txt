@@ -3,6 +3,7 @@
  ┣ 📂py_scripts
  ┃ ┣ 📂api
  ┃ ┃ ┣ 📜__init__.py
+ ┃ ┃ ┣ 📜atr_data.py
  ┃ ┃ ┣ 📜login.py
  ┃ ┃ ┣ 📜open_positions.py
  ┃ ┃ ┗ 📜price_data.py

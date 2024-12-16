@@ -1,40 +1,11 @@
 import logging as log
 import threading
-import time
 from api.login import LoginManager
-from api.open_positions import OpenPositionsAPI
 import api.utils as utils
-
-CHECK_INTERVAL = 1
-
-def fetch_open_positions(login_manager):
-    """Fetch open positions periodically."""
-    log.info("Starting open positions fetch loop.")
-    open_positions_api = OpenPositionsAPI(login_manager)
-
-    while True:
-        try:
-            # log.info("Fetching open positions...")
-            positions = open_positions_api.get_open_positions()
-
-            if positions:
-                positions = utils.clean_positions(positions.get("positions", []))
-                log.info("%s", positions)
-            else:
-                log.warning("No open positions found.")
-
-            # log.info("Sleeping for %s seconds before fetching again...", CHECK_INTERVAL)
-            time.sleep(CHECK_INTERVAL)
-        except Exception as e:
-            log.error("An error occurred while fetching open positions: %s", e)
-            break
-
-def start_token_refresh(login_manager):
-    """Start token refresh in a separate thread."""
-    log.info("Starting token refresh loop.")
-    login_manager.start_token_refresh()
+from api.price_data import PriceData
 
 def main():
+    utils.setup_logging()
     log.info("************ Starting Application ************")
 
     # Initialize the Login Manager
@@ -48,20 +19,26 @@ def main():
             log.info("Login successful!")
 
             # Start the token refresh process in a separate thread
-            refresh_thread = threading.Thread(target=start_token_refresh, args=(login_manager,), daemon=True)
+            refresh_thread = threading.Thread(target=utils.start_new_login, args=(login_manager,))
             refresh_thread.start()
 
+            # Initialize PriceData
+            price_data = PriceData(login_manager)
+
+            # Test the PriceData functionality
+            log.info("Fetching and updating swing values...")
+            price_data.update_swing_values()
+
+            # Log stored values to verify functionality
+            stored_values = price_data.get_stored_values()
+            log.info("Stored swing values: %s", stored_values)
+
             # Start fetching open positions in the main thread
-            fetch_open_positions(login_manager)
+            utils.fetch_open_positions(login_manager)
         else:
             log.error("Login failed. Missing auth details.")
     except Exception as e:
         log.error("An error occurred: %s", e)
 
 if __name__ == "__main__":
-    log.basicConfig(
-        level=log.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[log.StreamHandler()],
-    )
     main()
