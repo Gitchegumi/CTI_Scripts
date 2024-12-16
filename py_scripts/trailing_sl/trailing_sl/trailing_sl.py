@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log.basicConfig(
-    level=log.DEBUG,
+    level=log.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[log.FileHandler("./logs/debug.log"), log.StreamHandler()],
 )
