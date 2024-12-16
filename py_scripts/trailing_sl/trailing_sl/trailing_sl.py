@@ -1,3 +1,8 @@
+"""A script to fetch open positions from the City Traders Imperium platform.
+
+Returns:
+    dict: Open positions
+"""
 import os
 import logging as log
 import time
@@ -21,6 +26,8 @@ CHECK_INTERVAL = 60
 
 
 class TradingAPI:
+    """Class to interact
+    """
     def __init__(self):
         self.session = requests.Session()
         self.auth_trading_api = None
@@ -28,6 +35,8 @@ class TradingAPI:
         self.system_uuid = None
 
     def login(self):
+        """Login to the platform and retrieve tokens.
+        """
         url = f"{PLATFORM_URL}/mtr-core-edge/login"
         payload = {"email": EMAIL, "password": PASSWORD, "brokerId": BROKER_ID}
         headers = {
@@ -76,6 +85,8 @@ class TradingAPI:
             log.error("Login failed: %s", e)
 
     def get_open_positions(self):
+        """Fetch open positions from the trading API.
+        """
         url = f"{PLATFORM_URL}/mtr-api/{self.system_uuid}/open-positions"
         payload = {}
         headers = {
@@ -89,16 +100,23 @@ class TradingAPI:
             "Origin": PLATFORM_URL,
             "Referer": PLATFORM_URL,
         }
-        log.debug("Open positions request headers: %s", headers)
+        # log.debug("Open positions request headers: %s", headers)
         try:
             response = requests.request("GET", url, headers=headers, data=payload, timeout=10)
             response.raise_for_status()
-            positions = response.json()
-            log.info("Retrieved open positions: %s", positions)
-            return positions
+            open_positions = response.json()
+            # log.info("Retrieved open positions: %s", open_positions)
+            return open_positions
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch open positions: %s", e)
             return []
+
+def clean_positions(positions):
+    """Remove unnecessary nested 'positions' field."""
+    for position in positions:
+        if 'positions' in position:
+            del position['positions']
+    return positions
 
 
 if __name__ == "__main__":
@@ -111,12 +129,13 @@ if __name__ == "__main__":
                 positions = api.get_open_positions()
 
                 if positions:
+                    positions = clean_positions(positions.get("positions", []))
                     log.info("Processing positions: %s", positions)
                 else:
                     log.warning("No open positions to process.")
 
                 log.info("Sleeping for %s seconds", CHECK_INTERVAL)
                 time.sleep(CHECK_INTERVAL)
-            except Exception as e:
+            except (requests.exceptions.RequestException, KeyError, IndexError) as e:
                 log.error("An error occurred: %s", e)
                 break
