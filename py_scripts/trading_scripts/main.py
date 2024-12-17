@@ -39,9 +39,6 @@ def main():
         log.error("Failed to import strategy module: %s", e)
     except AttributeError as e:
         log.error("Selected module does not have a 'run_strategy' function: %s", e)
-    except Exception as e:
-        log.error("An unexpected error occurred: %s", e)
-
 
 if __name__ == "__main__":
     main()
