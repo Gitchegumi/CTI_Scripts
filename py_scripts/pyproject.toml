@@ -1,9 +1,12 @@
 [tool.poetry]
-name = "trailing-sl"
+name = "trading_scripts"
 version = "0.1.0"
 description = "This is a python script to automate trailing my stop-loss in the CTI match-trader platform"
 authors = ["Gitchegumi <mat@gitchegumi.com>"]
 readme = "README.md"
+packages = [
+    { include = "trading_scripts" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"

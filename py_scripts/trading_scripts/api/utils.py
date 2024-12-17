@@ -1,7 +1,12 @@
+"""A utility module for common functions used across the trading scripts.
+
+Returns:
+    None
+"""
 import logging as log
 from logging.handlers import RotatingFileHandler
 import time
-from api.open_positions import OpenPositionsAPI
+from api.open_positions import OpenPositionsAPI # pylint: disable=import-error
 
 
 PLATFORM_URL = "https://platform.citytradersimperium.com"
@@ -14,6 +19,8 @@ def clean_positions(positions):
     return positions
 
 def setup_logging():
+    """Configure logging for the application.
+    """
     log_handler = RotatingFileHandler(
         "./logs/debug.log", maxBytes=5 * 1024 * 1024, backupCount=3
     )  # 5MB per file, 3 backups
@@ -53,8 +60,14 @@ def fetch_open_positions(login_manager, check_interval=1):
 
             # log.info("Sleeping for %s seconds before fetching again...", check_interval)
             time.sleep(check_interval)
-        except Exception as e:
-            log.error("An error occurred while fetching open positions: %s", e)
+        except (ConnectionError, TimeoutError) as e:
+            log.error("A network error occurred while fetching open positions: %s", e)
+            break
+        except ValueError as e:
+            log.error("A value error occurred while processing positions: %s", e)
+            break
+        except (KeyError, TypeError) as e:
+            log.error("An error occurred while processing positions: %s", e)
             break
 
 def start_new_login(login_manager):

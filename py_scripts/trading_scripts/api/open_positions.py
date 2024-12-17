@@ -1,6 +1,11 @@
-import api.utils as utils
-import requests
+"""A module for interacting with Match Trader API to fetch open positions.
+
+Returns:
+    dict: A dictionary containing open positions data.
+"""
 import logging as log
+import api.utils as utils # pylint: disable=import-error
+import requests
 
 class OpenPositionsAPI:
     """Class to interact with open positions API."""
@@ -28,7 +33,7 @@ class OpenPositionsAPI:
             "Referer": utils.PLATFORM_URL,
         }
         try:
-            response = requests.request("GET", url, headers=headers, data=payload, timeout=10)
+            response = requests.get(url, headers=headers, data=payload, timeout=10)
             response.raise_for_status()
             open_positions = response.json()
             return open_positions

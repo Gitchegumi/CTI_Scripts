@@ -1,9 +1,17 @@
+"""A module for fetching market data from the Match Trader API.
+
+Returns:
+    dict: A dictionary containing market data.
+"""
+
 import logging as log
-from api.open_positions import OpenPositionsAPI
-from api.utils import PLATFORM_URL
+from api.utils import PLATFORM_URL, fetch_open_positions  # pylint: disable=import-error
 import requests
 
+
 class PriceData:
+    """A class for fetching and updating market data."""
+
     def __init__(self, login_manager):
         self.login_manager = login_manager
         self.stored_values = {}  # To store the most recent swing values per position
@@ -30,8 +38,7 @@ class PriceData:
 
     def update_swing_values(self):
         """Update the most recent swing values for each open position."""
-        open_positions_api = OpenPositionsAPI(self.login_manager)
-        open_positions = open_positions_api.get_open_positions()
+        open_positions = fetch_open_positions(self.login_manager)
 
         if not open_positions:
             log.info("No open positions found.")
@@ -58,7 +65,12 @@ class PriceData:
                     "high": current_high,
                     "low": current_low,
                 }
-                log.info("Initialized stored values for %s: High=%s, Low=%s", symbol, current_high, current_low)
+                log.info(
+                    "Initialized stored values for %s: High=%s, Low=%s",
+                    symbol,
+                    current_high,
+                    current_low,
+                )
 
             if side == "BUY":
                 if current_high > self.stored_values[symbol]["high"]:

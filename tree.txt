@@ -1,20 +1,31 @@
 📦CTI_Scripts
  ┣ 📂.git [truncated]
  ┣ 📂py_scripts
- ┃ ┣ 📂api
+ ┃ ┣ 📂trading_scripts
+ ┃ ┃ ┣ 📂api
+ ┃ ┃ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┃ ┃ ┣ 📜__init__.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜login.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜open_positions.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜price_data.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┗ 📜utils.cpython-312.pyc
+ ┃ ┃ ┃ ┣ 📜__init__.py
+ ┃ ┃ ┃ ┣ 📜atr_data.py
+ ┃ ┃ ┃ ┣ 📜login.py
+ ┃ ┃ ┃ ┣ 📜open_positions.py
+ ┃ ┃ ┃ ┣ 📜price_data.py
+ ┃ ┃ ┃ ┗ 📜utils.py
+ ┃ ┃ ┣ 📂logs
+ ┃ ┃ ┃ ┗ 📜debug.log
+ ┃ ┃ ┣ 📂strategies
+ ┃ ┃ ┃ ┣ 📜__init__.py
+ ┃ ┃ ┃ ┗ 📜trailing_sl.py
+ ┃ ┃ ┣ 📜.env
  ┃ ┃ ┣ 📜__init__.py
- ┃ ┃ ┣ 📜atr_data.py
- ┃ ┃ ┣ 📜login.py
- ┃ ┃ ┣ 📜open_positions.py
- ┃ ┃ ┗ 📜price_data.py
- ┃ ┣ 📂logs
- ┃ ┃ ┗ 📜debug.log
- ┃ ┣ 📂strategies
- ┃ ┃ ┗ 📜trailing_sl.py
- ┃ ┣ 📜.env
- ┃ ┣ 📜main.py
+ ┃ ┃ ┗ 📜main.py
  ┃ ┣ 📜README.md
  ┃ ┣ 📜poetry.lock
  ┃ ┗ 📜pyproject.toml
  ┣ 📜.gitignore
- ┗ 📜get_info.ipynb
+ ┣ 📜get_info.ipynb
+ ┗ 📜tree.txt
