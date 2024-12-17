@@ -5,12 +5,14 @@
  ┃ ┃ ┣ 📂api
  ┃ ┃ ┃ ┣ 📂__pycache__
  ┃ ┃ ┃ ┃ ┣ 📜__init__.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜fetch_price_data.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜login.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜open_positions.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜price_data.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┗ 📜utils.cpython-312.pyc
  ┃ ┃ ┃ ┣ 📜__init__.py
  ┃ ┃ ┃ ┣ 📜atr_data.py
+ ┃ ┃ ┃ ┣ 📜fetch_price_data.py
  ┃ ┃ ┃ ┣ 📜login.py
  ┃ ┃ ┃ ┣ 📜open_positions.py
  ┃ ┃ ┃ ┣ 📜price_data.py
@@ -18,6 +20,9 @@
  ┃ ┃ ┣ 📂logs
  ┃ ┃ ┃ ┗ 📜debug.log
  ┃ ┃ ┣ 📂strategies
+ ┃ ┃ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┃ ┃ ┣ 📜__init__.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┗ 📜trailing_sl.cpython-312.pyc
  ┃ ┃ ┃ ┣ 📜__init__.py
  ┃ ┃ ┃ ┗ 📜trailing_sl.py
  ┃ ┃ ┣ 📜.env

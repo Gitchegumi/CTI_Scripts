@@ -1,9 +1,10 @@
 """A trailing stop loss strategy that uses the Trading API to fetch and update open positions."""
+
 import logging as log
 import threading
-from api.login import LoginManager # pylint: disable=import-error
-from api.price_data import PriceData # pylint: disable=import-error
-import api.utils as utils # pylint: disable=import-error
+from api.login import LoginManager  # pylint: disable=import-error
+import api.utils as utils  # pylint: disable=import-error
+from api.fetch_price_data import fetch_price_data  # pylint: disable=import-error
 
 def run_strategy():
     """Main entry point for the trailing stop loss strategy."""
@@ -21,19 +22,17 @@ def run_strategy():
             log.info("Login successful!")
 
             # Start the token refresh process in a separate thread
-            refresh_thread = threading.Thread(target=utils.start_new_login, args=(login_manager,))
+            refresh_thread = threading.Thread(
+                target=utils.start_new_login, args=(login_manager,)
+            )
             refresh_thread.start()
 
-            # Initialize PriceData
-            price_data = PriceData(login_manager)
-
-            # Test the PriceData functionality
-            log.info("Fetching and updating swing values...")
-            price_data.update_swing_values()
-
-            # Log stored values to verify functionality
-            stored_values = price_data.get_stored_values()
-            log.info("Stored swing values: %s", stored_values)
+            # Start fetching price data in the main thread
+            symbols = ["EURUSD", "US500", "US30"]
+            price_thread = threading.Thread(
+                target=fetch_price_data, args=(login_manager, symbols)
+            )
+            price_thread.start()
 
             # Start fetching open positions in the main thread
             utils.fetch_open_positions(login_manager)
