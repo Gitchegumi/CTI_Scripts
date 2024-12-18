@@ -6,10 +6,63 @@ Returns:
 import logging as log
 from logging.handlers import RotatingFileHandler
 import time
+import requests
 from api.open_positions import OpenPositionsAPI # pylint: disable=import-error
 
 
 PLATFORM_URL = "https://platform.citytradersimperium.com"
+
+def edit_sl_position(
+        login_manager,
+        position_id,
+        instrument,
+        order_side,
+        volume,
+        sl_price,
+        tp_price=0,
+        trailing_distance=0
+    ):
+    """Edit the stop loss position via the Match Trader API.
+
+    Args:
+        login_manager (LoginManager): The login manager instance.
+        position_id (str): The ID of the position to edit.
+        instrument (str): The trading instrument (e.g., "EURUSD").
+        order_side (str): The side of the order ("BUY" or "SELL").
+        volume (float): The volume of the position.
+        sl_price (float): The new stop loss price.
+        tp_price (float, optional): The take profit price. Defaults to 0.
+        trailing_distance (float, optional): The trailing distance. Defaults to 0.
+
+    Returns:
+        bool: True if the request was successful, False otherwise.
+    """
+    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/edit"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Auth-trading-api": login_manager.auth_trading_api,
+        "Cookie": f"co-auth={login_manager.cookie}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+    payload = {
+        "id": position_id,
+        "instrument": instrument,
+        "orderSide": order_side,
+        "volume": volume,
+        "isMobile": False,
+        "slPrice": sl_price,
+        "tpPrice": tp_price,
+        "trailingDistance": trailing_distance,
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+        log.info("Successfully updated SL for position %s: %s", position_id, sl_price)
+        return True
+    except requests.RequestException as e:
+        log.error("Failed to update SL for position %s: %s", position_id, e)
+        return False
 
 def clean_positions(positions):
     """Remove unnecessary nested 'positions' field."""
@@ -76,14 +129,16 @@ def fetch_open_positions_once(login_manager):
 
         if positions:
             positions = clean_positions(positions.get("positions", []))
-            filtered_positions = [
-                {
-                    "symbol": pos["symbol"],
-                }
-                for pos in positions
-            ]
+            # filtered_positions = [
+            #     {
+            #         "symbol": pos["symbol"],
+            #         "side": pos["side"],
+            #         "stop loss": pos["stopLoss"],
+            #     }
+            #     for pos in positions
+            # ]
             # log.info("Symbols for Market Watch: %s", filtered_positions)
-            return filtered_positions
+            return positions
         else:
             log.warning("No open positions found.")
     except (ConnectionError, TimeoutError) as e:

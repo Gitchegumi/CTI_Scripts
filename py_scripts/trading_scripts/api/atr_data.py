@@ -4,15 +4,13 @@ Returns:
     float: The calculated ATR value.
 """
 
-import time
 import logging as log
 from decimal import Decimal
 from api.price_data import PriceData  # pylint: disable=import-error
-from api.utils import fetch_open_positions_once  # pylint: disable=import-error
 
 
 def calculate_atr_from_market_data(
-    login_manager, symbol, resolution="5", period=14, check_interval=30
+    login_manager, symbol, resolution="5", period=14
 ):
     """
     Calculate ATR using market data fetched from the PriceData class.
@@ -27,43 +25,35 @@ def calculate_atr_from_market_data(
     - ATR value for the given symbol.
     """
     atr_data = PriceData(login_manager)
-    positions = fetch_open_positions_once(login_manager)
-    symbols = [pos["symbol"] for pos in positions]
+    try:
+        data = atr_data.fetch_atr_data(symbol, resolution, period)
+        if data is None or data.empty:
+            log.error("Failed to fetch data for ATR calculation.")
+            return None
 
-    while True:
-        try:
-            for symbol in symbols:
-                data = atr_data.fetch_atr_data(symbol, resolution, period)
-                if data is None or data.empty:
-                    log.error("Failed to fetch data for ATR calculation.")
-                    return None
+        # Calculate True Range (TR)
+        data["previous_close"] = data["close"].shift(1)
+        data["high_low"] = data["high"] - data["low"]
+        data["high_prev_close"] = abs(data["high"] - data["previous_close"])
+        data["low_prev_close"] = abs(data["low"] - data["previous_close"])
+        data["TR"] = data[["high_low", "high_prev_close", "low_prev_close"]].max(axis=1)
 
-                # Calculate ATR
-                data["TR"] = data.apply(
-                    lambda row: max(
-                        row["high"] - row["low"],
-                        abs(row["high"] - row["close"]),
-                        abs(row["low"] - row["close"]),
-                    ),
-                    axis=1,
-                )
+        # Calculate ATR using the rolling mean
+        atr_series = data["TR"].rolling(window=period).mean()
+        if atr_series.isnull().all():
+            log.error("Not enough data to calculate ATR for symbol: %s", symbol)
+            return None
+        atr = atr_series.iloc[-1]
 
-                # Calculate ATR using the rolling mean
-                atr = data["TR"].rolling(window=period).mean().iloc[-1]
+        # Determine decimal precision
+        example_close = data["close"].iloc[0]  # Take the first 'close' value
+        decimal_places = abs(Decimal(str(example_close)).as_tuple().exponent)
 
-                # Determine decimal precision
-                example_close = data["close"].iloc[0]  # Take the first 'close' value
-                decimal_places = abs(Decimal(str(example_close)).as_tuple().exponent)
+        # Round ATR to match precision
+        rounded_atr = round(atr, decimal_places)
+        log.info("Calculated ATR for %s: %s", symbol, rounded_atr)
+        return rounded_atr
 
-                # Round ATR to match precision
-                rounded_atr = round(atr, decimal_places)
-                log.info(
-                    "Calculated ATR for %s: %s",
-                    symbol,
-                    rounded_atr,
-                )
-
-            time.sleep(check_interval)
-        except (ConnectionError, TimeoutError) as e:
-            log.error("A network error occurred while calculating ATR: %s", e)
-            break
+    except (ValueError, KeyError, AttributeError) as e:
+        log.error("Error calculating ATR for symbol %s: %s", symbol, e)
+        return None

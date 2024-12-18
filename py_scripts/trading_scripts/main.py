@@ -18,9 +18,9 @@ def main():
     utils.setup_logging()
     log.info("************ Starting Application ************")
 
-    print("Select a strategy to run:")
+    log.info("Select a strategy to run:")
     for key, module_name in STRATEGIES.items():
-        print(f"{key}: {module_name}")
+        log.info("%s: %s", key, module_name)
 
     choice = input("Enter the number of the strategy: ").strip()
     if choice not in STRATEGIES:
