@@ -5,7 +5,7 @@ import threading
 from api.login import LoginManager  # pylint: disable=import-error
 import api.utils as utils  # pylint: disable=import-error
 from api.fetch_price_data import fetch_price_data  # pylint: disable=import-error
-from api.utils import fetch_open_positions_loop, fetch_open_positions_once # pylint: disable=import-error
+from api.utils import fetch_open_positions_once # pylint: disable=import-error
 from api.atr_data import calculate_atr_from_market_data  # pylint: disable=import-error
 
 def run_strategy():

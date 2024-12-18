@@ -7,7 +7,7 @@ import api.utils as utils # pylint: disable=import-error
 
 # Available strategies
 STRATEGIES = {
-    "1": "strategies.trailing_sl",
+    "1": "strategies.trailing_sl_atr",
     # Add other strategies here in the format "key": "module_path"
 }
 
