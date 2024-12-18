@@ -5,11 +5,13 @@ import threading
 from api.login import LoginManager  # pylint: disable=import-error
 import api.utils as utils  # pylint: disable=import-error
 from api.fetch_price_data import fetch_price_data  # pylint: disable=import-error
+from api.utils import fetch_open_positions_loop, fetch_open_positions_once # pylint: disable=import-error
+from api.atr_data import calculate_atr_from_market_data  # pylint: disable=import-error
 
 def run_strategy():
     """Main entry point for the trailing stop loss strategy."""
     utils.setup_logging()
-    log.info("************ Running Trailing SL Strategy ************")
+    log.info("************ Running Trailing SL by ATR Strategy ************")
 
     # Initialize the Login Manager
     login_manager = LoginManager()
@@ -17,28 +19,28 @@ def run_strategy():
         log.info("Attempting to log in...")
         login_manager.login()
 
-        auth_details = login_manager.get_auth_details()
-        if auth_details["auth_trading_api"] and auth_details["cookie"]:
-            log.info("Login successful!")
+        # Start the token refresh process in a separate thread
+        refresh_thread = threading.Thread(
+            target=utils.start_new_login, args=(login_manager,)
+        )
+        refresh_thread.start()
 
-            # Start the token refresh process in a separate thread
-            refresh_thread = threading.Thread(
-                target=utils.start_new_login, args=(login_manager,)
-            )
-            refresh_thread.start()
+        # Fetch and update market data for open positions
+        data_symbols = fetch_open_positions_once(login_manager)
+        fetch_thred = threading.Thread(
+            target=fetch_price_data, args=(login_manager, data_symbols)
+        )
+        fetch_thred.start()
 
-            # Start fetching price data in the main thread
-            symbols = ["EURUSD", "US500", "US30"]
-            price_thread = threading.Thread(
-                target=fetch_price_data, args=(login_manager, symbols)
-            )
-            price_thread.start()
+        # Fetch and update ATR data for open positions
+        atr_thread = threading.Thread(
+            target=calculate_atr_from_market_data, args=(login_manager, data_symbols)
+        )
+        atr_thread.start()
 
-            # Start fetching open positions in the main thread
-            utils.fetch_open_positions(login_manager)
+        # while True:
+        #     fetch_open_positions_loop(login_manager, check_interval=10)
 
-        else:
-            log.error("Login failed. Missing auth details.")
     except (ConnectionError, KeyError) as e:
         log.error("A connection or key error occurred: %s", e)
     except ValueError as e:

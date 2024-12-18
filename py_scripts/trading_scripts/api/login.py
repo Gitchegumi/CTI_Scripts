@@ -1,9 +1,17 @@
+"""A module for handling authentication and token retrieval.
+
+Raises:
+    ValueError: If login fails.
+
+Returns:
+    None
+"""
 import os
+import logging as log
 import time
 import requests
-import logging as log
 from dotenv import load_dotenv
-import api.utils as utils
+import api.utils as utils # pylint: disable=import-error
 
 # Load environment variables
 load_dotenv()
@@ -11,7 +19,7 @@ load_dotenv()
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 BROKER_ID = os.getenv("BROKER_ID")
-REFRESH_INTERVAL = 300
+REFRESH_INTERVAL = 1800  # 30 minutes
 
 class LoginManager:
     """Handles authentication and token retrieval."""
@@ -48,22 +56,14 @@ class LoginManager:
             log.error("Login failed: %s", e)
             raise
 
-    def get_auth_details(self):
-        """Returns authentication details."""
-        return {
-            "auth_trading_api": self.auth_trading_api,
-            "cookie": self.cookie,
-            "system_uuid": self.system_uuid,
-        }
-    
     def start_periodic_login(self):
         """Start a periodic login process."""
         while True:
             try:
-                log.info("Sleeping for %s seconds until the next login.", REFRESH_INTERVAL)
+                log.info("Sleeping for %s minutes until the next login.", REFRESH_INTERVAL / 60)
                 time.sleep(REFRESH_INTERVAL)
                 log.info("Logging in...")
                 self.login()
-            except Exception as e:
+            except (requests.exceptions.RequestException, ValueError) as e:
                 log.error("An error occurred during login: %s", e)
                 break

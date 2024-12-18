@@ -30,9 +30,9 @@ def setup_logging():
         handlers=[log_handler, log.StreamHandler()],
     )
 
-def fetch_open_positions(login_manager, check_interval=1):
+def fetch_open_positions_loop(login_manager, check_interval=1):
     """Fetch open positions periodically."""
-    log.info("Starting open positions fetch loop.")
+    log.info("Fetching Open Positions.")
     open_positions_api = OpenPositionsAPI(login_manager)
 
     while True:
@@ -42,19 +42,15 @@ def fetch_open_positions(login_manager, check_interval=1):
 
             if positions:
                 positions = clean_positions(positions.get("positions", []))
-                filtered_positions = [
-                    {
-                        "symbol": pos["symbol"],
-                        "volume": pos["volume"],
-                        "side": pos["side"],
-                        "stopLoss": pos["stopLoss"],
-                        "currentPrice": pos["currentPrice"],
-                        "profit": pos["profit"],
-                        "netProfit": pos["netProfit"],
-                    }
-                    for pos in positions
-                ]
-                log.info("%s", filtered_positions)
+                # filtered_positions = [
+                #     {
+                #         "symbol": pos["symbol"],
+                #         "side": pos["side"],
+                #         "stop loss": pos["stopLoss"],
+                #     }
+                #     for pos in positions
+                # ]
+                # log.info("%s", filtered_positions)
             else:
                 log.warning("No open positions found.")
 
@@ -69,6 +65,36 @@ def fetch_open_positions(login_manager, check_interval=1):
         except (KeyError, TypeError) as e:
             log.error("An error occurred while processing positions: %s", e)
             break
+
+def fetch_open_positions_once(login_manager):
+    """Fetch open positions periodically."""
+    # log.info("Fetching Open Positions.")
+    open_positions_api = OpenPositionsAPI(login_manager)
+    try:
+        # log.info("Fetching open positions...")
+        positions = open_positions_api.get_open_positions()
+
+        if positions:
+            positions = clean_positions(positions.get("positions", []))
+            filtered_positions = [
+                {
+                    "symbol": pos["symbol"],
+                }
+                for pos in positions
+            ]
+            # log.info("Symbols for Market Watch: %s", filtered_positions)
+            return filtered_positions
+        else:
+            log.warning("No open positions found.")
+    except (ConnectionError, TimeoutError) as e:
+        log.error("A network error occurred while fetching open positions: %s", e)
+        return []
+    except ValueError as e:
+        log.error("A value error occurred while processing positions: %s", e)
+        return []
+    except (KeyError, TypeError) as e:
+        log.error("An error occurred while processing positions: %s", e)
+        return []
 
 def start_new_login(login_manager):
     """Wrapper for starting periodic login in a thread."""

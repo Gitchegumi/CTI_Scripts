@@ -5,15 +5,19 @@
 import time
 import logging as log
 from api.price_data import PriceData # pylint: disable=import-error
+from api.utils import fetch_open_positions_once # pylint: disable=import-error
 
 def fetch_price_data(login_manager, symbols, check_interval=15):
     """Fetch market data for the given symbols."""
     log.info("Starting price data fetch loop.")
     price_data = PriceData(login_manager)
-    symbols = [symbol.upper() for symbol in symbols]
+    positions = fetch_open_positions_once(login_manager)
+    symbols = [pos["symbol"] for pos in positions]
+    # log.info("Symbols for Market Watch: %s", symbols)
     while True:
         try:
-            price_data.update_swing_values()
+            for symbol in symbols:
+                price_data.update_swing_values(symbol)
             stored_values = price_data.get_stored_values()
             log.info("Stored swing values: %s", stored_values)
             time.sleep(check_interval)

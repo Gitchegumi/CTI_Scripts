@@ -14,6 +14,7 @@ selenium = "^4.27.1"
 python-dotenv = "^1.0.1"
 requests = "^2.32.3"
 cloudscraper = "^1.2.71"
+pandas = "^2.2.3"
 
 
 [build-system]
