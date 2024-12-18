@@ -10,7 +10,7 @@ from api.utils import (  # pylint: disable=import-error
     PLATFORM_URL,
 )
 import requests
-import pandas as pd
+import pandas as pd # pylint: disable=import-error # pylance reports this as an error but it is not
 
 
 class PriceData:
