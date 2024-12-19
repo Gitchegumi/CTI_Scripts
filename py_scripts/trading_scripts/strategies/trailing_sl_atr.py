@@ -103,7 +103,7 @@ def update_positions(login_manager, positions, symbols, interval=10):
         new_positions = fetch_open_positions_once(login_manager)
         positions.extend(new_positions)
         new_symbols = [pos["symbol"] for pos in new_positions]
-        
+
         # Update symbols list in place to avoid issues in threads
         symbols.clear()
         symbols.extend(new_symbols)
