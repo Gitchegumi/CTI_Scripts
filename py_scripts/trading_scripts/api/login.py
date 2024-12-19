@@ -8,7 +8,6 @@ Returns:
 """
 import os
 import logging as log
-import time
 import requests
 from dotenv import load_dotenv
 import api.utils as utils # pylint: disable=import-error
@@ -56,14 +55,22 @@ class LoginManager:
             log.error("Login failed: %s", e)
             raise
 
-    def start_periodic_login(self):
-        """Start a periodic login process."""
-        while True:
-            try:
-                log.info("Sleeping for %s minutes until the next login.", REFRESH_INTERVAL / 60)
-                time.sleep(REFRESH_INTERVAL)
-                log.info("Logging in...")
-                self.login()
-            except (requests.exceptions.RequestException, ValueError) as e:
-                log.error("An error occurred during login: %s", e)
-                break
+    def refresh_token(self):
+        """Refresh the authentication token."""
+        url = f"{utils.PLATFORM_URL}/manager/refresh-token"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        }
+        try:
+            response = requests.post(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            new_token = response.json().get("token")
+            if new_token:
+                self.session.auth_trading_api = new_token
+                log.info("Token refreshed successfully.")
+            else:
+                log.error("Failed to refresh token: No token in response.")
+        except requests.exceptions.RequestException as e:
+            log.error("Failed to refresh token: %s", e)

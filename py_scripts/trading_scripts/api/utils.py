@@ -153,4 +153,7 @@ def fetch_open_positions_once(login_manager):
 
 def start_new_login(login_manager):
     """Wrapper for starting periodic login in a thread."""
-    login_manager.start_periodic_login()
+    while True:
+        log.info("Refreshing token in 10 minutes...")
+        time.sleep(60 * 10)  # 30 minutes
+        login_manager.refresh_token()

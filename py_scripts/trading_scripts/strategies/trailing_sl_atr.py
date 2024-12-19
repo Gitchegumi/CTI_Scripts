@@ -21,9 +21,23 @@ def calculate_new_sl(position, atr_value, swing_values, initial_r_value):
     current_price = swing_values[symbol]["high"] if side == "BUY" else swing_values[symbol]["low"]
     rr_value = round(abs(current_price - position["openPrice"]) / initial_r_value, 2)
 
-    if 1.0 < rr_value <= 2 and position["currentPrice"] > position["openPrice"]:
+    if (
+        1.5 < rr_value <= 3 and position["currentPrice"] > position["openPrice"]
+        if side == "BUY"
+        else position["currentPrice"] < position["openPrice"]
+    ):
         atr_multiplier = 2
-    elif rr_value > 2.0 and position["currentPrice"] > position["openPrice"]:
+    elif (
+        3 < rr_value <= 5 and position["currentPrice"] > position["openPrice"]
+        if side == "BUY"
+        else position["currentPrice"] < position["openPrice"]
+    ):
+        atr_multiplier = 1.5
+    elif (
+        5 < rr_value and position["currentPrice"] > position["openPrice"]
+        if side == "BUY"
+        else position["currentPrice"] < position["openPrice"]
+    ):
         atr_multiplier = 1
 
     log.info("ATR Multiplier %s: %s", position["symbol"], atr_multiplier)
@@ -209,10 +223,10 @@ def run_strategy():
         login_manager.login()
 
         # Start the token refresh process in a separate thread
-        # refresh_thread = threading.Thread(
-        #     target=utils.start_new_login, args=(login_manager,)
-        # )
-        # refresh_thread.start()
+        refresh_thread = threading.Thread(
+            target=utils.start_new_login, args=(login_manager,)
+        )
+        refresh_thread.start()
 
         # Fetch and update market data for open positions
         positions = []
