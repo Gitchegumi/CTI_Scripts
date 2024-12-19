@@ -19,7 +19,7 @@ load_dotenv()
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 BROKER_ID = os.getenv("BROKER_ID")
-REFRESH_INTERVAL = 1800  # 30 minutes
+REFRESH_INTERVAL = 900  # 15 minutes
 
 class LoginManager:
     """Handles authentication and token retrieval."""

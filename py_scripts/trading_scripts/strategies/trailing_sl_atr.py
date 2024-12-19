@@ -119,7 +119,7 @@ def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=30)
             with atr_lock:
                 if atr_value is not None:
                     atr_values[symbol] = atr_value
-        log.info("ATR values updated: %s", atr_values)
+        log.info("ATR values updated")
         time.sleep(interval)
 
 def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=15):
@@ -129,7 +129,7 @@ def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=
             price_data.update_swing_values(symbol)
             with swing_lock:
                 swing_values[symbol] = price_data.get_stored_values().get(symbol, {})
-        log.info("Swing values updated: %s", swing_values)
+        log.info("Swing values updated")
         time.sleep(interval)
 
 def run_strategy():
@@ -164,24 +164,30 @@ def run_strategy():
         threading.Thread(
             target=update_positions, args=(login_manager, positions, symbols)
         ).start()
+
+        while not positions:
+            log.info("Waiting for positions to be fetched...")
+            time.sleep(1)
+
         threading.Thread(
-            target=update_atr_values, args=(login_manager, symbols, atr_values, atr_lock)
-        ).start()
+                target=update_atr_values, args=(login_manager, symbols, atr_values, atr_lock)
+            ).start()
         threading.Thread(
             target=update_swing_values, args=(price_data, symbols, swing_values, swing_lock)
         ).start()
 
         # Main loop to update stop loss
         while True:
-            update_stop_loss(
-                login_manager,
-                positions,
-                atr_values,
-                swing_values,
-                atr_lock,
-                swing_lock
-            )
-            time.sleep(10)  # Adjust this interval as needed
+            if atr_values and swing_values:
+                update_stop_loss(
+                    login_manager,
+                    positions,
+                    atr_values,
+                    swing_values,
+                    atr_lock,
+                    swing_lock
+                )
+                time.sleep(10)  # Adjust this interval as needed
 
     except (ConnectionError, KeyError) as e:
         log.error("A connection or key error occurred: %s", e)
