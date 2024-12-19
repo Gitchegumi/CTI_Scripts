@@ -96,11 +96,18 @@ Nothing Changed.",
             else:
                 log.error("Unknown position side: %s", side)
 
-def update_positions(login_manager, positions, interval=10):
+def update_positions(login_manager, positions, symbols, interval=10):
     """Update positions every specified interval."""
     while True:
         positions.clear()
-        positions.extend(fetch_open_positions_once(login_manager))
+        new_positions = fetch_open_positions_once(login_manager)
+        positions.extend(new_positions)
+        new_symbols = [pos["symbol"] for pos in new_positions]
+        
+        # Update symbols list in place to avoid issues in threads
+        symbols.clear()
+        symbols.extend(new_symbols)
+
         log.info("Positions updated: %s", [position["symbol"] for position in positions])
         time.sleep(interval)
 
@@ -110,7 +117,8 @@ def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=30)
         for symbol in symbols:
             atr_value = calculate_atr_from_market_data(login_manager, symbol)
             with atr_lock:
-                atr_values[symbol] = atr_value
+                if atr_value is not None:
+                    atr_values[symbol] = atr_value
         log.info("ATR values updated: %s", atr_values)
         time.sleep(interval)
 
@@ -142,10 +150,8 @@ def run_strategy():
         refresh_thread.start()
 
         # Fetch and update market data for open positions
-        positions = fetch_open_positions_once(login_manager)
-
-        # Variables
-        symbols = [pos["symbol"] for pos in positions]
+        positions = []
+        symbols = []
         price_data = PriceData(login_manager)
         atr_values = {}
         swing_values = {}
@@ -156,7 +162,7 @@ def run_strategy():
 
         # Start threads for updating positions, ATR values, and swing values
         threading.Thread(
-            target=update_positions, args=(login_manager, positions)
+            target=update_positions, args=(login_manager, positions, symbols)
         ).start()
         threading.Thread(
             target=update_atr_values, args=(login_manager, symbols, atr_values, atr_lock)
