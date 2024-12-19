@@ -21,7 +21,7 @@ def calculate_new_sl(position, atr_value, swing_values, initial_r_value):
     current_price = swing_values[symbol]["high"] if side == "BUY" else swing_values[symbol]["low"]
     rr_value = round(abs(current_price - position["openPrice"]) / initial_r_value, 2)
 
-    if rr_value > 1.0 and rr_value <= 2 and position["currentPrice"] > position["openPrice"]:
+    if 1.0 < rr_value <= 2 and position["currentPrice"] > position["openPrice"]:
         atr_multiplier = 2
     elif rr_value > 2.0 and position["currentPrice"] > position["openPrice"]:
         atr_multiplier = 1
