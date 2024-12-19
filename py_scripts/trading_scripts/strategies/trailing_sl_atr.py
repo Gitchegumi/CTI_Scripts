@@ -128,35 +128,41 @@ def update_positions(
     """Update positions every specified interval."""
     while True:
         positions.clear()
-        new_positions = fetch_open_positions_once(login_manager)
-        positions.extend(new_positions)
-        new_symbols = [pos["symbol"] for pos in new_positions]
+        try:
+            new_positions = fetch_open_positions_once(login_manager)
+            if new_positions is not None:
+                positions.extend(new_positions)
+                new_symbols = [pos["symbol"] for pos in new_positions]
 
-        # Update symbols list in place to avoid issues in threads
-        symbols.clear()
-        symbols.extend(new_symbols)
+                # Update symbols list in place to avoid issues in threads
+                symbols.clear()
+                symbols.extend(new_symbols)
 
-        # Calculate and store initial R value for new positions
-        for position in new_positions:
-            if position["id"] not in initial_r_values:
-                atr_value = calculate_atr_from_market_data(
-                    login_manager,
-                    position["symbol"]
+                # Calculate and store initial R value for new positions
+                for position in new_positions:
+                    if position["id"] not in initial_r_values:
+                        atr_value = calculate_atr_from_market_data(
+                            login_manager,
+                            position["symbol"]
+                        )
+                        sample = position["openPrice"]
+                        decimal_places = abs(Decimal(str(sample)).as_tuple().exponent)
+                        if atr_value is not None:
+                            initial_r_value = round(abs(
+                                position["openPrice"]-(position["openPrice"] - atr_value * 3)
+                            ), decimal_places) if position["side"] == "BUY" else round(abs(
+                                position["openPrice"]-(position["openPrice"] + atr_value * 3)
+                            ), decimal_places)
+                            initial_r_values[position["id"]] = initial_r_value
+
+                log.info(
+                    "Positions updated: %s",
+                    [(position["symbol"], position["netProfit"], initial_r_value) for position in positions]
                 )
-                sample = position["openPrice"]
-                decimal_places = abs(Decimal(str(sample)).as_tuple().exponent)
-                if atr_value is not None:
-                    initial_r_value = round(abs(
-                        position["openPrice"]-(position["openPrice"] - atr_value * 3)
-                    ), decimal_places) if position["side"] == "BUY" else round(abs(
-                        position["openPrice"]-(position["openPrice"] + atr_value * 3)
-                    ), decimal_places)
-                    initial_r_values[position["id"]] = initial_r_value
-
-        log.info(
-            "Positions updated: %s",
-            [(position["symbol"], position["netProfit"], initial_r_value) for position in positions]
-        )
+            else:
+                log.info("No open positions found.")
+        except (ConnectionError, KeyError) as e:
+            log.error("A connection or key error occurred: %s", e)
         time.sleep(interval)
 
 def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=30):
