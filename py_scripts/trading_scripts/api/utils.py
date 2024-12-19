@@ -155,5 +155,5 @@ def start_new_login(login_manager):
     """Wrapper for starting periodic login in a thread."""
     while True:
         log.info("Refreshing token in 10 minutes...")
-        time.sleep(60 * 10)  # 30 minutes
+        time.sleep(60 * 10)  # 10 minutes
         login_manager.refresh_token()
