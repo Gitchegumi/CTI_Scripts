@@ -65,7 +65,7 @@ def update_stop_loss(login_manager, positions, atr_values, swing_values, atr_loc
                     )
                 else:
                     log.info(
-                        "New stop loss (%s) is less than current stop loss (%s) for %s. \
+                        "New stop loss (%s) is not greater than current stop loss (%s) for %s. \
 Nothing Changed.",
                         new_sl,
                         stop_loss,
@@ -87,7 +87,7 @@ Nothing Changed.",
                     )
                 else:
                     log.info(
-                        "New stop loss (%s) is greater than current stop loss (%s) for %s. \
+                        "New stop loss (%s) is not less than current stop loss (%s) for %s. \
 Nothing Changed.",
                         new_sl,
                         stop_loss,
