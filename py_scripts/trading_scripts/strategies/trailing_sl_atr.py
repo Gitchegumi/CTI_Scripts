@@ -154,9 +154,8 @@ def update_positions(
                     initial_r_values[position["id"]] = initial_r_value
 
         log.info(
-            "Positions updated: %s r-values: %s",
-            [(position["symbol"], position["netProfit"]) for position in positions],
-            initial_r_values
+            "Positions updated: %s",
+            [(position["symbol"], position["netProfit"], initial_r_value) for position in positions]
         )
         time.sleep(interval)
 
