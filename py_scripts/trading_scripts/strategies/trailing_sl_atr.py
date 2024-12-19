@@ -11,28 +11,49 @@ from api.atr_data import calculate_atr_from_market_data  # pylint: disable=impor
 from api.price_data import PriceData  # pylint: disable=import-error
 from api.utils import edit_sl_position # pylint: disable=import-error
 
-def calculate_new_sl(position, atr_value, swing_values):
+def calculate_new_sl(position, atr_value, swing_values, initial_r_value):
     """Calculate the new stop loss based on 3xATR."""
     symbol = position["symbol"]
     side = position["side"]
+    atr_multiplier = 3
+
+    # Calculate RR value
+    current_price = swing_values[symbol]["high"] if side == "BUY" else swing_values[symbol]["low"]
+    rr_value = round(abs(current_price - position["openPrice"]) / initial_r_value, 2)
+
+    if rr_value > 1.0 and rr_value <= 2 and position["currentPrice"] > position["openPrice"]:
+        atr_multiplier = 2
+    elif rr_value > 2.0 and position["currentPrice"] > position["openPrice"]:
+        atr_multiplier = 1
+
+    log.info("ATR Multiplier: %s", atr_multiplier)
+    log.info("RR Value: %s", rr_value)
 
     # Determine decimal precision
     example_value = position["openPrice"]  # Take example value
     decimal_places = abs(Decimal(str(example_value)).as_tuple().exponent)
 
     if side == "BUY":
-        new_sl_calc = swing_values[symbol]["high"] - (atr_value * 3)
+        new_sl_calc = swing_values[symbol]["high"] - (atr_value * atr_multiplier)
         new_sl = round(new_sl_calc, decimal_places)
     elif side == "SELL":
-        new_sl_calc = swing_values[symbol]["low"] + (atr_value * 3)
+        new_sl_calc = swing_values[symbol]["low"] + (atr_value * atr_multiplier)
         new_sl = round(new_sl_calc, decimal_places)
     else:
         log.error("Unknown position side: %s", side)
         return None
     return new_sl
 
-def update_stop_loss(login_manager, positions, atr_values, swing_values, atr_lock, swing_lock):
-    """Update the stop loss for each position based on 3xATR."""
+def update_stop_loss(
+        login_manager,
+        positions,
+        atr_values,
+        swing_values,
+        atr_lock,
+        swing_lock,
+        initial_r_values
+    ):
+    """Update the stop loss for each position based on RR."""
     for position in positions:
         symbol = position["symbol"]
         side = position["side"]
@@ -47,7 +68,8 @@ def update_stop_loss(login_manager, positions, atr_values, swing_values, atr_loc
             continue
 
         with swing_lock:
-            new_sl = calculate_new_sl(position, atr_value, swing_values)
+            initial_r_value = initial_r_values.get(position_id)
+            new_sl = calculate_new_sl(position, atr_value, swing_values, initial_r_value)
         if new_sl is not None:
             if side == "BUY":
                 if new_sl > stop_loss:
@@ -96,7 +118,13 @@ Nothing Changed.",
             else:
                 log.error("Unknown position side: %s", side)
 
-def update_positions(login_manager, positions, symbols, interval=10):
+def update_positions(
+        login_manager,
+        positions,
+        symbols,
+        initial_r_values,
+        interval=10
+    ):
     """Update positions every specified interval."""
     while True:
         positions.clear()
@@ -108,7 +136,28 @@ def update_positions(login_manager, positions, symbols, interval=10):
         symbols.clear()
         symbols.extend(new_symbols)
 
-        log.info("Positions updated: %s", [position["symbol"] for position in positions])
+        # Calculate and store initial R value for new positions
+        for position in new_positions:
+            if position["id"] not in initial_r_values:
+                atr_value = calculate_atr_from_market_data(
+                    login_manager,
+                    position["symbol"]
+                )
+                sample = position["openPrice"]
+                decimal_places = abs(Decimal(str(sample)).as_tuple().exponent)
+                if atr_value is not None:
+                    initial_r_value = round(abs(
+                        position["openPrice"]-(position["openPrice"] - atr_value * 3)
+                    ), decimal_places) if position["side"] == "BUY" else round(abs(
+                        position["openPrice"]-(position["openPrice"] + atr_value * 3)
+                    ), decimal_places)
+                    initial_r_values[position["id"]] = initial_r_value
+
+        log.info(
+            "Positions updated: %s r-values: %s",
+            [(position["symbol"], position["netProfit"]) for position in positions],
+            initial_r_values
+        )
         time.sleep(interval)
 
 def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=30):
@@ -119,7 +168,7 @@ def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=30)
             with atr_lock:
                 if atr_value is not None:
                     atr_values[symbol] = atr_value
-        log.info("ATR values updated")
+        log.info("ATR values updated: %s", atr_values)
         time.sleep(interval)
 
 def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=15):
@@ -129,7 +178,7 @@ def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=
             price_data.update_swing_values(symbol)
             with swing_lock:
                 swing_values[symbol] = price_data.get_stored_values().get(symbol, {})
-        log.info("Swing values updated")
+        log.info("Swing values updated: %s", swing_values)
         time.sleep(interval)
 
 def run_strategy():
@@ -155,6 +204,7 @@ def run_strategy():
         price_data = PriceData(login_manager)
         atr_values = {}
         swing_values = {}
+        initial_r_values = {}
 
         # Create locks for ATR and swing values
         atr_lock = threading.Lock()
@@ -162,7 +212,12 @@ def run_strategy():
 
         # Start threads for updating positions, ATR values, and swing values
         threading.Thread(
-            target=update_positions, args=(login_manager, positions, symbols)
+            target=update_positions, args=(
+                login_manager,
+                positions,
+                symbols,
+                initial_r_values
+            )
         ).start()
 
         while not positions:
@@ -170,7 +225,12 @@ def run_strategy():
             time.sleep(1)
 
         threading.Thread(
-                target=update_atr_values, args=(login_manager, symbols, atr_values, atr_lock)
+                target=update_atr_values, args=(
+                    login_manager,
+                    symbols,
+                    atr_values,
+                    atr_lock
+                )
             ).start()
         threading.Thread(
             target=update_swing_values, args=(price_data, symbols, swing_values, swing_lock)
@@ -185,7 +245,8 @@ def run_strategy():
                     atr_values,
                     swing_values,
                     atr_lock,
-                    swing_lock
+                    swing_lock,
+                    initial_r_values
                 )
                 time.sleep(10)  # Adjust this interval as needed
 
