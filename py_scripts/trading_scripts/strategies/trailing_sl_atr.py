@@ -26,8 +26,8 @@ def calculate_new_sl(position, atr_value, swing_values, initial_r_value):
     elif rr_value > 2.0 and position["currentPrice"] > position["openPrice"]:
         atr_multiplier = 1
 
-    log.info("ATR Multiplier: %s", atr_multiplier)
-    log.info("RR Value: %s", rr_value)
+    log.info("ATR Multiplier %s: %s", position["symbol"], atr_multiplier)
+    log.info("RR Value %s: %s", position["symbol"], rr_value)
 
     # Determine decimal precision
     example_value = position["openPrice"]  # Take example value
