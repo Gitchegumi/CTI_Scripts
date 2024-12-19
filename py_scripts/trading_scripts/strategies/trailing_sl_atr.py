@@ -154,11 +154,22 @@ def update_positions(
                                 position["openPrice"]-(position["openPrice"] + atr_value * 3)
                             ), decimal_places)
                             initial_r_values[position["id"]] = initial_r_value
+                        else:
+                            log.warning(
+                                "ATR value is None for position %s. Skipping R-value \
+calculation.", position["id"]
+                            )
 
-                log.info(
-                    "Positions updated: %s",
-                    [(position["symbol"], position["netProfit"], initial_r_value) for position in positions]
-                )
+                        log.info(
+                            "Positions updated: %s",
+                            [
+                                (
+                                    position["symbol"],
+                                    position["netProfit"],
+                                    initial_r_value
+                                ) for position in positions
+                            ]
+                        )
             else:
                 log.info("No open positions found.")
         except (ConnectionError, KeyError) as e:
@@ -198,10 +209,10 @@ def run_strategy():
         login_manager.login()
 
         # Start the token refresh process in a separate thread
-        refresh_thread = threading.Thread(
-            target=utils.start_new_login, args=(login_manager,)
-        )
-        refresh_thread.start()
+        # refresh_thread = threading.Thread(
+        #     target=utils.start_new_login, args=(login_manager,)
+        # )
+        # refresh_thread.start()
 
         # Fetch and update market data for open positions
         positions = []
