@@ -20,8 +20,7 @@ load_dotenv()
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 BROKER_ID = os.getenv("BROKER_ID")
-REFRESH_INTERVAL = 60 * 10  # 10 minutes
-
+REFRESH_INTERVAL = 60 * 1  # 10 minutes
 
 class LoginManager:
     """Handles authentication and token retrieval."""
@@ -95,7 +94,10 @@ AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         }
 
         while True:
-            log.info("Refreshing token in %s minutes.", refresh_interval / 60)
+            log.info(
+                "Refreshing token in %s minutes.",
+                refresh_interval / 60,
+            )
             time.sleep(refresh_interval)
             session = requests.Session()
             session.headers.update(headers)
@@ -126,14 +128,17 @@ AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     None,
                 )
                 if new_co_auth != self.cookie:
-                    print("Co-auth cookie refreshed successfully.")
+                    log.info(
+                        "Co-auth cookie refreshed successfully.",
+                    )
                     self.cookie = new_co_auth
-                if new_rt_token != self.rt_token:
-                    print("RT token refreshed successfully.")
-                    self.rt_token = new_rt_token
                 else:
-                    print("Failed to refresh token: No co-auth token in response.")
+                    log.info("Co-auth cookie did not change.")
                     return None
+                if new_rt_token != self.rt_token:
+                    log.info("RT token refreshed successfully.")
+                    self.rt_token = new_rt_token
+                return self.cookie, self.rt_token
             except requests.exceptions.RequestException as e:
                 print(f"Failed to refresh token: {e}")
-                return None
+                return None, None

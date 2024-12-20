@@ -80,15 +80,16 @@ def setup_logging():
         "./logs/debug.log", maxBytes=5 * 1024 * 1024, backupCount=3
     )  # 5MB per file, 3 backups
     log_handler.setFormatter(log.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
     log.basicConfig(
         level=log.INFO,
         handlers=[log_handler, log.StreamHandler()],
     )
 
-def fetch_open_positions_loop(login_manager, check_interval=1):
+def fetch_open_positions_loop(system_uuid, auth_trading_api, cookie, check_interval=1):
     """Fetch open positions periodically."""
     log.info("Fetching Open Positions.")
-    open_positions_api = OpenPositionsAPI(login_manager)
+    open_positions_api = OpenPositionsAPI(system_uuid, auth_trading_api, cookie)
 
     while True:
         try:

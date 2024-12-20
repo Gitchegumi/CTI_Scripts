@@ -216,7 +216,9 @@ calculation.",
                             ],
                         )
             else:
-                log.info("Expected a list of positions, but got: %s", type(new_positions))
+                log.info(
+                    "Expected a list of positions, but got: %s", type(new_positions)
+                )
         except (ConnectionError, KeyError) as e:
             log.error("A connection or key error occurred: %s", e)
         time.sleep(interval)
@@ -312,6 +314,10 @@ def run_strategy():
         # Main loop to update stop loss
         while True:
             if atr_values and swing_values:
+                if login_manager.cookie != cookie or login_manager.rt_token != rt_token:
+                    cookie, rt_token = login_manager.cookie, login_manager.rt_token
+                    log.info("Updated cookie and rt token in main loop.")
+
                 update_stop_loss(
                     system_uuid,
                     auth_trading_api,
