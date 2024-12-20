@@ -13,7 +13,9 @@ from api.open_positions import OpenPositionsAPI # pylint: disable=import-error
 PLATFORM_URL = "https://platform.citytradersimperium.com"
 
 def edit_sl_position(
-        login_manager,
+        system_uuid,
+        auth_trading_api,
+        cookie,
         position_id,
         instrument,
         order_side,
@@ -37,11 +39,11 @@ def edit_sl_position(
     Returns:
         bool: True if the request was successful, False otherwise.
     """
-    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/edit"
+    url = f"{PLATFORM_URL}/mtr-api/{system_uuid}/position/edit"
     headers = {
         "Accept": "application/json, text/plain, */*",
-        "Auth-trading-api": login_manager.auth_trading_api,
-        "Cookie": f"co-auth={login_manager.cookie}",
+        "Auth-trading-api": auth_trading_api,
+        "Cookie": f"co-auth={cookie}",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
     }
@@ -119,16 +121,16 @@ def fetch_open_positions_loop(login_manager, check_interval=1):
             log.error("An error occurred while processing positions: %s", e)
             break
 
-def fetch_open_positions_once(login_manager):
+def fetch_open_positions_once(system_uuid, auth_trading_api, cookie):
     """Fetch open positions periodically."""
     # log.info("Fetching Open Positions.")
-    open_positions_api = OpenPositionsAPI(login_manager)
+    open_positions_api = OpenPositionsAPI(system_uuid, auth_trading_api, cookie)
     try:
         # log.info("Fetching open positions...")
         positions = open_positions_api.get_open_positions()
 
         if positions:
-            positions = clean_positions(positions.get("positions", []))
+        #     positions = clean_positions(positions.get("positions", []))
             # filtered_positions = [
             #     {
             #         "symbol": pos["symbol"],
@@ -139,8 +141,7 @@ def fetch_open_positions_once(login_manager):
             # ]
             # log.info("Symbols for Market Watch: %s", filtered_positions)
             return positions
-        else:
-            log.warning("No open positions found.")
+        log.warning("No open positions found.")
     except (ConnectionError, TimeoutError) as e:
         log.error("A network error occurred while fetching open positions: %s", e)
         return []
@@ -150,10 +151,3 @@ def fetch_open_positions_once(login_manager):
     except (KeyError, TypeError) as e:
         log.error("An error occurred while processing positions: %s", e)
         return []
-
-def start_new_login(login_manager):
-    """Wrapper for starting periodic login in a thread."""
-    while True:
-        log.info("Refreshing token in 10 minutes...")
-        time.sleep(60 * 10)  # 10 minutes
-        login_manager.refresh_token()

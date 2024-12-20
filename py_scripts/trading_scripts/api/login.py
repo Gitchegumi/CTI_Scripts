@@ -7,6 +7,7 @@ Returns:
     None
 """
 import os
+import time
 import logging as log
 import requests
 from dotenv import load_dotenv
@@ -18,7 +19,7 @@ load_dotenv()
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 BROKER_ID = os.getenv("BROKER_ID")
-REFRESH_INTERVAL = 900  # 15 minutes
+REFRESH_INTERVAL = 60 * 10  # 10 minutes
 
 class LoginManager:
     """Handles authentication and token retrieval."""
@@ -55,9 +56,9 @@ class LoginManager:
             log.error("Login failed: %s", e)
             raise
 
-    def refresh_token(self):
+    def refresh_token(self, auth_trading_api):
         """Refresh the authentication token."""
-        url = f"{utils.PLATFORM_URL}/manager/refresh-token"
+        url = f"{utils.PLATFORM_URL}/manager/refresh-token?rt={auth_trading_api}"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -66,11 +67,17 @@ class LoginManager:
         try:
             response = requests.post(url, headers=headers, timeout=10)
             response.raise_for_status()
-            new_token = response.json().get("token")
-            if new_token:
-                self.session.auth_trading_api = new_token
-                log.info("Token refreshed successfully.")
-            else:
-                log.error("Failed to refresh token: No token in response.")
+            while True:
+                log.info("Refreshing token in 20 minutes...")
+                time.sleep(REFRESH_INTERVAL)
+                try:
+                    new_token = response.json().get("token")
+                    if new_token:
+                        self.auth_trading_api = new_token
+                        log.info("Token refreshed successfully.")
+                    else:
+                        log.error("Failed to refresh token: No token in response.")
+                except ValueError:
+                    log.error("Failed to refresh token: Response is not in JSON format.")
         except requests.exceptions.RequestException as e:
             log.error("Failed to refresh token: %s", e)
