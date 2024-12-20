@@ -122,10 +122,10 @@ def fetch_open_positions_loop(system_uuid, auth_trading_api, cookie, check_inter
             log.error("An error occurred while processing positions: %s", e)
             break
 
-def fetch_open_positions_once(system_uuid, auth_trading_api, cookie):
+def fetch_open_positions_once(login_manager):
     """Fetch open positions periodically."""
     # log.info("Fetching Open Positions.")
-    open_positions_api = OpenPositionsAPI(system_uuid, auth_trading_api, cookie)
+    open_positions_api = OpenPositionsAPI(login_manager)
     try:
         # log.info("Fetching open positions...")
         positions = open_positions_api.get_open_positions()

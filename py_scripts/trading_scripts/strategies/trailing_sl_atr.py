@@ -144,6 +144,7 @@ Nothing Changed.",
 
 
 def update_positions(
+    login_manager,
     system_uuid,
     auth_trading_api,
     cookie,
@@ -157,7 +158,7 @@ def update_positions(
         positions.clear()
         try:
             new_positions = utils.fetch_open_positions_once(
-                system_uuid, auth_trading_api, cookie
+                login_manager
             )
             # log.info("Positions fetched: %s", new_positions)
             if isinstance(new_positions, dict) and "positions" in new_positions:
@@ -289,6 +290,7 @@ def run_strategy():
         threading.Thread(
             target=update_positions,
             args=(
+                login_manager,
                 system_uuid,
                 auth_trading_api,
                 cookie,
