@@ -240,10 +240,10 @@ def run_strategy():
         login_manager.login()
 
         # Start the token refresh process in a separate thread
-        refresh_thread = threading.Thread(
-            target=utils.start_new_login, args=(login_manager,)
-        )
-        refresh_thread.start()
+        # refresh_thread = threading.Thread(
+        #     target=utils.start_new_login, args=(login_manager,)
+        # )
+        # refresh_thread.start()
 
         # Fetch and update market data for open positions
         positions = []
