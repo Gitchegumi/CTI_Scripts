@@ -16,17 +16,19 @@ import pandas as pd # pylint: disable=import-error
 class PriceData:
     """A class for fetching and updating market data."""
 
-    def __init__(self, login_manager):
-        self.login_manager = login_manager
+    def __init__(self, system_uuid, auth_trading_api, cookie):
+        self.system_uuid = system_uuid
+        self.auth_trading_api = auth_trading_api
+        self.cookie = cookie
         self.stored_values = {}  # To store the most recent swing values per position
 
     def fetch_market_data(self, symbol, resolution="5", countback=500):
         """Fetch market data for the given symbols."""
-        url = f"{PLATFORM_URL}/market-data-api/{self.login_manager.system_uuid}/api/trading-view/history"
+        url = f"{PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/history"
 
         headers = {
-            "Auth-trading-api": self.login_manager.auth_trading_api,
-            "Cookie": f"co-auth={self.login_manager.cookie}",
+            "Auth-trading-api": self.auth_trading_api,
+            "Cookie": f"co-auth={self.cookie}",
             "User-Agent": "Mozilla/5.0",
             "Accept": "*/*",
         }

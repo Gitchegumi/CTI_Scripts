@@ -6,21 +6,21 @@ Returns:
 import logging as log
 import api.utils as utils # pylint: disable=import-error
 import requests
+from api.login import LoginManager # pylint: disable=import-error
 
 class OpenPositionsAPI:
     """Class to interact with open positions API."""
 
-    def __init__(self, login_manager):
-        self.session = login_manager
+    def __init__(self, login_manager: LoginManager):
+        self.login_manager = login_manager
 
     def get_open_positions(self):
         """Fetch open positions from the trading API.
         """
-        url = f"{utils.PLATFORM_URL}/mtr-api/{self.session.system_uuid}/open-positions"
-        payload = {}
+        url = f"{utils.PLATFORM_URL}/mtr-api/{self.login_manager.system_uuid}/open-positions"
         headers = {
-            "Auth-trading-api": self.session.auth_trading_api,
-            "Cookie": f"co-auth={self.session.cookie}",
+            "Auth-trading-api": self.login_manager.auth_trading_api,
+            "Cookie": f"co-auth={self.login_manager.cookie}",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -29,8 +29,11 @@ class OpenPositionsAPI:
             "Origin": utils.PLATFORM_URL,
             "Referer": utils.PLATFORM_URL,
         }
+        session = requests.Session()
+        session.headers.update(headers)
+
         try:
-            response = requests.get(url, headers=headers, data=payload, timeout=10)
+            response = session.get(url, timeout=10)
             response.raise_for_status()
             open_positions = response.json()
             return open_positions
