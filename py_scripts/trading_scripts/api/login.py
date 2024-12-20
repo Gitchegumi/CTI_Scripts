@@ -73,30 +73,67 @@ class LoginManager:
             log.error("Login failed: %s", e)
             raise
 
-    def refresh_token(self, rt_token):
+    def refresh_token(self, rt_token, refresh_interval=REFRESH_INTERVAL):
         """Refresh the authentication token."""
-        url = f"{utils.PLATFORM_URL}/manager/refresh-token?rt={rt_token}"
+        url = f"{utils.PLATFORM_URL}/mtr-backend/refresh-token"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Origin": "https://platform.citytradersimperium.com",
+            "Referer": "https://platform.citytradersimperium.com/dashboard",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": "Windows",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-GPC": "1",
         }
-        try:
-            response = requests.post(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            while True:
-                log.info("Refreshing token in 20 minutes...")
-                time.sleep(REFRESH_INTERVAL)
-                try:
-                    new_token = response.json().get("token")
-                    if new_token:
-                        self.auth_trading_api = new_token
-                        log.info("Token refreshed successfully.")
-                    else:
-                        log.error("Failed to refresh token: No token in response.")
-                except ValueError:
-                    log.error(
-                        "Failed to refresh token: Response is not in JSON format."
-                    )
-        except requests.exceptions.RequestException as e:
-            log.error("Failed to refresh token: %s", e)
+
+        while True:
+            log.info("Refreshing token in %s minutes.", refresh_interval / 60)
+            time.sleep(refresh_interval)
+            session = requests.Session()
+            session.headers.update(headers)
+            session.cookies.set(
+                "rt",
+                rt_token,
+                domain="citytradersimperium.com",
+                path="/mtr-backend/refresh-token",
+            )
+            try:
+                response = session.post(url, json={})
+                response.raise_for_status()
+                # Extract the updated co-auth token from cookies
+                new_co_auth = next(
+                    (
+                        cookie.value
+                        for cookie in response.cookies
+                        if cookie.name == "co-auth"
+                    ),
+                    None,
+                )
+                new_rt_token = next(
+                    (
+                        cookie.value
+                        for cookie in response.cookies
+                        if cookie.name == "rt" and "mtr-backend" in cookie.path
+                    ),
+                    None,
+                )
+                if new_co_auth != self.cookie:
+                    print("Co-auth cookie refreshed successfully.")
+                    self.cookie = new_co_auth
+                if new_rt_token != self.rt_token:
+                    print("RT token refreshed successfully.")
+                    self.rt_token = new_rt_token
+                else:
+                    print("Failed to refresh token: No co-auth token in response.")
+                    return None
+            except requests.exceptions.RequestException as e:
+                print(f"Failed to refresh token: {e}")
+                return None

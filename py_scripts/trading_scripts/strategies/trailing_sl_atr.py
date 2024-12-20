@@ -263,12 +263,13 @@ def run_strategy():
         system_uuid = login_manager.system_uuid
         auth_trading_api = login_manager.auth_trading_api
         cookie = login_manager.cookie
+        rt_token = login_manager.rt_token
 
         # Start the token refresh process in a separate thread
-        # refresh_thread = threading.Thread(
-        #     target=utils.start_new_login, args=(system_uuid, auth_trading_api, cookie,)
-        # )
-        # refresh_thread.start()
+        refresh_thread = threading.Thread(
+            target=login_manager.refresh_token, args=(rt_token,)
+        )
+        refresh_thread.start()
 
         # Fetch and update market data for open positions
         positions = []
