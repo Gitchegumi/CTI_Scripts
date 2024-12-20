@@ -22,22 +22,19 @@ def calculate_new_sl(position, atr_value, swing_values, initial_r_value):
     )
     rr_value = round(abs(current_price - position["openPrice"]) / initial_r_value, 2)
 
-    if (
-        1.5 < rr_value <= 3 and position["currentPrice"] > position["openPrice"]
-        if side == "BUY"
-        else position["currentPrice"] < position["openPrice"]
+    if 1.5 < rr_value <= 3 and (
+        (side == "BUY" and position["currentPrice"] > position["openPrice"])
+        or (side == "SELL" and position["currentPrice"] < position["openPrice"])
     ):
         atr_multiplier = 2
-    elif (
-        3 < rr_value <= 5 and position["currentPrice"] > position["openPrice"]
-        if side == "BUY"
-        else position["currentPrice"] < position["openPrice"]
+    elif 3 < rr_value <= 5 and (
+        (side == "BUY" and position["currentPrice"] > position["openPrice"])
+        or (side == "SELL" and position["currentPrice"] < position["openPrice"])
     ):
         atr_multiplier = 1.5
-    elif (
-        5 < rr_value and position["currentPrice"] > position["openPrice"]
-        if side == "BUY"
-        else position["currentPrice"] < position["openPrice"]
+    elif 5 < rr_value and (
+        (side == "BUY" and position["currentPrice"] > position["openPrice"])
+        or (side == "SELL" and position["currentPrice"] < position["openPrice"])
     ):
         atr_multiplier = 1
 
@@ -157,9 +154,7 @@ def update_positions(
     while True:
         positions.clear()
         try:
-            new_positions = utils.fetch_open_positions_once(
-                login_manager
-            )
+            new_positions = utils.fetch_open_positions_once(login_manager)
             # log.info("Positions fetched: %s", new_positions)
             if isinstance(new_positions, dict) and "positions" in new_positions:
                 new_positions = new_positions["positions"]
@@ -231,24 +226,37 @@ def update_atr_values(
     """Update ATR values every specified interval."""
     while True:
         for symbol in symbols:
+            if symbol not in symbols:
+                log.info("Removing symbol %s from ATR values.", symbol)
+                atr_values[symbol] = {}
             atr_value = calculate_atr_from_market_data(
                 system_uuid, auth_trading_api, cookie, symbol
             )
             with atr_lock:
                 if atr_value is not None:
                     atr_values[symbol] = atr_value
-        log.info("ATR values updated: %s", atr_values)
+            log.info("ATR values updated for %s: %s", symbol, atr_values[symbol])
         time.sleep(interval)
 
 
 def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=15):
     """Update high/low values every specified interval."""
     while True:
+        # log.info("Swing value symbols: %s", symbols)
         for symbol in symbols:
+            log.info("Updating swing values for symbol: %s", symbol)
+            if symbol not in symbols:
+                log.info("Removing symbol %s from swing values.", symbol)
+                swing_values[symbol] = {}
             price_data.update_swing_values(symbol)
             with swing_lock:
                 swing_values[symbol] = price_data.get_stored_values().get(symbol, {})
-        log.info("Swing values updated: %s", swing_values)
+            log.info(
+                "Swing values updated for %s: high=%s low=%s",
+                symbol,
+                swing_values[symbol].get("high"),
+                swing_values[symbol].get("low"),
+            )
         time.sleep(interval)
 
 
@@ -274,7 +282,6 @@ def run_strategy():
             target=login_manager.refresh_token, args=(rt_token,)
         )
         refresh_thread.start()
-
 
         # Fetch and update market data for open positions
         positions = []
@@ -306,17 +313,36 @@ def run_strategy():
             log.info("Waiting for positions to be fetched...")
             time.sleep(1)
 
-        threading.Thread(
-            target=update_atr_values,
-            args=(system_uuid, auth_trading_api, cookie, symbols, atr_values, atr_lock),
-        ).start()
-        threading.Thread(
-            target=update_swing_values,
-            args=(price_data, symbols, swing_values, swing_lock),
-        ).start()
+        if positions:
+            atr_thread = threading.Thread(
+                target=update_atr_values,
+                args=(
+                    system_uuid,
+                    auth_trading_api,
+                    cookie,
+                    symbols,
+                    atr_values,
+                    atr_lock,
+                ),
+            )
+            atr_thread.start()
+            swing_thread = threading.Thread(
+                target=update_swing_values,
+                args=(price_data, symbols, swing_values, swing_lock),
+            )
+            swing_thread.start()
+        else:
+            if atr_thread.is_alive():
+                atr_thread.stop()
+                log.info("ATR thread stopped.")
+            if swing_thread.is_alive():
+                swing_thread.stop()
+                log.info("Swing thread stopped.")
 
         # Main loop to update stop loss
         while True:
+            # log.info("positions from run_strategy: %s", positions)
+            # log.info("symbols from run_strategy: %s", symbols)
             if atr_values and swing_values:
                 if login_manager.cookie != cookie or login_manager.rt_token != rt_token:
                     cookie, rt_token = login_manager.cookie, login_manager.rt_token

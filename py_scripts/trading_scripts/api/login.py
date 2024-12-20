@@ -134,11 +134,8 @@ AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     self.cookie = new_co_auth
                 else:
                     log.info("Co-auth cookie did not change.")
-                    return None
                 if new_rt_token != self.rt_token:
                     log.info("RT token refreshed successfully.")
                     self.rt_token = new_rt_token
-                return self.cookie, self.rt_token
             except requests.exceptions.RequestException as e:
                 print(f"Failed to refresh token: {e}")
-                return None, None

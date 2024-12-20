@@ -52,7 +52,7 @@ def calculate_atr_from_market_data(
 
         # Round ATR to match precision
         rounded_atr = round(atr_values[-1], decimal_places)
-        log.info("Calculated ATR for %s: %s", symbol, rounded_atr)
+        # log.info("Calculated ATR for %s: %s", symbol, rounded_atr)
         return rounded_atr
 
     except (ValueError, KeyError, AttributeError) as e:
