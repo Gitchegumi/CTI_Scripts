@@ -6,12 +6,13 @@ Raises:
 Returns:
     None
 """
+
 import os
 import time
 import logging as log
 import requests
 from dotenv import load_dotenv
-import api.utils as utils # pylint: disable=import-error
+import api.utils as utils  # pylint: disable=import-error
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +22,7 @@ PASSWORD = os.getenv("PASSWORD")
 BROKER_ID = os.getenv("BROKER_ID")
 REFRESH_INTERVAL = 60 * 10  # 10 minutes
 
+
 class LoginManager:
     """Handles authentication and token retrieval."""
 
@@ -29,6 +31,7 @@ class LoginManager:
         self.auth_trading_api = None
         self.cookie = None
         self.system_uuid = None
+        self.rt_token = None
 
     def login(self):
         """Login to the platform and retrieve tokens."""
@@ -43,12 +46,26 @@ class LoginManager:
             response = self.session.post(url, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
+            # log.info("response cookies: %s", response.cookies)
+            # log.info("Login response: %s", data)
 
             if "tradingAccounts" in data and data["tradingAccounts"]:
                 self.auth_trading_api = data["tradingAccounts"][0]["tradingApiToken"]
+                rt_cookie = next(
+                    (
+                        cookie.value
+                        for cookie in response.cookies
+                        if cookie.name == "rt" and "mtr-backend" in cookie.path
+                    ),
+                    None,
+                )
+                self.rt_token = rt_cookie
                 self.cookie = data["token"]
-                self.system_uuid = data["tradingAccounts"][0]["offer"].get("system", {}).get("uuid")
+                self.system_uuid = (
+                    data["tradingAccounts"][0]["offer"].get("system", {}).get("uuid")
+                )
                 log.info("Login successful. Tokens retrieved.")
+                # log.info("rt token: %s", self.rt_token)
             else:
                 log.error("No trading accounts found in login response.")
                 raise ValueError("Login failed: No trading accounts found.")
@@ -56,9 +73,9 @@ class LoginManager:
             log.error("Login failed: %s", e)
             raise
 
-    def refresh_token(self, auth_trading_api):
+    def refresh_token(self, rt_token):
         """Refresh the authentication token."""
-        url = f"{utils.PLATFORM_URL}/manager/refresh-token?rt={auth_trading_api}"
+        url = f"{utils.PLATFORM_URL}/manager/refresh-token?rt={rt_token}"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -78,6 +95,8 @@ class LoginManager:
                     else:
                         log.error("Failed to refresh token: No token in response.")
                 except ValueError:
-                    log.error("Failed to refresh token: Response is not in JSON format.")
+                    log.error(
+                        "Failed to refresh token: Response is not in JSON format."
+                    )
         except requests.exceptions.RequestException as e:
             log.error("Failed to refresh token: %s", e)
