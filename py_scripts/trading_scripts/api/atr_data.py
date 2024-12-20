@@ -13,7 +13,7 @@ from api.price_data import PriceData  # pylint: disable=import-error
 
 
 def calculate_atr_from_market_data(
-    login_manager, symbol, resolution="5", period=14
+    system_uuid, auth_trading_api, cookie, symbol, resolution="5", period=14
 ):
     """
     Calculate ATR using market data fetched from the PriceData class.
@@ -27,7 +27,7 @@ def calculate_atr_from_market_data(
     Returns:
     - ATR value for the given symbol.
     """
-    atr_data = PriceData(login_manager)
+    atr_data = PriceData(system_uuid, auth_trading_api, cookie)
     try:
         data = atr_data.fetch_atr_data(symbol, resolution, 50)
         # log.info("ATR data: %s", data)
