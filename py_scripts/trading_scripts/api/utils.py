@@ -77,8 +77,8 @@ def setup_logging():
     """Configure logging for the application.
     """
     log_handler = RotatingFileHandler(
-        "./logs/debug.log", maxBytes=5 * 1024 * 1024, backupCount=3
-    )  # 5MB per file, 3 backups
+        "./logs/debug.log", maxBytes=1 * 1024 * 1024, backupCount=3
+    )  # 1MB per file, 3 backups
     log_handler.setFormatter(log.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
     log.basicConfig(
