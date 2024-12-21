@@ -305,7 +305,7 @@ def run_strategy():
 
             while not positions:
                 log.info("Waiting for positions to be fetched...")
-                time.sleep(1)
+                time.sleep(15)
 
             if positions:
                 atr_thread = threading.Thread(
