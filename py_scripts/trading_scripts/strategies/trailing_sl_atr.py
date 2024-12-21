@@ -201,15 +201,8 @@ calculation.",
                             )
 
                         log.info(
-                            "Positions updated: %s",
-                            [
-                                (
-                                    position["symbol"],
-                                    position["netProfit"],
-                                    initial_r_value,
-                                )
-                                for position in positions
-                            ],
+                            "%s updated - Net Profit: %s, Initial R: %s",
+                            position["symbol"], position["netProfit"], initial_r_value
                         )
             else:
                 log.info(
