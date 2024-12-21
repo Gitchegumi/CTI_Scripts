@@ -258,105 +258,106 @@ def run_strategy():
     utils.setup_logging()
     log.info("************ Running Trailing SL by ATR Strategy ************")
 
-    # Initialize the Login Manager
-    login_manager = LoginManager()
+    while True:
+        # Initialize the Login Manager
+        login_manager = LoginManager()
 
-    try:
-        log.info("Attempting to log in...")
-        login_manager.login()
-        system_uuid = login_manager.system_uuid
-        auth_trading_api = login_manager.auth_trading_api
-        cookie = login_manager.cookie
-        rt_token = login_manager.rt_token
+        try:
+            log.info("Attempting to log in...")
+            login_manager.login()
+            system_uuid = login_manager.system_uuid
+            auth_trading_api = login_manager.auth_trading_api
+            cookie = login_manager.cookie
+            rt_token = login_manager.rt_token
 
-        # Start the token refresh process in a separate thread
+            # Start the token refresh process in a separate thread
 
-        refresh_thread = threading.Thread(
-            target=login_manager.refresh_token, args=(rt_token,)
-        )
-        refresh_thread.start()
+            refresh_thread = threading.Thread(
+                target=login_manager.refresh_token, args=(rt_token,)
+            )
+            refresh_thread.start()
 
-        # Fetch and update market data for open positions
-        positions = []
-        symbols = []
-        price_data = PriceData(system_uuid, auth_trading_api, cookie)
-        atr_values = {}
-        swing_values = {}
-        initial_r_values = {}
+            # Fetch and update market data for open positions
+            positions = []
+            symbols = []
+            price_data = PriceData(system_uuid, auth_trading_api, cookie)
+            atr_values = {}
+            swing_values = {}
+            initial_r_values = {}
 
-        # Create locks for ATR and swing values
-        atr_lock = threading.Lock()
-        swing_lock = threading.Lock()
+            # Create locks for ATR and swing values
+            atr_lock = threading.Lock()
+            swing_lock = threading.Lock()
 
-        # Start threads for updating positions, ATR values, and swing values
-        threading.Thread(
-            target=update_positions,
-            args=(
-                login_manager,
-                system_uuid,
-                auth_trading_api,
-                cookie,
-                positions,
-                symbols,
-                initial_r_values,
-            ),
-        ).start()
-
-        while not positions:
-            log.info("Waiting for positions to be fetched...")
-            time.sleep(1)
-
-        if positions:
-            atr_thread = threading.Thread(
-                target=update_atr_values,
+            # Start threads for updating positions, ATR values, and swing values
+            threading.Thread(
+                target=update_positions,
                 args=(
-                    system_uuid,
-                    auth_trading_api,
-                    cookie,
-                    symbols,
-                    atr_values,
-                    atr_lock,
-                ),
-            )
-            atr_thread.start()
-            swing_thread = threading.Thread(
-                target=update_swing_values,
-                args=(price_data, symbols, swing_values, swing_lock),
-            )
-            swing_thread.start()
-        else:
-            if atr_thread.is_alive():
-                atr_thread.stop()
-                log.info("ATR thread stopped.")
-            if swing_thread.is_alive():
-                swing_thread.stop()
-                log.info("Swing thread stopped.")
-
-        # Main loop to update stop loss
-        while True:
-            # log.info("positions from run_strategy: %s", positions)
-            # log.info("symbols from run_strategy: %s", symbols)
-            if atr_values and swing_values:
-                if login_manager.cookie != cookie or login_manager.rt_token != rt_token:
-                    cookie, rt_token = login_manager.cookie, login_manager.rt_token
-                    log.info("Updated cookie and rt token in main loop.")
-
-                update_stop_loss(
+                    login_manager,
                     system_uuid,
                     auth_trading_api,
                     cookie,
                     positions,
-                    atr_values,
-                    swing_values,
-                    atr_lock,
-                    swing_lock,
+                    symbols,
                     initial_r_values,
-                )
-                time.sleep(10)  # Adjust this interval as needed
+                ),
+            ).start()
 
-    except (ConnectionError, KeyError) as e:
-        log.error("A connection or key error occurred: %s", e)
-    except ValueError as e:
-        log.error("A value error occurred: %s", e)
-    except RuntimeError as e:
-        log.error("A runtime error occurred: %s", e)
+            while not positions:
+                log.info("Waiting for positions to be fetched...")
+                time.sleep(1)
+
+            if positions:
+                atr_thread = threading.Thread(
+                    target=update_atr_values,
+                    args=(
+                        system_uuid,
+                        auth_trading_api,
+                        cookie,
+                        symbols,
+                        atr_values,
+                        atr_lock,
+                    ),
+                )
+                atr_thread.start()
+                swing_thread = threading.Thread(
+                    target=update_swing_values,
+                    args=(price_data, symbols, swing_values, swing_lock),
+                )
+                swing_thread.start()
+            else:
+                if atr_thread.is_alive():
+                    atr_thread.stop()
+                    log.info("ATR thread stopped.")
+                if swing_thread.is_alive():
+                    swing_thread.stop()
+                    log.info("Swing thread stopped.")
+
+            # Main loop to update stop loss
+            while True:
+                # log.info("positions from run_strategy: %s", positions)
+                # log.info("symbols from run_strategy: %s", symbols)
+                if atr_values and swing_values:
+                    if login_manager.cookie != cookie or login_manager.rt_token != rt_token:
+                        cookie, rt_token = login_manager.cookie, login_manager.rt_token
+                        log.info("Updated cookie and rt token in main loop.")
+
+                    update_stop_loss(
+                        system_uuid,
+                        auth_trading_api,
+                        cookie,
+                        positions,
+                        atr_values,
+                        swing_values,
+                        atr_lock,
+                        swing_lock,
+                        initial_r_values,
+                    )
+                    time.sleep(10)  # Adjust this interval as needed
+
+        except (ConnectionError, KeyError) as e:
+            log.error("A connection or key error occurred: %s", e)
+        except ValueError as e:
+            log.error("A value error occurred: %s", e)
+        except RuntimeError as e:
+            log.error("A runtime error occurred: %s", e)
