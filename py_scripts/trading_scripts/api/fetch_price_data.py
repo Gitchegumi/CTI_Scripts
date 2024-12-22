@@ -4,14 +4,14 @@
 """
 import time
 import logging as log
-from api.price_data import PriceData # pylint: disable=import-error
-from api.utils import fetch_open_positions_once # pylint: disable=import-error
+from trading_scripts.api.price_data import PriceData # pylint: disable=import-error
+from trading_scripts.api.utils import fetch_open_positions_once # pylint: disable=import-error
 
-def fetch_price_data(system_uuid, auth_trading_api, cookie, symbols, check_interval=15):
+def fetch_price_data(login_manager, symbols, check_interval=15):
     """Fetch market data for the given symbols."""
     log.info("Starting price data fetch loop.")
-    price_data = PriceData(system_uuid, auth_trading_api, cookie)
-    positions = fetch_open_positions_once(system_uuid, auth_trading_api, cookie)
+    price_data = PriceData(login_manager)
+    positions = fetch_open_positions_once(login_manager)
     symbols = [pos["symbol"] for pos in positions]
     # log.info("Symbols for Market Watch: %s", symbols)
     while True:

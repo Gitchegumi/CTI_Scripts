@@ -61,4 +61,8 @@
   
   ## 📘 Usage
   
-   To use the project, follow these steps:
+   To run a strategy, use the following command from the `py_scripts` directory:
+
+   ```bash
+   poetry run python3.12 -m trading_scripts.strategies.<strategy_name>
+   ```

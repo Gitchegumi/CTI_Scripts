@@ -6,7 +6,7 @@ Returns:
 
 import logging as log
 from datetime import datetime
-from api.utils import (  # pylint: disable=import-error
+from trading_scripts.api.utils import (  # pylint: disable=import-error
     PLATFORM_URL,
 )
 import requests
@@ -16,10 +16,10 @@ import pandas as pd # pylint: disable=import-error
 class PriceData:
     """A class for fetching and updating market data."""
 
-    def __init__(self, system_uuid, auth_trading_api, cookie):
-        self.system_uuid = system_uuid
-        self.auth_trading_api = auth_trading_api
-        self.cookie = cookie
+    def __init__(self, login_manager):
+        self.system_uuid = login_manager.system_uuid
+        self.auth_trading_api = login_manager.auth_trading_api
+        self.cookie = login_manager.cookie
         self.stored_values = {}  # To store the most recent swing values per position
 
     def fetch_market_data(self, symbol, resolution="5", countback=500):

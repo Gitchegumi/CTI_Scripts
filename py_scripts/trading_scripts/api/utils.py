@@ -7,15 +7,13 @@ import logging as log
 from logging.handlers import RotatingFileHandler
 import time
 import requests
-from api.open_positions import OpenPositionsAPI # pylint: disable=import-error
+from trading_scripts.api.open_positions import OpenPositionsAPI # pylint: disable=import-error
 
 
 PLATFORM_URL = "https://platform.citytradersimperium.com"
 
 def edit_sl_position(
-        system_uuid,
-        auth_trading_api,
-        cookie,
+        login_manager,
         position_id,
         instrument,
         order_side,
@@ -39,11 +37,11 @@ def edit_sl_position(
     Returns:
         bool: True if the request was successful, False otherwise.
     """
-    url = f"{PLATFORM_URL}/mtr-api/{system_uuid}/position/edit"
+    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/edit"
     headers = {
         "Accept": "application/json, text/plain, */*",
-        "Auth-trading-api": auth_trading_api,
-        "Cookie": f"co-auth={cookie}",
+        "Auth-trading-api": login_manager.auth_trading_api,
+        "Cookie": f"co-auth={login_manager.cookie}",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
     }
@@ -86,10 +84,10 @@ def setup_logging():
         handlers=[log_handler, log.StreamHandler()],
     )
 
-def fetch_open_positions_loop(system_uuid, auth_trading_api, cookie, check_interval=1):
+def fetch_open_positions_loop(login_manager, check_interval=1):
     """Fetch open positions periodically."""
     log.info("Fetching Open Positions.")
-    open_positions_api = OpenPositionsAPI(system_uuid, auth_trading_api, cookie)
+    open_positions_api = OpenPositionsAPI(login_manager)
 
     while True:
         try:

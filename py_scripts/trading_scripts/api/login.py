@@ -12,7 +12,7 @@ import time
 import logging as log
 import requests
 from dotenv import load_dotenv
-import api.utils as utils  # pylint: disable=import-error
+from trading_scripts.api import utils  # pylint: disable=import-error
 
 # Load environment variables
 load_dotenv()

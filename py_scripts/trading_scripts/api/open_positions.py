@@ -4,9 +4,9 @@ Returns:
     dict: A dictionary containing open positions data.
 """
 import logging as log
-import api.utils as utils # pylint: disable=import-error
 import requests
-from api.login import LoginManager # pylint: disable=import-error
+from trading_scripts.api import utils # pylint: disable=import-error
+from trading_scripts.api.login import LoginManager # pylint: disable=import-error
 
 class OpenPositionsAPI:
     """Class to interact with open positions API."""
