@@ -36,7 +36,11 @@ class OpenPositionsAPI:
             response = session.get(url, timeout=10)
             response.raise_for_status()
             open_positions = response.json()
-            return open_positions
+            if not open_positions:
+                log.info("No open positions")
+                return []
+            else:
+                return open_positions
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch open positions: %s", e)
             return []

@@ -159,15 +159,18 @@ def update_positions(
             if not new_positions or not isinstance(new_positions, (dict, list)):
                 log.warning("No valid positions returned from fetch.")
             else:
-                if isinstance(new_positions, dict) and "positions" in new_positions:
-                    new_positions = new_positions["positions"]
-                if isinstance(new_positions, list):
-                    positions.extend(new_positions)
-                    new_symbols = [pos["symbol"] for pos in new_positions]
-
+                new_positions = (
+                    new_positions.get("positions", [])
+                    if isinstance(new_positions, dict)
+                    else new_positions
+                )
+                lock = threading.Lock()
+                with lock:
                     # Update symbols list in place to avoid issues in threads
+                    positions.clear()
+                    positions.extend(new_positions)
                     symbols.clear()
-                    symbols.extend(new_symbols)
+                    symbols.extend(pos["symbol"] for pos in new_positions)
 
                     # Calculate and store initial R value for new positions
                     for position in new_positions:
@@ -176,7 +179,9 @@ def update_positions(
                                 login_manager, position["symbol"]
                             )
                             sample = position["openPrice"]
-                            decimal_places = abs(Decimal(str(sample)).as_tuple().exponent)
+                            decimal_places = abs(
+                                Decimal(str(sample)).as_tuple().exponent
+                            )
                             if atr_value is not None:
                                 initial_r_value = (
                                     round(
@@ -209,27 +214,19 @@ def update_positions(
                                 position["netProfit"],
                                 initial_r_value,
                             )
-                else:
-                    log.info(
-                        "Expected a list of positions, but got: %s", type(new_positions)
-                    )
         except (ConnectionError, KeyError) as e:
             log.error("A connection or key error occurred: %s", e)
         time.sleep(interval)
 
 
-def update_atr_values(
-    login_manager, symbols, atr_values, atr_lock, interval=10
-):
+def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=60):
     """Update ATR values every specified interval."""
     while True:
         for symbol in symbols:
             if symbol not in symbols:
                 log.info("Removing symbol %s from ATR values.", symbol)
                 atr_values[symbol] = {}
-            atr_value = calculate_atr_from_market_data(
-                login_manager, symbol
-            )
+            atr_value = calculate_atr_from_market_data(login_manager, symbol)
             with atr_lock:
                 if atr_value is not None:
                     atr_values[symbol] = atr_value
@@ -237,7 +234,7 @@ def update_atr_values(
         time.sleep(interval)
 
 
-def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=10):
+def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=30):
     """Update high/low values every specified interval."""
     while True:
         # log.info("Swing value symbols: %s", symbols)
@@ -360,6 +357,7 @@ def run_strategy():
             log.error("A value error occurred: %s", e)
         except RuntimeError as e:
             log.error("A runtime error occurred: %s", e)
+
 
 if __name__ == "__main__":
     run_strategy()

@@ -93,8 +93,9 @@ def fetch_open_positions_loop(login_manager, check_interval=1):
         try:
             # log.info("Fetching open positions...")
             positions = open_positions_api.get_open_positions()
-
-            if positions:
+            if not positions:
+                positions = []
+            elif positions:
                 positions = clean_positions(positions.get("positions", []))
                 # filtered_positions = [
                 #     {
