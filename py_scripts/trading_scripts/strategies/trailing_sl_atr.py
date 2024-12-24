@@ -222,10 +222,17 @@ def update_positions(
 def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=60):
     """Update ATR values every specified interval."""
     while True:
+        # current_order_numbers = {
+        #     pos["id"]
+        #     for pos in utils.fetch_open_positions_once(login_manager)["positions"]
+        # }
+        # with atr_lock:
+        #     # Remove old orders from atr_values
+        #     for order_number in list(atr_values.keys()):
+        #         if order_number not in current_order_numbers:
+        #             log.info("Removing old order %s from ATR values.", order_number)
+        #             del atr_values[order_number]
         for symbol in symbols:
-            if symbol not in symbols:
-                log.info("Removing symbol %s from ATR values.", symbol)
-                atr_values[symbol] = {}
             atr_value = calculate_atr_from_market_data(login_manager, symbol)
             with atr_lock:
                 if atr_value is not None:
@@ -234,15 +241,23 @@ def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=60)
         time.sleep(interval)
 
 
-def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=30):
+def update_swing_values(
+    price_data, symbols, swing_values, swing_lock, interval=30
+):
     """Update high/low values every specified interval."""
     while True:
-        # log.info("Swing value symbols: %s", symbols)
+        # current_order_numbers = {
+        #     pos["id"]
+        #     for pos in utils.fetch_open_positions_once(login_manager)["positions"]
+        # }
+        # with swing_lock:
+        #     # Remove old orders from swing_values
+        #     for order_number in list(swing_values.keys()):
+        #         if order_number not in current_order_numbers:
+        #             log.info("Removing old order %s from swing values.", order_number)
+        #             del swing_values[order_number]
         for symbol in symbols:
             log.info("Updating swing values for symbol: %s", symbol)
-            if symbol not in symbols:
-                log.info("Removing symbol %s from swing values.", symbol)
-                swing_values[symbol] = {}
             price_data.update_swing_values(symbol)
             with swing_lock:
                 swing_values[symbol] = price_data.get_stored_values().get(symbol, {})
@@ -253,6 +268,16 @@ def update_swing_values(price_data, symbols, swing_values, swing_lock, interval=
                 swing_values[symbol].get("low"),
             )
         time.sleep(interval)
+
+def tail(file, lines=20):
+    """Print the last `lines` lines of a file.
+
+    Args:
+        file (.log): The log file to read.
+        lines (int, optional): The number of lines to read. Defaults to 20.
+    """
+    with open(file, 'r', encoding='utf-8') as f:
+        return f.readlines()[-lines:]
 
 
 def run_strategy():
@@ -337,6 +362,14 @@ def run_strategy():
                         )
                 else:
                     empty_check_count = 0
+
+                log_lines = tail('logs/debug.log', 5)
+                if any('401 ' in line for line in log_lines):
+                    log.error("Data fetch error detected. Restarting the strategy.")
+                    os.execv(
+                        sys.executable,
+                        [sys.executable] + sys.argv,
+                    )
 
                 # log.info("positions from run_strategy: %s", positions)
                 # log.info("symbols from run_strategy: %s", symbols)
