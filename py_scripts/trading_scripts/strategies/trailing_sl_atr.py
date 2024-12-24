@@ -222,16 +222,16 @@ def update_positions(
 def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=60):
     """Update ATR values every specified interval."""
     while True:
-        # current_order_numbers = {
-        #     pos["id"]
-        #     for pos in utils.fetch_open_positions_once(login_manager)["positions"]
-        # }
-        # with atr_lock:
-        #     # Remove old orders from atr_values
-        #     for order_number in list(atr_values.keys()):
-        #         if order_number not in current_order_numbers:
-        #             log.info("Removing old order %s from ATR values.", order_number)
-        #             del atr_values[order_number]
+        current_symbols = {
+            pos["symbol"]
+            for pos in utils.fetch_open_positions_once(login_manager)["positions"]
+        }
+        with atr_lock:
+            # Remove old orders from atr_values
+            for symbol in list(atr_values.keys()):
+                if symbol not in current_symbols:
+                    log.info("Removing old order %s from ATR values.", symbol)
+                    del atr_values[symbol]
         for symbol in symbols:
             atr_value = calculate_atr_from_market_data(login_manager, symbol)
             with atr_lock:
@@ -242,20 +242,20 @@ def update_atr_values(login_manager, symbols, atr_values, atr_lock, interval=60)
 
 
 def update_swing_values(
-    price_data, symbols, swing_values, swing_lock, interval=30
+    login_manager, price_data, symbols, swing_values, swing_lock, interval=30
 ):
     """Update high/low values every specified interval."""
     while True:
-        # current_order_numbers = {
-        #     pos["id"]
-        #     for pos in utils.fetch_open_positions_once(login_manager)["positions"]
-        # }
-        # with swing_lock:
-        #     # Remove old orders from swing_values
-        #     for order_number in list(swing_values.keys()):
-        #         if order_number not in current_order_numbers:
-        #             log.info("Removing old order %s from swing values.", order_number)
-        #             del swing_values[order_number]
+        current_symbols = {
+            pos["symbol"]
+            for pos in utils.fetch_open_positions_once(login_manager)["positions"]
+        }
+        with swing_lock:
+            # Remove old orders from swing_values
+            for symbol in list(swing_values.keys()):
+                if symbol not in current_symbols:
+                    log.info("Removing old order %s from swing values.", symbol)
+                    del swing_values[symbol]
         for symbol in symbols:
             log.info("Updating swing values for symbol: %s", symbol)
             price_data.update_swing_values(symbol)
@@ -285,8 +285,8 @@ def run_strategy():
     utils.setup_logging()
     log.info("************ Running Trailing SL by ATR Strategy ************")
 
-    max_empty_checks = 3
-    empty_check_count = 0
+    # max_empty_checks = 3
+    # empty_check_count = 0
 
     while True:
         # Initialize the Login Manager
@@ -339,29 +339,29 @@ def run_strategy():
             ).start()
             threading.Thread(
                 target=update_swing_values,
-                args=(price_data, symbols, swing_values, swing_lock),
+                args=(login_manager, price_data, symbols, swing_values, swing_lock),
             ).start()
 
             # Main loop to update stop loss
             while True:
-                if not positions:
-                    empty_check_count += 1
-                    log.warning(
-                        "Positions list is empty. Empty check count: %s",
-                        empty_check_count,
-                    )
-                    time.sleep(5)
+                # if not positions:
+                #     empty_check_count += 1
+                #     log.warning(
+                #         "Positions list is empty. Empty check count: %s",
+                #         empty_check_count,
+                #     )
+                #     time.sleep(5)
 
-                    if empty_check_count >= max_empty_checks:
-                        log.error(
-                            "Empty check count exceeded. Restarting the strategy."
-                        )
-                        os.execv(
-                            sys.executable,
-                            [sys.executable] + sys.argv,
-                        )
-                else:
-                    empty_check_count = 0
+                #     if empty_check_count >= max_empty_checks:
+                #         log.error(
+                #             "Empty check count exceeded. Restarting the strategy."
+                #         )
+                #         os.execv(
+                #             sys.executable,
+                #             [sys.executable] + sys.argv,
+                #         )
+                # else:
+                #     empty_check_count = 0
 
                 log_lines = tail('logs/debug.log', 5)
                 if any('401 ' in line for line in log_lines):
