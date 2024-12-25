@@ -384,6 +384,20 @@ def run_strategy():
                         initial_r_values,
                     )
 
+                restart_intervals = [
+                    ("Restarting strategy in 60 minutes.", 60 * 30),
+                    ("Restarting strategy in 30 minutes.", 60 * 20),
+                    ("Restarting strategy in 10 minutes.", 60 * 5),
+                    ("Restarting strategy in 5 minutes.", 60 * 4),
+                    ("Restarting strategy in 1 minute.", 60),
+                ]
+
+                while True:
+                    for message, sleep_time in restart_intervals:
+                        log.warning(message)
+                        time.sleep(sleep_time)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+
         except (ConnectionError, KeyError) as e:
             log.error("A connection or key error occurred: %s", e)
         except ValueError as e:
