@@ -8,7 +8,7 @@ import logging as log
 from datetime import datetime
 from trading_scripts.api import utils  # pylint: disable=import-error
 import requests
-import pandas as pd # pylint: disable=import-error
+import pandas as pd  # pylint: disable=import-error
 
 
 class PriceData:
@@ -152,7 +152,7 @@ class PriceData:
         # Convert timestamp to datetime for readability
         data["timestamp"] = pd.to_datetime(data["timestamp"], unit="ms")
         return data
-    
+
     def fetch_account_balance(self):
         """Fetch account balance data."""
         url = f"{utils.PLATFORM_URL}/mtr-api/{self.system_uuid}/balance"
@@ -183,7 +183,7 @@ class PriceData:
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch account balance: %s", e)
             return {}
-        
+
     def fetch_symbol_data(self, symbol):
         """Get the latest news for a symbol."""
         url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/symbols?symbol={symbol}"
@@ -206,7 +206,12 @@ class PriceData:
 
         session = requests.Session()
         session.headers.update(headers)
-        session.cookies.set("co-auth", self.cookie, domain="citytradersimperium.com", path="/mtr-backend/refresh-token")
+        session.cookies.set(
+            "co-auth",
+            self.cookie,
+            domain="citytradersimperium.com",
+            path="/mtr-backend/refresh-token",
+        )
         try:
             response = session.get(url)
             response.raise_for_status()
