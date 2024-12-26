@@ -6,9 +6,7 @@ Returns:
 
 import logging as log
 from datetime import datetime
-from trading_scripts.api.utils import (  # pylint: disable=import-error
-    PLATFORM_URL,
-)
+from trading_scripts.api import utils  # pylint: disable=import-error
 import requests
 import pandas as pd # pylint: disable=import-error
 
@@ -24,7 +22,7 @@ class PriceData:
 
     def fetch_market_data(self, symbol, resolution="5", countback=500):
         """Fetch market data for the given symbols."""
-        url = f"{PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/history"
+        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/history"
 
         headers = {
             "Auth-trading-api": self.auth_trading_api,
@@ -154,3 +152,66 @@ class PriceData:
         # Convert timestamp to datetime for readability
         data["timestamp"] = pd.to_datetime(data["timestamp"], unit="ms")
         return data
+    
+    def fetch_account_balance(self):
+        """Fetch account balance data."""
+        url = f"{utils.PLATFORM_URL}/mtr-api/{self.system_uuid}/balance"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Origin": "https://platform.citytradersimperium.com",
+            "Referer": "https://platform.citytradersimperium.com/dashboard",
+            "Auth-trading-api": self.auth_trading_api,
+            "Cookie": f"co-auth={self.cookie}",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": "Windows",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-GPC": "1",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            account_balance = response.json()
+            log.info("Account balance fetched successfully.")
+            return account_balance
+        except requests.exceptions.RequestException as e:
+            log.error("Failed to fetch account balance: %s", e)
+            return {}
+        
+    def fetch_symbol_data(self, symbol):
+        """Get the latest news for a symbol."""
+        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/symbols?symbol={symbol}"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Origin": "https://platform.citytradersimperium.com",
+            "Referer": "https://platform.citytradersimperium.com/dashboard",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": "Windows",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-GPC": "1",
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
+        session.cookies.set("co-auth", self.cookie, domain="citytradersimperium.com", path="/mtr-backend/refresh-token")
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            symbol_data = response.json()
+            return symbol_data
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to get symbol data: {e}")
+            return None

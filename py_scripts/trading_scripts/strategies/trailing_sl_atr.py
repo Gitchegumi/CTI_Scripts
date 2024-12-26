@@ -77,6 +77,14 @@ def update_stop_loss(
     interval=30,
 ):
     """Update the stop loss for each position based on RR."""
+    price_data = PriceData(login_manager)
+    account_balance = price_data.fetch_account_balance()
+    total_balance = float(account_balance.get("balance", 0))
+
+    if total_balance == 0:
+        log.error("Account balance is zero or could not be fetched.")
+        return
+
     for position in positions:
         symbol = position["symbol"]
         side = position["side"]
@@ -96,10 +104,17 @@ def update_stop_loss(
                 position, atr_value, swing_values, initial_r_value
             )
         if new_sl is not None:
+            symbol_data = price_data.fetch_symbol_data(symbol)
+            pointvalue = symbol_data.get("pointvalue", 1)
+            open_price = position["openPrice"]
+            take_profit = None
             if side == "BUY":
                 if new_sl > stop_loss:
                     log.info(
                         "Updating stop loss for %s: %s -> %s", symbol, stop_loss, new_sl
+                    )
+                    take_profit = open_price + (
+                        total_balance * 0.01 / (volume * pointvalue)
                     )
                     # Update stop loss using the Trading API
                     utils.edit_sl_position(
@@ -109,6 +124,7 @@ def update_stop_loss(
                         side,
                         volume,
                         new_sl,
+                        take_profit,
                     )
                 else:
                     log.info(
@@ -123,6 +139,9 @@ Nothing Changed.",
                     log.info(
                         "Updating stop loss for %s: %s -> %s", symbol, stop_loss, new_sl
                     )
+                    take_profit = open_price - (
+                        total_balance * 0.01 / (volume * pointvalue)
+                    )
                     # Update stop loss using the Trading API
                     utils.edit_sl_position(
                         login_manager,
@@ -131,6 +150,7 @@ Nothing Changed.",
                         side,
                         volume,
                         new_sl,
+                        take_profit,
                     )
                 else:
                     log.info(
@@ -269,6 +289,7 @@ def update_swing_values(
             )
         time.sleep(interval)
 
+
 def tail(file, lines=20):
     """Print the last `lines` lines of a file.
 
@@ -276,8 +297,22 @@ def tail(file, lines=20):
         file (.log): The log file to read.
         lines (int, optional): The number of lines to read. Defaults to 20.
     """
-    with open(file, 'r', encoding='utf-8') as f:
+    with open(file, "r", encoding="utf-8") as f:
         return f.readlines()[-lines:]
+
+
+def restart_for_time():
+    """Restart the strategy after a specified time interval."""
+    restart_intervals = [
+        ("Restarting strategy in 15 minutes.", 60 * 10),
+        ("Restarting strategy in 5 minutes.", 60 * 4),
+        ("Restarting strategy in 1 minute.", 60),
+    ]
+
+    for message, sleep_time in restart_intervals:
+        log.warning(message)
+        time.sleep(sleep_time)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def run_strategy():
@@ -285,8 +320,8 @@ def run_strategy():
     utils.setup_logging()
     log.info("************ Running Trailing SL by ATR Strategy ************")
 
-    # max_empty_checks = 3
-    # empty_check_count = 0
+    max_empty_checks = 3
+    empty_check_count = 0
 
     while True:
         # Initialize the Login Manager
@@ -303,6 +338,8 @@ def run_strategy():
                 target=login_manager.refresh_token, args=(rt_token,)
             )
             refresh_thread.start()
+
+            threading.Thread(target=restart_for_time).start()
 
             # Fetch and update market data for open positions
             positions = []
@@ -337,6 +374,7 @@ def run_strategy():
                     atr_lock,
                 ),
             ).start()
+
             threading.Thread(
                 target=update_swing_values,
                 args=(login_manager, price_data, symbols, swing_values, swing_lock),
@@ -344,27 +382,27 @@ def run_strategy():
 
             # Main loop to update stop loss
             while True:
-                # if not positions:
-                #     empty_check_count += 1
-                #     log.warning(
-                #         "Positions list is empty. Empty check count: %s",
-                #         empty_check_count,
-                #     )
-                #     time.sleep(5)
+                if not positions:
+                    empty_check_count += 1
+                    log.warning(
+                        "Positions list is empty. Empty check count: %s",
+                        empty_check_count,
+                    )
+                    time.sleep(5)
 
-                #     if empty_check_count >= max_empty_checks:
-                #         log.error(
-                #             "Empty check count exceeded. Restarting the strategy."
-                #         )
-                #         os.execv(
-                #             sys.executable,
-                #             [sys.executable] + sys.argv,
-                #         )
-                # else:
-                #     empty_check_count = 0
+                    if empty_check_count >= max_empty_checks:
+                        log.error(
+                            "Empty check count exceeded. Restarting the strategy."
+                        )
+                        os.execv(
+                            sys.executable,
+                            [sys.executable] + sys.argv,
+                        )
+                else:
+                    empty_check_count = 0
 
-                log_lines = tail('logs/debug.log', 5)
-                if any('401 ' in line for line in log_lines):
+                log_lines = tail("logs/debug.log", 5)
+                if any("401 " in line for line in log_lines):
                     log.error("Data fetch error detected. Restarting the strategy.")
                     os.execv(
                         sys.executable,
@@ -383,20 +421,6 @@ def run_strategy():
                         swing_lock,
                         initial_r_values,
                     )
-
-                restart_intervals = [
-                    ("Restarting strategy in 60 minutes.", 60 * 30),
-                    ("Restarting strategy in 30 minutes.", 60 * 20),
-                    ("Restarting strategy in 10 minutes.", 60 * 5),
-                    ("Restarting strategy in 5 minutes.", 60 * 4),
-                    ("Restarting strategy in 1 minute.", 60),
-                ]
-
-                while True:
-                    for message, sleep_time in restart_intervals:
-                        log.warning(message)
-                        time.sleep(sleep_time)
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
 
         except (ConnectionError, KeyError) as e:
             log.error("A connection or key error occurred: %s", e)
