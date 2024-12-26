@@ -106,6 +106,7 @@ def update_stop_loss(
         if new_sl is not None:
             symbol_data = price_data.fetch_symbol_data(symbol)
             pointvalue = symbol_data.get("pointvalue", 1)
+            pricescale = symbol_data.get("pricescale", 1)
             open_price = position["openPrice"]
             take_profit = None
             if side == "BUY":
@@ -114,7 +115,7 @@ def update_stop_loss(
                         "Updating stop loss for %s: %s -> %s", symbol, stop_loss, new_sl
                     )
                     take_profit = open_price + (
-                        total_balance * 0.01 / (volume * pointvalue)
+                        total_balance * (1 / pricescale) / (volume * pointvalue)
                     )
                     # Update stop loss using the Trading API
                     utils.edit_sl_position(
