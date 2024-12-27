@@ -47,7 +47,7 @@ trading_hours = {
     },
 }
 
-trading_sybomls = ["EURUSD", "US500", "US30", "BTCUSDC"]
+trading_symbols = ["EURUSD", "US500", "US30", "BTCUSDC"]
 
 def determine_trading_hours(symbols):
     for symbol in symbols:
@@ -101,18 +101,26 @@ def enter_trade(symbol, direction, stop_loss, take_profit):
     pass
 
 def run_strategy():
-    symbols = trading_sybomls
-    direction = get_trend(symbols)
-    stop_loss = calc_stop_loss(symbols)
-    take_profit = calc_take_profit(symbols)
-    determine_trading_hours(symbols)
-    calc_atr(symbols)
-    calc_rsi(symbols)
-    calc_macd(symbols)
-    calc_keltner_channel(symbols)
-    for symbol in symbols:
-        enter_trade(symbol, direction, stop_loss, take_profit)
-    pass
+    login_manager = LoginManager()
+    open_positions = utils.get_open_positions_once(login_manager)
+    symbols = trading_symbols
+    while True:
+        for symbol in symbols:
+            if symbol in open_positions:
+                log.info("Position already open for %s", symbol)
+                pass
+            else:
+                direction = get_trend(symbols)
+                stop_loss = calc_stop_loss(symbols)
+                take_profit = calc_take_profit(symbols)
+                determine_trading_hours(symbols)
+                calc_atr(symbols)
+                calc_rsi(symbols)
+                calc_macd(symbols)
+                calc_keltner_channel(symbols)
+                for symbol in symbols:
+                    enter_trade(symbol, direction, stop_loss, take_profit)
+                pass
 
 if __name__ == "__main__":
     run_strategy()
