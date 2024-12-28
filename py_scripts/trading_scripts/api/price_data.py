@@ -159,8 +159,7 @@ class PriceData:
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
             "Origin": "https://platform.citytradersimperium.com",
             "Referer": "https://platform.citytradersimperium.com/dashboard",
             "Auth-trading-api": self.auth_trading_api,
@@ -187,13 +186,11 @@ class PriceData:
 
     def fetch_symbol_data(self, symbol):
         """Get the latest news for a symbol."""
-        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view\
-/symbols?symbol={symbol}"
+        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/symbols?symbol={symbol}" # pylint: disable=line-too-long
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
             "Origin": "https://platform.citytradersimperium.com",
             "Referer": "https://platform.citytradersimperium.com/dashboard",
             "Accept-Encoding": "gzip, deflate, br",
