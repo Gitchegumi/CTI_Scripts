@@ -196,10 +196,10 @@ def get_trend(login_manager, symbol):
     log.info("15M Linear Regression percentage for %s: %s", symbol, regression_15m)
 
     if regression_1h > 0.1 and regression_15m > 0.05:
-        log.info("Trend identified: BUY")
+        log.info("Trend identified: Uptrend")
         return "Uptrend"
     elif regression_1h < -0.1 and regression_15m < -0.05:
-        log.info("Trend identified: SELL")
+        log.info("Trend identified: Downtrend")
         return "Downtrend"
     log.info("No trend identified")
     return None
