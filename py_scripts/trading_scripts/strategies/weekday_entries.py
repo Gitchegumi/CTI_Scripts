@@ -67,23 +67,32 @@ def is_within_trading_hours(symbol):
         bool: True if within trading hours, False otherwise.
     """
     now = datetime.now(ny_timezone)
+    log.info("Current time: %s", now)
     symbol_hours = trading_hours.get(symbol, {}).get("market_hours")
+    log.info("Symbol hours for %s: %s", symbol, symbol_hours)
+
     if not symbol_hours:
         return True  # No specific trading hours, assume always open
 
-    start_str = symbol_hours["start"]
-    end_str = symbol_hours["end"]
+    # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
+    if symbol == "EURUSD" and (now.weekday() < 0 or now.weekday() > 4):
+        return False
 
-    if " " in start_str:
-        start = datetime.strptime(start_str, "%A %H:%M:%S").time()
-        end = datetime.strptime(end_str, "%A %H:%M:%S").time()
+    # If the config includes full weekday names
+    if " " in symbol_hours["start"]:
+        start = symbol_hours["start"]  # e.g. "Monday 00:00:00"
+        end = symbol_hours["end"]      # e.g. "Friday 23:59:59"
+        # If you still want to parse the specific times, you can do so here, 
+        # but the weekday check above will prevent Sunday trades for EURUSD.
+        return True
     else:
-        start = datetime.strptime(start_str, "%H:%M:%S").time()
-        end = datetime.strptime(end_str, "%H:%M:%S").time()
+        # Fallback for times given with no weekday
+        start = datetime.strptime(symbol_hours["start"], "%H:%M:%S").time()
+        end = datetime.strptime(symbol_hours["end"], "%H:%M:%S").time()
 
-    if start < end:
-        return start <= now.time() <= end
-    return now.time() >= start or now.time() <= end
+        if start < end:
+            return start <= now.time() <= end
+        return now.time() >= start or now.time() <= end
 
 
 def is_within_daily_swap(symbol):
@@ -144,8 +153,26 @@ def calc_linear_regression(login_manager, symbol, timeframe):
 
     df = pd.DataFrame(ohlc)
     df.set_index("t", inplace=True)
-    df.ta.linreg(close="c", length=14, append=True)
-    return df["LR_14"].iloc[-1] - df["LR_14"].iloc[-2]
+    # log.info("Dataframe for %s: %s", symbol, df.head())
+
+    df.ta.linreg(close="c", length=50, append=True)
+    # log.info("Linear regression Dataframe for %s: %s", symbol, df.tail())
+
+    if "LR_50" not in df.columns:
+        log.error("Linear Regression calculation failed for %s", symbol)
+        return None
+
+    lr_diff = df["LR_50"].iloc[-1] - df["LR_50"].iloc[-2]
+    current_price = df["c"].iloc[-1]
+
+    if current_price == 0:
+        log.error("Current price is 0 for %s", symbol)
+        return None
+
+    lr_precentage = (lr_diff / current_price) * 100
+    # log.info("Linear Regression percentage for %s: %s", symbol, lr_precentage)
+
+    return lr_precentage
 
 
 def get_trend(login_manager, symbol):
@@ -159,12 +186,17 @@ def get_trend(login_manager, symbol):
     """
     log.info("Calculating trend for %s", symbol)
     regression_1h = calc_linear_regression(login_manager, symbol, 60)
+    log.info("1H Linear Regression percentage for %s: %s", symbol, regression_1h)
     regression_15m = calc_linear_regression(login_manager, symbol, 15)
+    log.info("15M Linear Regression percentage for %s: %s", symbol, regression_15m)
 
-    if regression_1h > 0 and regression_15m > 0:
-        return "buy"
-    elif regression_1h < 0 and regression_15m < 0:
-        return "sell"
+    if regression_1h > 0.1 and regression_15m > 0.05:
+        log.info("Trend identified: BUY")
+        return "BUY"
+    elif regression_1h < -0.1 and regression_15m < -0.05:
+        log.info("Trend identified: SELL")
+        return "SELL"
+    log.info("No trend identified")
     return None
 
 
@@ -207,9 +239,13 @@ def calc_keltner_channel(login_manager, symbol):
     price_data = PriceData()
     ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
     df = pd.DataFrame(ohlc).set_index("t")
-    kc = df.ta.kc(close="c", high="h", low="l")
-    df["KC_Lower"] = kc["KCL_20_2.0"]
-    df["KC_Upper"] = kc["KCU_20_2.0"]
+    kc = df.ta.kc(close="c", high="h", low="l", length=20, scalar=1.5, mamode="ema")
+
+    # log.info("Keltner Channel values: %s", kc)
+
+    df["KC_Lower"] = kc["KCLe_20_1.5"]
+    df["KC_Middle"] = kc["KCBe_20_1.5"]
+    df["KC_Upper"] = kc["KCUe_20_1.5"]
     result = {
         "price": df["c"].iloc[-1],
         "lower_band": df["KC_Lower"].iloc[-1],
@@ -325,7 +361,8 @@ def calc_volume(login_manager, symbol):
     log.info("Calculating volume for %s", symbol)
     risk_per_trade = 0.0025  # 0.25% risk per trade
     price_data = PriceData()
-    account_balance = price_data.fetch_account_balance(login_manager)
+    account_balance_data = price_data.fetch_account_balance(login_manager)
+    account_balance = float(account_balance_data["balance"])
     current_price = price_data.fetch_market_watch(login_manager, symbol)
     stop_loss = calc_stop_loss(login_manager, symbol)
     volume = (account_balance * risk_per_trade) / abs(current_price - stop_loss)
@@ -397,16 +434,12 @@ def run_strategy():
             if symbol in open_positions:
                 log.info("Position already open for %s", symbol)
             else:
-                stop_loss = calc_stop_loss(login_manager, symbol)
-                take_profit = calc_take_profit(login_manager, symbol)
-                volume = calc_volume(login_manager, symbol)
                 trend = get_trend(login_manager, symbol)
-                direction = identify_trade_signal(
-                    login_manager,
-                    symbol,
-                    trend
-                )
+                direction = identify_trade_signal(login_manager, symbol, trend)
                 if direction:
+                    stop_loss = calc_stop_loss(login_manager, symbol)
+                    take_profit = calc_take_profit(login_manager, symbol)
+                    volume = calc_volume(login_manager, symbol)
                     log.info("Entering trade for %s", symbol)
                     enter_trade(
                         login_manager,
@@ -418,7 +451,7 @@ def run_strategy():
                     )
                 else:
                     log.info("No trade signal found for %s", symbol)
-        time.sleep(5)  # Adjust sleep interval as needed
+        time.sleep(60)  # Adjust sleep interval as needed
 
 
 if __name__ == "__main__":
