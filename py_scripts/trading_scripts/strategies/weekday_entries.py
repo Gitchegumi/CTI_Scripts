@@ -155,14 +155,14 @@ def calc_linear_regression(login_manager, symbol, timeframe):
     df.set_index("t", inplace=True)
     # log.info("Dataframe for %s: %s", symbol, df.head())
 
-    df.ta.linreg(close="c", length=50, append=True)
+    df.ta.linreg(close="c", length=14, append=True)
     # log.info("Linear regression Dataframe for %s: %s", symbol, df.tail())
 
-    if "LR_50" not in df.columns:
+    if "LR_14" not in df.columns:
         log.error("Linear Regression calculation failed for %s", symbol)
         return None
 
-    lr_diff = df["LR_50"].iloc[-1] - df["LR_50"].iloc[-2]
+    lr_diff = df["LR_14"].iloc[-1] - df["LR_14"].iloc[-2]
     current_price = df["c"].iloc[-1]
 
     if current_price == 0:
