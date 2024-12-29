@@ -52,9 +52,8 @@ class PriceData:
             if data.get("s") == "ok":
                 # log.info("Market data fetched for %s: %s", symbol, data)
                 return data
-            else:
-                log.error("Failed to fetch market data for %s: %s", symbol, data)
-                return {}
+            log.error("Failed to fetch market data for %s: %s", symbol, data)
+            return {}
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch market data: %s", e)
             return {}
@@ -219,4 +218,37 @@ class PriceData:
             return symbol_data
         except requests.exceptions.RequestException as e:
             print(f"Failed to get symbol data: {e}")
+            return None
+
+    def fetch_market_watch(self, symbol):
+        """Fetch market watch data."""
+        url = f"{utils.PLATFORM_URL}/mtr-api/{self.system_uuid}/quotations?symbols='{symbol}'"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
+            "Origin": utils.PLATFORM_URL,
+            "Referer": f"{utils.PLATFORM_URL}/dashboard",
+            "Auth-trading-api": self.auth_trading_api,
+            "Cookie": f"co-auth={self.cookie}",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": "Windows",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-GPC": "1",
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            market_watch_data = response.json()
+            return market_watch_data
+        except requests.exceptions.RequestException as e:
+            log.error("Failed to fetch market watch data: %s", e)
             return None

@@ -6,6 +6,7 @@ Returns:
 import logging as log
 from logging.handlers import RotatingFileHandler
 import time
+import json
 import requests
 from trading_scripts.api.open_positions import OpenPositionsAPI # pylint: disable=import-error
 
@@ -62,6 +63,42 @@ def edit_sl_position(
         return True
     except requests.RequestException as e:
         log.error("Failed to update SL for position %s: %s", position_id, e)
+        return False
+    
+def close_position(login_manager, position_id, symbol, side, volume):
+    """Close a position via the Match Trader API.
+
+    Args:
+        login_manager (LoginManager): The login manager instance.
+        position_id (str): The ID of the position to close.
+        symbol (str): The trading symbol (e.g., "EURUSD").
+        side (str): The side of the order ("BUY" or "SELL").
+        volume (float): The volume of the position.
+
+    Returns:
+        bool: True if the request was successful, False otherwise.
+    """
+    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/close"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Auth-trading-api": login_manager.auth_trading_api,
+        "Cookie": f"co-auth={login_manager.cookie}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+    payload = json.dumps({
+        "positionId": position_id,
+        "instrument": symbol,
+        "orderSide": side,
+        "volume": volume,
+    })
+    try:
+        response = requests.post(url, headers=headers, data=payload, timeout=10)
+        response.raise_for_status()
+        log.info("Successfully closed position %s", position_id)
+        return True
+    except requests.RequestException as e:
+        log.error("Failed to close position %s: %s", position_id, e)
         return False
 
 def clean_positions(positions):
