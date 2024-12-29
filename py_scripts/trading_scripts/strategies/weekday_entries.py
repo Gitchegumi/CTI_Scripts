@@ -54,7 +54,7 @@ trading_hours = {
     },
 }
 
-trading_symbols = ["US500", "US30", "BTCUSDC", "EURUSD"]
+trading_symbols = ["US500", "US30", "EURUSD", "BTCUSDC"]
 
 
 def is_within_trading_hours(symbol):
@@ -75,14 +75,19 @@ def is_within_trading_hours(symbol):
         return True  # No specific trading hours, assume always open
 
     # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
-    if symbol == "EURUSD" or "US500" or "US30" and (now.weekday() < 0 or now.weekday() > 4):
+    if (
+        symbol == "EURUSD"
+        or "US500"
+        or "US30"
+        and (now.weekday() < 0 or now.weekday() > 4)
+    ):
         return False
 
     # If the config includes full weekday names
     if " " in symbol_hours["start"]:
         start = symbol_hours["start"]  # e.g. "Monday 00:00:00"
-        end = symbol_hours["end"]      # e.g. "Friday 23:59:59"
-        # If you still want to parse the specific times, you can do so here, 
+        end = symbol_hours["end"]  # e.g. "Friday 23:59:59"
+        # If you still want to parse the specific times, you can do so here,
         # but the weekday check above will prevent Sunday trades for EURUSD.
         return True
     else:
@@ -182,7 +187,7 @@ def get_trend(login_manager, symbol):
         symbol (str): The trading symbol.
 
     Returns:
-        str: The trend direction ("buy", "sell", or None).
+        str: The trend direction ("BUY", "SELL", or None).
     """
     log.info("Calculating trend for %s", symbol)
     regression_1h = calc_linear_regression(login_manager, symbol, 60)
@@ -192,10 +197,10 @@ def get_trend(login_manager, symbol):
 
     if regression_1h > 0.1 and regression_15m > 0.05:
         log.info("Trend identified: BUY")
-        return "BUY"
+        return "Uptrend"
     elif regression_1h < -0.1 and regression_15m < -0.05:
         log.info("Trend identified: SELL")
-        return "SELL"
+        return "Downtrend"
     log.info("No trend identified")
     return None
 
@@ -260,10 +265,10 @@ def identify_trade_signal(login_manger, symbol, trend):
 
     Args:
         symbol (str): The trading symbol.
-        trend (str): The trend direction ("buy" or "sell").
+        trend (str): The trend direction ("Uptrend" or "Downtrend").
 
     Returns:
-       str : The trade signal ("buy", "sell", or None).
+       str : The trade signal ("BUY", "SELL", or None).
     """
     log.info("Identifying trade signal for %s", symbol)
     # Identify trade signal based on RSI, MACD, and Keltner Channel
@@ -272,31 +277,68 @@ def identify_trade_signal(login_manger, symbol, trend):
     kc_values = calc_keltner_channel(login_manger, symbol)
 
     # BUY signal conditions
-    if (
-        trend == "buy"
-        and rsi < 30  # RSI is oversold
-        and macd_histogram[0] > macd_histogram[1]  # MACD shows weakening bearish
-        and kc_values["price"] < kc_values["lower_band"]  # Price below lower KC band
-        and kc_values["candlestick"]
-        in ["pinbar", "engulfing"]  # Pinbar or engulfing toward bullish
-    ):
-        log.info("RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values)
-        log.info("Trade signal identified: BUY")
-        return "buy"
+    if trend == "Uptrend":
+        log.info("Checking RSI for oversold condition")
+        if rsi < 30:  # RSI is oversold
+            log.info("RSI is oversold: %s, checking MACD", rsi)
+            macd_current = macd_histogram.iloc[-1]
+            macd_previous = macd_histogram.iloc[-2]
+            if macd_current > macd_previous:  # MACD shows bullish pressure
+                log.info(
+                    "MACD histogram is bullish: %s, %s, checking KC",
+                    macd_current,
+                    macd_previous,
+                )
+                if (
+                    kc_values["price"] < kc_values["lower_band"]
+                ):  # Price below lower KC band
+                    log.info(
+                        "Price is below lower KC band: %s, %s",
+                        kc_values["price"],
+                        kc_values["lower_band"],
+                    )
+                    if kc_values["candlestick"] in [
+                        "pinbar",
+                        "engulfing",
+                    ]:  # Pinbar or engulfing toward bullish
+                        log.info(
+                            "RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values
+                        )
+                        log.info("Trade signal identified: BUY")
+                        return "BUY"
 
     # SELL signal conditions
-    if (
-        trend == "sell"
-        and rsi > 70  # RSI is overbought
-        and macd_histogram[0] < macd_histogram[1]  # MACD shows weakening bullish
-        and kc_values["price"] > kc_values["upper_band"]  # Price above upper KC band
-        and kc_values["candlestick"]
-        in ["pinbar", "engulfing"]  # Pinbar or engulfing toward bearish
-    ):
-        log.info("RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values)
-        log.info("Trade signal identified: SELL")
-        return "sell"
+    if trend == "Downtrend":
+        log.info("Checking RSI for overbought condition")
+        if rsi > 70:  # RSI is overbought
+            log.info("RSI is overbought: %s, checking MACD", rsi)
+            macd_current = macd_histogram.iloc[-1]
+            macd_previous = macd_histogram.iloc[-2]
+            if macd_current < macd_previous:  # MACD shows weakening bullish
+                log.info(
+                    "MACD histogram is bearish: %s, %s, checking KC",
+                    macd_current,
+                    macd_previous,
+                )
+                if (
+                    kc_values["price"] > kc_values["upper_band"]
+                ):  # Price above upper KC band
+                    log.info(
+                        "Price is above upper KC band: %s, %s",
+                        kc_values["price"],
+                        kc_values["upper_band"],
+                    )
+                    if kc_values["candlestick"] in [
+                        "pinbar",
+                        "engulfing",
+                    ]:  # Pinbar or engulfing toward bearish
+                        log.info(
+                            "RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values
+                        )
+                        log.info("Trade signal identified: SELL")
+                        return "SELL"
 
+    log.info("No trade signal identified")
     return None
 
 
@@ -315,10 +357,10 @@ def calc_stop_loss(login_manager, symbol):
     side = identify_trade_signal(login_manager, symbol, trend)
     market_watch = price_data.fetch_market_watch(login_manager, symbol)
     atr = calculate_atr_from_market_data(login_manager, symbol)
-    if side == "buy":
+    if side == "BUY":
         stop_loss = market_watch["bid"] - (atr * 3)
         return stop_loss
-    if side == "sell":
+    if side == "SELL":
         stop_loss = market_watch["ask"] + (atr * 3)
         return stop_loss
     return None
@@ -339,10 +381,10 @@ def calc_take_profit(login_manager, symbol):
     side = identify_trade_signal(login_manager, symbol, trend)
     market_watch = price_data.fetch_market_watch(login_manager, symbol)
     atr = calculate_atr_from_market_data(login_manager, symbol)
-    if side == "buy":
+    if side == "BUY":
         take_profit = market_watch["bid"] + (atr * 9)
         return take_profit
-    if side == "sell":
+    if side == "SELL":
         take_profit = market_watch["ask"] - (atr * 9)
         return take_profit
     return None
@@ -374,7 +416,7 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
 
     Args:
         symbol (str): The trading symbol.
-        direction (str): The trade direction ("buy" or "sell").
+        direction (str): The trade direction ("BUY" or "SELL").
         volume (float): The volume to trade.
         stop_loss (float): The stop loss value.
         take_profit (float): The take profit value.
