@@ -76,9 +76,7 @@ def is_within_trading_hours(symbol):
 
     # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
     if (
-        symbol == "EURUSD"
-        or "US500"
-        or "US30"
+        symbol in ["EURUSD", "US500", "US30"]
         and (now.weekday() < 0 or now.weekday() > 4)
     ):
         return False
@@ -150,7 +148,6 @@ def calc_linear_regression(login_manager, symbol, timeframe):
     log.info("Calculating linear regression for %s", symbol)
     price_data = PriceData()
     ohlc = price_data.fetch_market_data(login_manager, symbol, timeframe)
-    log.info("Fetched market data for %s", symbol)  # Log the fetched data
 
     if not ohlc or "t" not in ohlc:
         log.error("Market data for %s does not contain 't' key", symbol)
@@ -195,10 +192,10 @@ def get_trend(login_manager, symbol):
     regression_15m = calc_linear_regression(login_manager, symbol, 15)
     log.info("15M Linear Regression percentage for %s: %s", symbol, regression_15m)
 
-    if regression_1h > 0.1 and regression_15m > 0.05:
+    if regression_1h > 0.1 and regression_15m > 0.02:
         log.info("Trend identified: Uptrend")
         return "Uptrend"
-    elif regression_1h < -0.1 and regression_15m < -0.05:
+    elif regression_1h < -0.1 and regression_15m < -0.02:
         log.info("Trend identified: Downtrend")
         return "Downtrend"
     log.info("No trend identified")
@@ -283,7 +280,8 @@ def identify_trade_signal(login_manger, symbol, trend):
     kc_values = calc_keltner_channel(login_manger, symbol)
     # log.info("MACD Histogram for %s: %s", symbol, macd.tail())
     macd_hist_current = macd["MACDh_12_26_9"].iloc[-1]
-    macd_hist_previous = macd["MACDh_12_26_9"].iloc[-2]
+    macd_hist_prev_5_max = macd["MACDh_12_26_9"].iloc[-7:-2].max()
+    macd_hist_prev_5_min = macd["MACDh_12_26_9"].iloc[-7:-2].min()
 
     # BUY signal conditions
     if trend == "Uptrend":
@@ -292,11 +290,11 @@ def identify_trade_signal(login_manger, symbol, trend):
             log.info("RSI is oversold: %s, checking MACD", rsi)
             if rsi > rsi_d:  # RSI is bullish
                 log.info("RSI is bullish: %s, %s, checking MACD", rsi, rsi_d)
-                if macd_hist_current > macd_hist_previous:  # MACD shows bullish pressure
+                if macd_hist_current > macd_hist_prev_5_min:  # MACD shows bullish pressure
                     log.info(
                         "MACD histogram is bullish: %s, %s, checking KC",
                         macd_hist_current,
-                        macd_hist_previous,
+                        macd_hist_prev_5_min,
                     )
                     if (
                         kc_values["low"] <= kc_values["middle_band"]
@@ -333,7 +331,7 @@ def identify_trade_signal(login_manger, symbol, trend):
                     log.error(
                         "Failed MACD check for BUY: macd_current=%s, macd_previous=%s",
                         macd_hist_current,
-                        macd_hist_previous,
+                        macd_hist_prev_5_min,
                     )
             else:
                 log.error("Failed RSI check for BUY: RSI=%s, RSId=%s", rsi, rsi_d)
@@ -347,11 +345,11 @@ def identify_trade_signal(login_manger, symbol, trend):
             log.info("RSI is overbought: %s, checking MACD", rsi)
             if rsi < rsi_d:  # RSI is bearish
                 log.info("RSI is bearish: %s, %s, checking MACD", rsi, rsi_d)
-                if macd_hist_current < macd_hist_previous:  # MACD shows weakening bullish
+                if macd_hist_current < macd_hist_prev_5_max:  # MACD shows weakening bullish
                     log.info(
                         "MACD histogram is bearish: %s, %s, checking KC",
                         macd_hist_current,
-                        macd_hist_previous,
+                        macd_hist_prev_5_max,
                     )
                     if (
                         kc_values["high"] >= kc_values["middle_band"]
@@ -388,7 +386,7 @@ def identify_trade_signal(login_manger, symbol, trend):
                     log.error(
                         "Failed MACD check for SELL: macd_current=%s, macd_previous=%s",
                         macd_hist_current,
-                        macd_hist_previous,
+                        macd_hist_prev_5_max,
                     )
             else:
                 log.error("Failed RSI check for SELL: RSI=%s, RSId=%s", rsi, rsi_d)
