@@ -75,7 +75,7 @@ def is_within_trading_hours(symbol):
         return True  # No specific trading hours, assume always open
 
     # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
-    if symbol == "EURUSD" and (now.weekday() < 0 or now.weekday() > 4):
+    if symbol == "EURUSD" or "US500" or "US30" and (now.weekday() < 0 or now.weekday() > 4):
         return False
 
     # If the config includes full weekday names
