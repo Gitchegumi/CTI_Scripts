@@ -327,6 +327,7 @@ def run_strategy():
     empty_check_count = 0
 
     while True:
+        utils.print_boxed_message("Starting Trailing SL by ATR loop...")
         # Initialize the Login Manager
         login_manager = LoginManager()
 

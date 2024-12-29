@@ -514,6 +514,7 @@ def run_strategy():
     open_positions = []
     utils.setup_logging()
     while True:
+        utils.print_boxed_message("Looking for trade opportunities")
         login_manager.login()
         open_positions_response = utils.fetch_open_positions_once(login_manager)
         open_positions = (
