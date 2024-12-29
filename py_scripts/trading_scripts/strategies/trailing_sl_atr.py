@@ -77,8 +77,8 @@ def update_stop_loss(
     interval=30,
 ):
     """Update the stop loss for each position based on RR."""
-    price_data = PriceData(login_manager)
-    account_balance = price_data.fetch_account_balance()
+    price_data = PriceData()
+    account_balance = price_data.fetch_account_balance(login_manager)
     total_balance = float(account_balance.get("balance", 0))
 
     if total_balance == 0:
@@ -104,7 +104,7 @@ def update_stop_loss(
                 position, atr_value, swing_values, initial_r_value
             )
         if new_sl is not None:
-            symbol_data = price_data.fetch_symbol_data(symbol)
+            symbol_data = price_data.fetch_symbol_data(login_manager, symbol)
             pointvalue = symbol_data.get("pointvalue", 1)
             pricescale = symbol_data.get("pricescale", 1)
             if pricescale == 100:
@@ -281,7 +281,7 @@ def update_swing_values(
                     del swing_values[symbol]
         for symbol in symbols:
             log.info("Updating swing values for symbol: %s", symbol)
-            price_data.update_swing_values(symbol)
+            price_data.update_swing_values(login_manager, symbol)
             with swing_lock:
                 swing_values[symbol] = price_data.get_stored_values().get(symbol, {})
             log.info(
@@ -347,7 +347,7 @@ def run_strategy():
             # Fetch and update market data for open positions
             positions = []
             symbols = []
-            price_data = PriceData(login_manager)
+            price_data = PriceData()
             atr_values = {}
             swing_values = {}
             initial_r_values = {}

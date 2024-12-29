@@ -54,7 +54,7 @@ trading_hours = {
     },
 }
 
-trading_symbols = ["BTCUSDC"]
+trading_symbols = ["US500", "US30", "BTCUSDC", "EURUSD"]
 
 
 def is_within_trading_hours(symbol):
@@ -126,22 +126,29 @@ def close_trades_during_swap(login_manager, open_positions):
             )
 
 
-def calc_linear_regression(symbol, timeframe):
+def calc_linear_regression(login_manager, symbol, timeframe):
     """Calculate the linear regression for the given symbol and timeframe.
 
     Args:
         symbol (str): The trading symbol.
         timeframe (str): The timeframe for the linear regression.
     """
-    price_data = PriceData(LoginManager())
-    ohlc = price_data.fetch_market_data(symbol, timeframe)
+    log.info("Calculating linear regression for %s", symbol)
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(login_manager, symbol, timeframe)
+    log.info("Fetched market data for %s", symbol)  # Log the fetched data
+
+    if not ohlc or "t" not in ohlc:
+        log.error("Market data for %s does not contain 't' key", symbol)
+        return None
+
     df = pd.DataFrame(ohlc)
     df.set_index("t", inplace=True)
     df.ta.linreg(close="c", length=14, append=True)
     return df["LR_14"].iloc[-1] - df["LR_14"].iloc[-2]
 
 
-def get_trend(symbol):
+def get_trend(login_manager, symbol):
     """Get the trend for the given symbol based on linear regression.
 
     Args:
@@ -150,8 +157,9 @@ def get_trend(symbol):
     Returns:
         str: The trend direction ("buy", "sell", or None).
     """
-    regression_1h = calc_linear_regression(symbol, 60)
-    regression_15m = calc_linear_regression(symbol, 15)
+    log.info("Calculating trend for %s", symbol)
+    regression_1h = calc_linear_regression(login_manager, symbol, 60)
+    regression_15m = calc_linear_regression(login_manager, symbol, 15)
 
     if regression_1h > 0 and regression_15m > 0:
         return "buy"
@@ -160,47 +168,50 @@ def get_trend(symbol):
     return None
 
 
-def calc_rsi(symbol):
+def calc_rsi(login_manager, symbol):
     """Calculate the RSI values for the specified symbol.
 
     Args:
         symbol (str): The trading symbol.
     """
-    price_data = PriceData(LoginManager())
-    ohlc = price_data.fetch_market_data(symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("time")
-    df["RSI"] = ta.rsi(df["close"], length=14)
+    log.info("Calculating RSI for %s", symbol)
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
+    df = pd.DataFrame(ohlc).set_index("t")
+    df["RSI"] = ta.rsi(df["c"], length=14)
     return df["RSI"].iloc[-1]
 
 
-def calc_macd(symbol):
+def calc_macd(login_manager, symbol):
     """Calculate the MACD values for the specified symbol.
 
     Args:
         symbol (str): The trading symbol.
     """
-    price_data = PriceData(LoginManager())
-    ohlc = price_data.fetch_market_data(symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("time")
-    macd = df.ta.macd(fast=12, slow=26, signal=9)
+    log.info("Calculating MACD for %s", symbol)
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
+    df = pd.DataFrame(ohlc).set_index("t")
+    macd = df.ta.macd(close="c", fast=12, slow=26, signal=9)
     return macd["MACDh_12_26_9"].iloc[-1] if "MACDh_12_26_9" in macd.columns else 0
 
 
-def calc_keltner_channel(symbol):
+def calc_keltner_channel(login_manager, symbol):
     """Calculate the Keltner Channel values for the specified symbol.
 
     Args:
         symbol (str): The trading symbol.
     """
     # Calculate Keltner Channel values for the specified symbol
-    price_data = PriceData(LoginManager())
-    ohlc = price_data.fetch_market_data(symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("time")
-    kc = df.ta.kc()
+    log.info("Calculating Keltner Channel for %s", symbol)
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
+    df = pd.DataFrame(ohlc).set_index("t")
+    kc = df.ta.kc(close="c", high="h", low="l")
     df["KC_Lower"] = kc["KCL_20_2.0"]
     df["KC_Upper"] = kc["KCU_20_2.0"]
     result = {
-        "price": df["close"].iloc[-1],
+        "price": df["c"].iloc[-1],
         "lower_band": df["KC_Lower"].iloc[-1],
         "upper_band": df["KC_Upper"].iloc[-1],
         "candlestick": "engulfing",  # Simplified placeholder
@@ -208,7 +219,7 @@ def calc_keltner_channel(symbol):
     return result
 
 
-def identify_trade_signal(symbol, trend):
+def identify_trade_signal(login_manger, symbol, trend):
     """Identify the trade signal based on RSI, MACD, and Keltner Channel.
 
     Args:
@@ -218,37 +229,42 @@ def identify_trade_signal(symbol, trend):
     Returns:
        str : The trade signal ("buy", "sell", or None).
     """
+    log.info("Identifying trade signal for %s", symbol)
     # Identify trade signal based on RSI, MACD, and Keltner Channel
-    rsi = calc_rsi(symbol)
-    macd_histogram = calc_macd(symbol)
-    kc_values = calc_keltner_channel(symbol)
+    rsi = calc_rsi(login_manger, symbol)
+    macd_histogram = calc_macd(login_manger, symbol)
+    kc_values = calc_keltner_channel(login_manger, symbol)
 
     # BUY signal conditions
     if (
         trend == "buy"
         and rsi < 30  # RSI is oversold
-        and macd_histogram > 0  # MACD shows weakening bearish
+        and macd_histogram[0] > macd_histogram[1]  # MACD shows weakening bearish
         and kc_values["price"] < kc_values["lower_band"]  # Price below lower KC band
         and kc_values["candlestick"]
         in ["pinbar", "engulfing"]  # Pinbar or engulfing toward bullish
     ):
+        log.info("RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values)
+        log.info("Trade signal identified: BUY")
         return "buy"
 
     # SELL signal conditions
     if (
         trend == "sell"
         and rsi > 70  # RSI is overbought
-        and macd_histogram < 0  # MACD shows weakening bullish
+        and macd_histogram[0] < macd_histogram[1]  # MACD shows weakening bullish
         and kc_values["price"] > kc_values["upper_band"]  # Price above upper KC band
         and kc_values["candlestick"]
         in ["pinbar", "engulfing"]  # Pinbar or engulfing toward bearish
     ):
+        log.info("RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values)
+        log.info("Trade signal identified: SELL")
         return "sell"
 
     return None
 
 
-def calc_stop_loss(login_manager, symbols):
+def calc_stop_loss(login_manager, symbol):
     """Calculate the stop loss for the given symbol.
 
     Args:
@@ -257,22 +273,22 @@ def calc_stop_loss(login_manager, symbols):
     Returns:
         float: The stop loss value.
     """
-    price_data = PriceData(login_manager)
-    for symbol in symbols:
-        trend = get_trend(symbol)
-        side = identify_trade_signal(symbol, trend)
-        market_watch = price_data.fetch_market_watch(symbol)
-        atr = calculate_atr_from_market_data(login_manager, symbol)
-        if side == "buy":
-            stop_loss = market_watch["bid"] - (atr * 3)
-            return stop_loss
-        if side == "sell":
-            stop_loss = market_watch["ask"] + (atr * 3)
-            return stop_loss
+    log.info("Calculating stop loss for %s", symbol)
+    price_data = PriceData()
+    trend = get_trend(login_manager, symbol)
+    side = identify_trade_signal(login_manager, symbol, trend)
+    market_watch = price_data.fetch_market_watch(login_manager, symbol)
+    atr = calculate_atr_from_market_data(login_manager, symbol)
+    if side == "buy":
+        stop_loss = market_watch["bid"] - (atr * 3)
+        return stop_loss
+    if side == "sell":
+        stop_loss = market_watch["ask"] + (atr * 3)
+        return stop_loss
     return None
 
 
-def calc_take_profit(login_manager, symbols):
+def calc_take_profit(login_manager, symbol):
     """Calculate the stop loss for the given symbol.
 
     Args:
@@ -281,18 +297,18 @@ def calc_take_profit(login_manager, symbols):
     Returns:
         float: The stop loss value.
     """
-    price_data = PriceData(login_manager)
-    for symbol in symbols:
-        trend = get_trend(symbol)
-        side = identify_trade_signal(symbol, trend)
-        market_watch = price_data.fetch_market_watch(symbol)
-        atr = calculate_atr_from_market_data(login_manager, symbol)
-        if side == "buy":
-            take_profit = market_watch["bid"] + (atr * 9)
-            return take_profit
-        if side == "sell":
-            take_profit = market_watch["ask"] - (atr * 9)
-            return take_profit
+    log.info("Calculating take profit for %s", symbol)
+    price_data = PriceData()
+    trend = get_trend(login_manager, symbol)
+    side = identify_trade_signal(login_manager, symbol, trend)
+    market_watch = price_data.fetch_market_watch(login_manager, symbol)
+    atr = calculate_atr_from_market_data(login_manager, symbol)
+    if side == "buy":
+        take_profit = market_watch["bid"] + (atr * 9)
+        return take_profit
+    if side == "sell":
+        take_profit = market_watch["ask"] - (atr * 9)
+        return take_profit
     return None
 
 
@@ -306,9 +322,11 @@ def calc_volume(login_manager, symbol):
         float: The volume to trade.
     """
     # Calculate volume based on account balance
+    log.info("Calculating volume for %s", symbol)
     risk_per_trade = 0.0025  # 0.25% risk per trade
-    account_balance = PriceData.fetch_account_balance(login_manager)
-    current_price = PriceData.fetch_market_watch(login_manager, symbol)
+    price_data = PriceData()
+    account_balance = price_data.fetch_account_balance(login_manager)
+    current_price = price_data.fetch_market_watch(login_manager, symbol)
     stop_loss = calc_stop_loss(login_manager, symbol)
     volume = (account_balance * risk_per_trade) / abs(current_price - stop_loss)
     return volume
@@ -358,13 +376,18 @@ def run_strategy():
     """Run the trading strategy based on weekday entries."""
     login_manager = LoginManager()
     open_positions = []
-    symbols = trading_symbols
+    utils.setup_logging()
     while True:
         login_manager.login()
         open_positions_response = utils.fetch_open_positions_once(login_manager)
-        open_positions = open_positions_response.get("positions", []) if open_positions_response else []
+        open_positions = (
+            open_positions_response.get("positions", [])
+            if open_positions_response
+            else []
+        )
         close_trades_during_swap(login_manager, open_positions)
-        for symbol in symbols:
+        for symbol in trading_symbols:
+            log.info("Checking trades for %s", symbol)
             if not is_within_trading_hours(symbol):
                 log.info(
                     "Skipping trades for %s as it is outside trading hours", symbol
@@ -377,8 +400,14 @@ def run_strategy():
                 stop_loss = calc_stop_loss(login_manager, symbol)
                 take_profit = calc_take_profit(login_manager, symbol)
                 volume = calc_volume(login_manager, symbol)
-                direction = identify_trade_signal(symbol, get_trend(symbol))
+                trend = get_trend(login_manager, symbol)
+                direction = identify_trade_signal(
+                    login_manager,
+                    symbol,
+                    trend
+                )
                 if direction:
+                    log.info("Entering trade for %s", symbol)
                     enter_trade(
                         login_manager,
                         symbol,
