@@ -321,15 +321,15 @@ def restart_for_time():
 def run_strategy():
     """Main entry point for the trailing stop loss strategy."""
     utils.setup_logging()
-    log.info("************ Running Trailing SL by ATR Strategy ************")
+    utils.print_boxed_message("Starting Trailing SL by ATR strategy...")
 
     max_empty_checks = 3
     empty_check_count = 0
 
     while True:
-        utils.print_boxed_message("Starting Trailing SL by ATR loop...")
         # Initialize the Login Manager
         login_manager = LoginManager()
+        utils.print_boxed_message("Starting main trailing SL loop...")
 
         try:
             log.info("Attempting to log in...")
@@ -416,6 +416,8 @@ def run_strategy():
                 # log.info("positions from run_strategy: %s", positions)
                 # log.info("symbols from run_strategy: %s", symbols)
                 if positions and atr_values and swing_values:
+                    for position in positions:
+                        utils.print_boxed_message(f"Updating stop loss for {position.get("symbol")}...")
                     update_stop_loss(
                         login_manager,
                         positions,

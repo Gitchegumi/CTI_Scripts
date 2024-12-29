@@ -188,8 +188,8 @@ def fetch_open_positions_once(login_manager):
     except (KeyError, TypeError) as e:
         log.error("An error occurred while processing positions: %s", e)
         return []
-    
-def print_boxed_message(message):
+
+def print_boxed_message(message, log_func=log.info):
     """Print a message in a box.
 
     Args:
@@ -198,7 +198,7 @@ def print_boxed_message(message):
     lines = message.split('\n')
     max_length = max(len(line) for line in lines)
     border = '*' * (max_length + 4)
-    print(border)
+    log_func(border)
     for line in lines:
-        print(f"* {line.center(max_length)} *")
-    print(border)
+        log_func(f"* {line.center(max_length)} *")
+    log_func(border)
