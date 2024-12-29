@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 import requests
 import pandas as pd
-import pandas_ta as ta  # pylint: disable=import-error
+import pandas_ta as ta  # pylint: disable=import-error, unused-import
 from pytz import timezone
 from trading_scripts.api import utils  # pylint: disable=import-error
 from trading_scripts.api.login import (  # pylint: disable=import-error
@@ -215,8 +215,8 @@ def calc_rsi(login_manager, symbol):
     price_data = PriceData()
     ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
     df = pd.DataFrame(ohlc).set_index("t")
-    df["RSI"] = ta.rsi(df["c"], length=14)
-    return df["RSI"].iloc[-1]
+    stoch_rsi = df.ta.stochrsi(high="h", low="l", close="c")
+    return stoch_rsi
 
 
 def calc_macd(login_manager, symbol):
@@ -230,7 +230,7 @@ def calc_macd(login_manager, symbol):
     ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
     df = pd.DataFrame(ohlc).set_index("t")
     macd = df.ta.macd(close="c", fast=12, slow=26, signal=9)
-    return macd["MACDh_12_26_9"].iloc[-1] if "MACDh_12_26_9" in macd.columns else 0
+    return macd
 
 
 def calc_keltner_channel(login_manager, symbol):
@@ -253,7 +253,10 @@ def calc_keltner_channel(login_manager, symbol):
     df["KC_Upper"] = kc["KCUe_20_1.5"]
     result = {
         "price": df["c"].iloc[-1],
+        "high": df["h"].iloc[-1],
+        "low": df["l"].iloc[-1],
         "lower_band": df["KC_Lower"].iloc[-1],
+        "middle_band": df["KC_Middle"].iloc[-1],
         "upper_band": df["KC_Upper"].iloc[-1],
         "candlestick": "engulfing",  # Simplified placeholder
     }
@@ -272,71 +275,125 @@ def identify_trade_signal(login_manger, symbol, trend):
     """
     log.info("Identifying trade signal for %s", symbol)
     # Identify trade signal based on RSI, MACD, and Keltner Channel
-    rsi = calc_rsi(login_manger, symbol)
-    macd_histogram = calc_macd(login_manger, symbol)
+    stoch_rsi = calc_rsi(login_manger, symbol)
+    rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
+    rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
+    log.info("RSI for %s: %s, %s", symbol, rsi, rsi_d)
+    macd = calc_macd(login_manger, symbol)
     kc_values = calc_keltner_channel(login_manger, symbol)
+    # log.info("MACD Histogram for %s: %s", symbol, macd.tail())
+    macd_hist_current = macd["MACDh_12_26_9"].iloc[-1]
+    macd_hist_previous = macd["MACDh_12_26_9"].iloc[-2]
 
     # BUY signal conditions
     if trend == "Uptrend":
         log.info("Checking RSI for oversold condition")
         if rsi < 30:  # RSI is oversold
             log.info("RSI is oversold: %s, checking MACD", rsi)
-            macd_current = macd_histogram.iloc[-1]
-            macd_previous = macd_histogram.iloc[-2]
-            if macd_current > macd_previous:  # MACD shows bullish pressure
-                log.info(
-                    "MACD histogram is bullish: %s, %s, checking KC",
-                    macd_current,
-                    macd_previous,
-                )
-                if (
-                    kc_values["price"] < kc_values["lower_band"]
-                ):  # Price below lower KC band
+            if rsi > rsi_d:  # RSI is bullish
+                log.info("RSI is bullish: %s, %s, checking MACD", rsi, rsi_d)
+                if macd_hist_current > macd_hist_previous:  # MACD shows bullish pressure
                     log.info(
-                        "Price is below lower KC band: %s, %s",
-                        kc_values["price"],
-                        kc_values["lower_band"],
+                        "MACD histogram is bullish: %s, %s, checking KC",
+                        macd_hist_current,
+                        macd_hist_previous,
                     )
-                    if kc_values["candlestick"] in [
-                        "pinbar",
-                        "engulfing",
-                    ]:  # Pinbar or engulfing toward bullish
+                    if (
+                        kc_values["low"] <= kc_values["middle_band"]
+                    ):  # Price below lower KC band
                         log.info(
-                            "RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values
+                            "Price is below upper KC band: %s, %s",
+                            kc_values["low"],
+                            kc_values["middle_band"],
                         )
-                        log.info("Trade signal identified: BUY")
-                        return "BUY"
+                        if kc_values["candlestick"] in [
+                            "pinbar",
+                            "engulfing",
+                        ]:  # Pinbar or engulfing toward bullish
+                            log.info(
+                                "RSI: %s, MACD: %s, KC: %s",
+                                rsi,
+                                macd_hist_current,
+                                kc_values,
+                            )
+                            log.info("Trade signal identified: BUY")
+                            return "BUY"
+                        else:
+                            log.error(
+                                "Failed candlestick check for BUY: %s",
+                                kc_values["candlestick"],
+                            )
+                    else:
+                        log.error(
+                            "Failed Keltner check for BUY: price=%s, lower_band=%s",
+                            kc_values["price"],
+                            kc_values["lower_band"],
+                        )
+                else:
+                    log.error(
+                        "Failed MACD check for BUY: macd_current=%s, macd_previous=%s",
+                        macd_hist_current,
+                        macd_hist_previous,
+                    )
+            else:
+                log.error("Failed RSI check for BUY: RSI=%s, RSId=%s", rsi, rsi_d)
+        else:
+            log.error("Failed RSI check for BUY: RSI=%s", rsi)
 
     # SELL signal conditions
     if trend == "Downtrend":
         log.info("Checking RSI for overbought condition")
         if rsi > 70:  # RSI is overbought
             log.info("RSI is overbought: %s, checking MACD", rsi)
-            macd_current = macd_histogram.iloc[-1]
-            macd_previous = macd_histogram.iloc[-2]
-            if macd_current < macd_previous:  # MACD shows weakening bullish
-                log.info(
-                    "MACD histogram is bearish: %s, %s, checking KC",
-                    macd_current,
-                    macd_previous,
-                )
-                if (
-                    kc_values["price"] > kc_values["upper_band"]
-                ):  # Price above upper KC band
+            if rsi < rsi_d:  # RSI is bearish
+                log.info("RSI is bearish: %s, %s, checking MACD", rsi, rsi_d)
+                if macd_hist_current < macd_hist_previous:  # MACD shows weakening bullish
                     log.info(
-                        "Price is above upper KC band: %s, %s",
-                        kc_values["price"],
-                        kc_values["upper_band"],
+                        "MACD histogram is bearish: %s, %s, checking KC",
+                        macd_hist_current,
+                        macd_hist_previous,
                     )
-                    if kc_values["candlestick"] in [
-                        "pinbar",
-                        "engulfing",
-                    ]:  # Pinbar or engulfing toward bearish
+                    if (
+                        kc_values["high"] >= kc_values["middle_band"]
+                    ):  # Price above upper KC band
                         log.info(
-                            "RSI: %s, MACD: %s, KC: %s", rsi, macd_histogram, kc_values
+                            "Price is above upper KC band: %s, %s",
+                            kc_values["high"],
+                            kc_values["middle_band"],
                         )
-                        log.info("Trade signal identified: SELL")
-                        return "SELL"
+                        if kc_values["candlestick"] in [
+                            "pinbar",
+                            "engulfing",
+                        ]:  # Pinbar or engulfing toward bearish
+                            log.info(
+                                "RSI: %s, MACD: %s, KC: %s",
+                                rsi,
+                                macd_hist_current,
+                                kc_values,
+                            )
+                            log.info("Trade signal identified: SELL")
+                            return "SELL"
+                        else:
+                            log.error(
+                                "Failed candlestick check for SELL: %s",
+                                kc_values["candlestick"],
+                            )
+                    else:
+                        log.error(
+                            "Failed Keltner check for SELL: price=%s, upper_band=%s",
+                            kc_values["price"],
+                            kc_values["upper_band"],
+                        )
+                else:
+                    log.error(
+                        "Failed MACD check for SELL: macd_current=%s, macd_previous=%s",
+                        macd_hist_current,
+                        macd_hist_previous,
+                    )
+            else:
+                log.error("Failed RSI check for SELL: RSI=%s, RSId=%s", rsi, rsi_d)
+        else:
+            log.error("Failed RSI check for SELL: RSI=%s", rsi)
 
     log.info("No trade signal identified")
     return None
@@ -464,6 +521,8 @@ def run_strategy():
             if open_positions_response
             else []
         )
+        open_position_symbols = [pos["symbol"] for pos in open_positions]
+        log.info("Open position symbols: %s", open_position_symbols)
         close_trades_during_swap(login_manager, open_positions)
         for symbol in trading_symbols:
             log.info("Checking trades for %s", symbol)
@@ -473,7 +532,7 @@ def run_strategy():
                 )
                 continue
 
-            if symbol in open_positions:
+            if symbol in open_position_symbols:
                 log.info("Position already open for %s", symbol)
             else:
                 trend = get_trend(login_manager, symbol)
