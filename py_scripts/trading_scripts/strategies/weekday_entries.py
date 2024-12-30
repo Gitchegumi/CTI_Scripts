@@ -285,12 +285,14 @@ def identify_trade_signal(login_manger, symbol, trend):
         name=["engulfing", "shootingstar", "hammer"],
     )
     recent_candles = candlestick.iloc[-5:].dropna(how="all")
-    non_zero_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
-    identified_patterns = non_zero_patterns.columns[(non_zero_patterns != 0).any(axis=0)]
-    log.info(
-        "Current candle patterns: %s",
-        json.dumps(identified_patterns.tolist())
-    )
+    recent_candle_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
+    recent_candle_patterns = recent_candle_patterns.loc[
+        :, (recent_candle_patterns != 0).any(axis=0)
+    ]
+    identified_patterns = recent_candle_patterns.columns[
+        (recent_candle_patterns != 0).any(axis=0)
+    ]
+    log.info("Current candle patterns: %s", json.dumps(identified_patterns.tolist()))
 
     stoch_rsi = calc_rsi(login_manger, symbol)
     rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
@@ -330,21 +332,22 @@ def identify_trade_signal(login_manger, symbol, trend):
                             kc_values["last_5_middle_min"],
                         )
                         if (
-                            "CDL_ENGULFING" in identified_patterns 
+                            "CDL_ENGULFING" in identified_patterns
                             or "CDL_HAMMER" in identified_patterns
                         ):
                             log.info(
-                                "RSI: %s, MACD: %s, KC: %s",
+                                "RSI: %s, MACD: %s, KC: %s, patterns: %s",
                                 rsi,
                                 macd_hist_current,
                                 kc_values,
+                                json.dumps(identified_patterns.tolist()),
                             )
                             log.info("Trade signal identified: BUY")
                             return "BUY"
                         else:
                             log.error(
                                 "Failed candlestick check for BUY: %s",
-                                non_zero_patterns,
+                                json.dumps(identified_patterns.tolist()),
                             )
                     else:
                         log.error(
@@ -399,18 +402,18 @@ def identify_trade_signal(login_manger, symbol, trend):
                             or "CDL_SPINNINGTOP" in identified_patterns
                         ):
                             log.info(
-                                "RSI: %s, MACD: %s, KC: %s, pattern: %s",
+                                "RSI: %s, MACD: %s, KC: %s, patterns: %s",
                                 rsi,
                                 macd_hist_current,
                                 kc_values,
-                                non_zero_patterns,
+                                json.dumps(identified_patterns.tolist()),
                             )
                             log.info("Trade signal identified: SELL")
                             return "SELL"
                         else:
                             log.error(
                                 "Failed candlestick check for SELL: %s",
-                                non_zero_patterns,
+                                json.dumps(identified_patterns.tolist()),
                             )
                     else:
                         log.error(
@@ -557,7 +560,27 @@ def calc_volume(login_manager, symbol):
         return None
 
     stop_loss = calc_stop_loss(login_manager, symbol)
-    volume = (account_balance * risk_per_trade) / abs(current_price["bid"] - stop_loss)
+    if stop_loss is None:
+        log.error("Stop loss calculation failed for %s", symbol)
+        return None
+
+    try:
+        bid_price = float(current_price["bid"])
+    except (ValueError, TypeError):
+        log.error("Invalid bid price for %s: %s", symbol, current_price["bid"])
+        return None
+
+    try:
+        volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss)
+    except ZeroDivisionError:
+        log.error(
+            "Division by zero error for %s: bid_price=%s, stop_loss=%s",
+            symbol,
+            bid_price,
+            stop_loss,
+        )
+        return None
+
     return volume
 
 
