@@ -417,7 +417,9 @@ def run_strategy():
                 # log.info("symbols from run_strategy: %s", symbols)
                 if positions and atr_values and swing_values:
                     for position in positions:
-                        utils.print_boxed_message(f"Updating stop loss for {position.get("symbol")}...")
+                        utils.print_boxed_message(
+                            f"Updating stop loss for {position.get("symbol")}..."
+                        )
                     update_stop_loss(
                         login_manager,
                         positions,

@@ -243,7 +243,7 @@ def calc_keltner_channel(login_manager, symbol):
     df = pd.DataFrame(ohlc).set_index("t")
     kc = df.ta.kc(close="c", high="h", low="l", length=20, scalar=1.5, mamode="ema")
 
-    # log.info("Keltner Channel values: %s", kc)
+    # log.info("Keltner Channel values: %s", kc.tail())
 
     df["KC_Lower"] = kc["KCLe_20_1.5"]
     df["KC_Middle"] = kc["KCBe_20_1.5"]
@@ -255,7 +255,6 @@ def calc_keltner_channel(login_manager, symbol):
         "lower_band": df["KC_Lower"].iloc[-1],
         "middle_band": df["KC_Middle"].iloc[-1],
         "upper_band": df["KC_Upper"].iloc[-1],
-        "candlestick": "engulfing",  # Simplified placeholder
     }
     return result
 
@@ -275,18 +274,20 @@ def identify_trade_signal(login_manger, symbol, trend):
     stoch_rsi = calc_rsi(login_manger, symbol)
     rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
     rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
-    log.info("RSI for %s: %s, %s", symbol, rsi, rsi_d)
+    rsi_prev_3_max = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:-1].max()
+    rsi_prev_3_min = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:-1].min()
     macd = calc_macd(login_manger, symbol)
     kc_values = calc_keltner_channel(login_manger, symbol)
-    # log.info("MACD Histogram for %s: %s", symbol, macd.tail())
+    # log.info("kc_values: %s", kc_values)
+    # kc_middle_prev_5 = kc_values["middle_band"].iloc[-6:-1]
     macd_hist_current = macd["MACDh_12_26_9"].iloc[-1]
-    macd_hist_prev_5_max = macd["MACDh_12_26_9"].iloc[-7:-2].max()
-    macd_hist_prev_5_min = macd["MACDh_12_26_9"].iloc[-7:-2].min()
+    macd_hist_prev_5_max = macd["MACDh_12_26_9"].iloc[-6:-1].max()
+    macd_hist_prev_5_min = macd["MACDh_12_26_9"].iloc[-6:-1].min()
 
     # BUY signal conditions
     if trend == "Uptrend":
         log.info("Checking RSI for oversold condition")
-        if rsi < 30:  # RSI is oversold
+        if rsi_prev_3_min < 30:  # RSI is oversold
             log.info("RSI is oversold: %s, checking MACD", rsi)
             if rsi > rsi_d:  # RSI is bullish
                 log.info("RSI is bullish: %s, %s, checking MACD", rsi, rsi_d)
@@ -297,35 +298,35 @@ def identify_trade_signal(login_manger, symbol, trend):
                         macd_hist_prev_5_min,
                     )
                     if (
-                        kc_values["low"] <= kc_values["middle_band"]
+                        kc_values["price"] <= kc_values["middle_band"]
                     ):  # Price below lower KC band
                         log.info(
-                            "Price is below upper KC band: %s, %s",
-                            kc_values["low"],
+                            "Price is below middle KC band: %s, %s",
+                            kc_values["price"],
                             kc_values["middle_band"],
                         )
-                        if kc_values["candlestick"] in [
-                            "pinbar",
-                            "engulfing",
-                        ]:  # Pinbar or engulfing toward bullish
-                            log.info(
-                                "RSI: %s, MACD: %s, KC: %s",
-                                rsi,
-                                macd_hist_current,
-                                kc_values,
-                            )
-                            log.info("Trade signal identified: BUY")
-                            return "BUY"
-                        else:
-                            log.error(
-                                "Failed candlestick check for BUY: %s",
-                                kc_values["candlestick"],
-                            )
+                        # if kc_values["candlestick"] in [
+                        #     "pinbar",
+                        #     "engulfing",
+                        # ]:  # Pinbar or engulfing toward bullish
+                        log.info(
+                            "RSI: %s, MACD: %s, KC: %s",
+                            rsi,
+                            macd_hist_current,
+                            kc_values,
+                        )
+                        log.info("Trade signal identified: BUY")
+                        return "BUY"
+                        # else:
+                        #     log.error(
+                        #         "Failed candlestick check for BUY: %s",
+                        #         kc_values["candlestick"],
+                        #     )
                     else:
                         log.error(
-                            "Failed Keltner check for BUY: price=%s, lower_band=%s",
+                            "Failed Keltner check for BUY: price=%s, middle_band=%s",
                             kc_values["price"],
-                            kc_values["lower_band"],
+                            kc_values["middle_band"],
                         )
                 else:
                     log.error(
@@ -341,7 +342,7 @@ def identify_trade_signal(login_manger, symbol, trend):
     # SELL signal conditions
     if trend == "Downtrend":
         log.info("Checking RSI for overbought condition")
-        if rsi > 70:  # RSI is overbought
+        if rsi_prev_3_max > 70:  # RSI is overbought
             log.info("RSI is overbought: %s, checking MACD", rsi)
             if rsi < rsi_d:  # RSI is bearish
                 log.info("RSI is bearish: %s, %s, checking MACD", rsi, rsi_d)
@@ -352,35 +353,35 @@ def identify_trade_signal(login_manger, symbol, trend):
                         macd_hist_prev_5_max,
                     )
                     if (
-                        kc_values["high"] >= kc_values["middle_band"]
+                        kc_values["price"] >= kc_values["middle_band"]
                     ):  # Price above upper KC band
                         log.info(
                             "Price is above upper KC band: %s, %s",
-                            kc_values["high"],
+                            kc_values["price"],
                             kc_values["middle_band"],
                         )
-                        if kc_values["candlestick"] in [
-                            "pinbar",
-                            "engulfing",
-                        ]:  # Pinbar or engulfing toward bearish
-                            log.info(
-                                "RSI: %s, MACD: %s, KC: %s",
-                                rsi,
-                                macd_hist_current,
-                                kc_values,
-                            )
-                            log.info("Trade signal identified: SELL")
-                            return "SELL"
-                        else:
-                            log.error(
-                                "Failed candlestick check for SELL: %s",
-                                kc_values["candlestick"],
-                            )
+                        # if kc_values["candlestick"] in [
+                        #     "pinbar",
+                        #     "engulfing",
+                        # ]:  # Pinbar or engulfing toward bearish
+                        log.info(
+                            "RSI: %s, MACD: %s, KC: %s",
+                            rsi,
+                            macd_hist_current,
+                            kc_values,
+                        )
+                        log.info("Trade signal identified: SELL")
+                        return "SELL"
+                        # else:
+                        #     log.error(
+                        #         "Failed candlestick check for SELL: %s",
+                        #         kc_values["candlestick"],
+                        #     )
                     else:
                         log.error(
-                            "Failed Keltner check for SELL: price=%s, upper_band=%s",
+                            "Failed Keltner check for SELL: price=%s, middle_band=%s",
                             kc_values["price"],
-                            kc_values["upper_band"],
+                            kc_values["middle_band"],
                         )
                 else:
                     log.error(
@@ -392,8 +393,6 @@ def identify_trade_signal(login_manger, symbol, trend):
                 log.error("Failed RSI check for SELL: RSI=%s, RSId=%s", rsi, rsi_d)
         else:
             log.error("Failed RSI check for SELL: RSI=%s", rsi)
-
-    log.info("No trade signal identified")
     return None
 
 
@@ -410,13 +409,24 @@ def calc_stop_loss(login_manager, symbol):
     price_data = PriceData()
     trend = get_trend(login_manager, symbol)
     side = identify_trade_signal(login_manager, symbol, trend)
-    market_watch = price_data.fetch_market_watch(login_manager, symbol)
+    market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
+
+    if not market_watch_data or not isinstance(market_watch_data, list):
+        log.error("Market watch data is missing or not in expected format for symbol: %s", symbol)
+        return None
+
+    market_watch = next((item for item in market_watch_data if item["symbol"] == symbol), None)
+
+    if not market_watch or "ask" not in market_watch:
+        log.error("Market watch data is missing or 'ask' key not found for symbol: %s", symbol)
+        return None
+    
     atr = calculate_atr_from_market_data(login_manager, symbol)
     if side == "BUY":
-        stop_loss = market_watch["bid"] - (atr * 3)
+        stop_loss = float(market_watch["bid"]) - (atr * 3)
         return stop_loss
     if side == "SELL":
-        stop_loss = market_watch["ask"] + (atr * 3)
+        stop_loss = float(market_watch["ask"]) + (atr * 3)
         return stop_loss
     return None
 
@@ -550,7 +560,9 @@ def run_strategy():
                         take_profit,
                     )
                 else:
-                    log.info("No trade signal found for %s", symbol)
+                    utils.print_boxed_message(
+                        f"No trade signal identified for {symbol}. Skipping."
+                    )
         time.sleep(60)  # Adjust sleep interval as needed
 
 

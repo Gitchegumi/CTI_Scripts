@@ -20,7 +20,7 @@ class PriceData:
     def fetch_market_data(self, login_manager, symbol, resolution="5", countback=500):
         """Fetch market data for the given symbols."""
         log.info("Fetching market data for symbol: %s, timeframe %s", symbol, resolution)
-        url = f"{utils.PLATFORM_URL}/market-data-api/{login_manager.system_uuid}/api/trading-view/history"
+        url = f"{utils.PLATFORM_URL}/market-data-api/{login_manager.system_uuid}/api/trading-view/history" # pylint: disable=line-too-long
 
         headers = {
             "Auth-trading-api": login_manager.auth_trading_api,
@@ -220,7 +220,7 @@ class PriceData:
 
     def fetch_market_watch(self, login_manager, symbol):
         """Fetch market watch data."""
-        url = f"{utils.PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/quotations?symbols='{symbol}'"
+        url = f"{utils.PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/quotations?symbols={symbol}" # pylint: disable=line-too-long
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
