@@ -10,14 +10,14 @@ from trading_scripts.api.utils import fetch_open_positions_once # pylint: disabl
 def fetch_price_data(login_manager, symbols, check_interval=15):
     """Fetch market data for the given symbols."""
     log.info("Starting price data fetch loop.")
-    price_data = PriceData(login_manager)
+    price_data = PriceData()
     positions = fetch_open_positions_once(login_manager)
     symbols = [pos["symbol"] for pos in positions]
     # log.info("Symbols for Market Watch: %s", symbols)
     while True:
         try:
             for symbol in symbols:
-                price_data.update_swing_values(symbol)
+                price_data.update_swing_values(login_manager, symbol)
             stored_values = price_data.get_stored_values()
             log.info("Stored swing values: %s", stored_values)
             time.sleep(check_interval)
