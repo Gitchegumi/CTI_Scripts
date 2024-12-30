@@ -335,9 +335,9 @@ def identify_trade_signal(login_manger, symbol, trend):
                         macd_hist_prev_5_min,
                     )
             else:
-                log.error("Failed RSI check for BUY: RSI=%s, RSId=%s", rsi, rsi_d)
+                log.error("Failed RSI check for BUY: RSI %s is not greater than RSId %s", rsi, rsi_d)
         else:
-            log.error("Failed RSI check for BUY: RSI=%s", rsi)
+            log.error("Failed RSI check for BUY: RSI %s is not less than 30", rsi)
 
     # SELL signal conditions
     if trend == "Downtrend":
@@ -390,9 +390,9 @@ def identify_trade_signal(login_manger, symbol, trend):
                         macd_hist_prev_5_max,
                     )
             else:
-                log.error("Failed RSI check for SELL: RSI=%s, RSId=%s", rsi, rsi_d)
+                log.error("Failed RSI check for SELL: RSI %s is not less than RSId %s", rsi, rsi_d)
         else:
-            log.error("Failed RSI check for SELL: RSI=%s", rsi)
+            log.error("Failed RSI check for SELL: RSI %s is not greater than 70", rsi)
     return None
 
 
