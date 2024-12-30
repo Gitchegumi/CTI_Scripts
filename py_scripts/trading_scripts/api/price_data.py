@@ -5,11 +5,15 @@ Returns:
 """
 
 import logging as log
+import time
 from datetime import datetime
 from trading_scripts.api import utils  # pylint: disable=import-error
 import requests
 import pandas as pd  # pylint: disable=import-error
 
+
+retries = 3
+retry_delay = 5
 
 class PriceData:
     """A class for fetching and updating market data."""
@@ -42,19 +46,29 @@ class PriceData:
             "countback": countback,
         }
 
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-            response.raise_for_status()
-            # log.info("Market data fetched successfully.")
-            data = response.json()
-            if data.get("s") == "ok":
-                # log.info("Market data fetched for %s: %s", symbol, data)
-                return data
-            log.error("Failed to fetch market data for %s: %s", symbol, data)
-            return {}
-        except requests.exceptions.RequestException as e:
-            log.error("Failed to fetch market data: %s", e)
-            return {}
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                if data.get("s") == "ok":
+                    return data
+                log.error("Failed to fetch market data for %s: %s", symbol, data)
+                return {}
+            except requests.exceptions.RequestException as e:
+                if response.status_code in [502, 504]:
+                    log.warning(
+                        "Attempt %d: Received %s error. Retrying in %s seconds...",
+                        attempt + 1,
+                        response.status_code,
+                        retry_delay
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    log.error("Failed to fetch market data: %s", e)
+                    return {}
+        log.error("Failed to fetch market data after %s retries", retries)
+        return {}
 
     def update_swing_values(self, login_manager, symbol, resolution="5", countback=1):
         """Update the most recent swing values for each open position."""
