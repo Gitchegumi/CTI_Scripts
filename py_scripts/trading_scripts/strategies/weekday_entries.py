@@ -456,6 +456,11 @@ def calc_stop_loss(login_manager, symbol):
     side = identify_trade_signal(login_manager, symbol, trend)
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
+    # log.info(
+    #     "market watch data for stop_loss: %s",
+    #     json.dumps(market_watch_data, indent=2)
+    # )
+
     if not market_watch_data or not isinstance(market_watch_data, list):
         log.error(
             "Market watch data is missing or not in expected format for symbol: %s",
@@ -466,6 +471,11 @@ def calc_stop_loss(login_manager, symbol):
     market_watch = next(
         (item for item in market_watch_data if item["symbol"] == symbol), None
     )
+
+    # log.info(
+    #     "market watch dict for stop_loss: %s",
+    #     json.dumps(market_watch, indent=2)
+    # )
 
     if not market_watch or "ask" not in market_watch:
         log.error(
@@ -484,19 +494,24 @@ def calc_stop_loss(login_manager, symbol):
 
 
 def calc_take_profit(login_manager, symbol):
-    """Calculate the stop loss for the given symbol.
+    """Calculate the take profit for the given symbol.
 
     Args:
         symbol (str): The trading symbol.
 
     Returns:
-        float: The stop loss value.
+        float: The take profit value.
     """
     log.info("Calculating take profit for %s", symbol)
     price_data = PriceData()
     trend = get_trend(login_manager, symbol)
     side = identify_trade_signal(login_manager, symbol, trend)
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
+
+    # log.info(
+    #     "market watch data for take_profit: %s",
+    #     json.dumps(market_watch_data, indent=2)
+    # )
 
     if not market_watch_data or not isinstance(market_watch_data, list):
         log.error(
@@ -508,6 +523,11 @@ def calc_take_profit(login_manager, symbol):
     market_watch = next(
         (item for item in market_watch_data if item["symbol"] == symbol), None
     )
+
+    # log.info(
+    #     "market watch dict for take_profit: %s",
+    #     json.dumps(market_watch, indent=2)
+    # )
 
     if not market_watch or "ask" not in market_watch:
         log.error(
@@ -542,6 +562,11 @@ def calc_volume(login_manager, symbol):
     account_balance = float(account_balance_data["balance"])
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
+    # log.info(
+    #     "market watch data for calc_volume: %s",
+    #     json.dumps(market_watch_data, indent=2)
+    # )
+
     if not market_watch_data or not isinstance(market_watch_data, list):
         log.error(
             "Market watch data is missing or not in expected format for symbol: %s",
@@ -552,6 +577,11 @@ def calc_volume(login_manager, symbol):
     current_price = next(
         (item for item in market_watch_data if item["symbol"] == symbol), None
     )
+
+    # log.info(
+    #     "current price for calc_volume: %s",
+    #     json.dumps(current_price, indent=2)
+    # )
 
     if not current_price or "bid" not in current_price:
         log.error(
@@ -571,7 +601,10 @@ def calc_volume(login_manager, symbol):
         return None
 
     try:
-        volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss)
+        if symbol == "EURUSD":
+            volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss) / 100000
+        else:
+            volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss)
     except ZeroDivisionError:
         log.error(
             "Division by zero error for %s: bid_price=%s, stop_loss=%s",
@@ -581,7 +614,15 @@ def calc_volume(login_manager, symbol):
         )
         return None
 
-    return volume
+    # log.info(
+    #         "%s * %s / abs(%s - %s) = %s",
+    #         account_balance,
+    #         risk_per_trade,
+    #         bid_price,
+    #         stop_loss,
+    #         ((account_balance * risk_per_trade) / abs(bid_price - stop_loss)),
+    #     )
+    return round(volume, 2)
 
 
 def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit):
