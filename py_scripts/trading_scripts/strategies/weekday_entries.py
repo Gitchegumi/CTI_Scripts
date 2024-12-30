@@ -75,9 +75,8 @@ def is_within_trading_hours(symbol):
         return True  # No specific trading hours, assume always open
 
     # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
-    if (
-        symbol in ["EURUSD", "US500", "US30"]
-        and (now.weekday() < 0 or now.weekday() > 4)
+    if symbol in ["EURUSD", "US500", "US30"] and (
+        now.weekday() < 0 or now.weekday() > 4
     ):
         return False
 
@@ -283,7 +282,7 @@ def identify_trade_signal(login_manger, symbol, trend):
         high="h",
         low="l",
         close="c",
-        name=["engulfing", "shootingstar", "hammer"]
+        name=["engulfing", "shootingstar", "hammer"],
     )
     current_candle = candlestick.iloc[-1]
     non_zero_patterns = current_candle[current_candle != 0]
@@ -311,7 +310,9 @@ def identify_trade_signal(login_manger, symbol, trend):
             log.info("RSI is oversold: %s, checking MACD", rsi)
             if rsi > rsi_d:  # RSI is bullish
                 log.info("RSI is bullish: %s, %s, checking MACD", rsi, rsi_d)
-                if macd_hist_current > macd_hist_prev_5_min:  # MACD shows bullish pressure
+                if (
+                    macd_hist_current > macd_hist_prev_5_min
+                ):  # MACD shows bullish pressure
                     log.info(
                         "MACD histogram is bullish: %s, %s, checking KC",
                         macd_hist_current,
@@ -325,7 +326,10 @@ def identify_trade_signal(login_manger, symbol, trend):
                             kc_values["last_5_low"],
                             kc_values["last_5_middle_min"],
                         )
-                        if current_candle['CDL_ENGULFING'] != 0 or current_candle['CDL_HAMMER'] != 0:  # Pinbar or engulfing toward bullish
+                        if (
+                            current_candle["CDL_ENGULFING"] != 0
+                            or current_candle["CDL_HAMMER"] != 0
+                        ):
                             log.info(
                                 "RSI: %s, MACD: %s, KC: %s",
                                 rsi,
@@ -355,10 +359,12 @@ def identify_trade_signal(login_manger, symbol, trend):
                 log.error(
                     "Failed RSI check for BUY: RSI %s is not greater than RSId %s",
                     round(rsi, 2),
-                    round(rsi_d, 2)
+                    round(rsi_d, 2),
                 )
         else:
-            log.error("Failed RSI check for BUY: RSI %s is not less than 30", round(rsi, 2))
+            log.error(
+                "Failed RSI check for BUY: RSI %s is not less than 30", round(rsi, 2)
+            )
 
     # SELL signal conditions
     if trend == "Downtrend":
@@ -368,7 +374,9 @@ def identify_trade_signal(login_manger, symbol, trend):
             log.info("RSI is overbought: %s, checking MACD", rsi)
             if rsi < rsi_d:  # RSI is bearish
                 log.info("RSI is bearish: %s, %s, checking MACD", rsi, rsi_d)
-                if macd_hist_current < macd_hist_prev_5_max:  # MACD shows weakening bullish
+                if (
+                    macd_hist_current < macd_hist_prev_5_max
+                ):  # MACD shows weakening bullish
                     log.info(
                         "MACD histogram is bearish: %s, %s, checking KC",
                         macd_hist_current,
@@ -382,7 +390,11 @@ def identify_trade_signal(login_manger, symbol, trend):
                             kc_values["last_5_high"],
                             kc_values["last_5_middle_max"],
                         )
-                        if current_candle['CDL_ENGULFING'] != 0 or current_candle['CDL_SHOOTINGSTAR'] != 0:
+                        if (
+                            current_candle["CDL_ENGULFING"] != 0
+                            or current_candle["CDL_SHOOTINGSTAR"] != 0
+                            or current_candle["CDL_SPINNINGTOP"] != 0
+                        ):
                             log.info(
                                 "RSI: %s, MACD: %s, KC: %s, pattern: %s",
                                 rsi,
@@ -413,10 +425,13 @@ def identify_trade_signal(login_manger, symbol, trend):
                 log.error(
                     "Failed RSI check for SELL: RSI %s is not less than RSId %s",
                     round(rsi, 2),
-                    round(rsi_d, 2)
+                    round(rsi_d, 2),
                 )
         else:
-            log.error("Failed RSI check for SELL: RSI %s is not greater than 70", round(rsi, 2))
+            log.error(
+                "Failed RSI check for SELL: RSI %s is not greater than 70",
+                round(rsi, 2),
+            )
     return None
 
 
@@ -436,13 +451,20 @@ def calc_stop_loss(login_manager, symbol):
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
     if not market_watch_data or not isinstance(market_watch_data, list):
-        log.error("Market watch data is missing or not in expected format for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or not in expected format for symbol: %s",
+            symbol,
+        )
         return None
 
-    market_watch = next((item for item in market_watch_data if item["symbol"] == symbol), None)
+    market_watch = next(
+        (item for item in market_watch_data if item["symbol"] == symbol), None
+    )
 
     if not market_watch or "ask" not in market_watch:
-        log.error("Market watch data is missing or 'ask' key not found for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or 'ask' key not found for symbol: %s", symbol
+        )
         return None
 
     atr = calculate_atr_from_market_data(login_manager, symbol)
@@ -471,13 +493,20 @@ def calc_take_profit(login_manager, symbol):
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
     if not market_watch_data or not isinstance(market_watch_data, list):
-        log.error("Market watch data is missing or not in expected format for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or not in expected format for symbol: %s",
+            symbol,
+        )
         return None
 
-    market_watch = next((item for item in market_watch_data if item["symbol"] == symbol), None)
+    market_watch = next(
+        (item for item in market_watch_data if item["symbol"] == symbol), None
+    )
 
     if not market_watch or "ask" not in market_watch:
-        log.error("Market watch data is missing or 'ask' key not found for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or 'ask' key not found for symbol: %s", symbol
+        )
         return None
 
     atr = calculate_atr_from_market_data(login_manager, symbol)
@@ -508,15 +537,22 @@ def calc_volume(login_manager, symbol):
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
     if not market_watch_data or not isinstance(market_watch_data, list):
-        log.error("Market watch data is missing or not in expected format for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or not in expected format for symbol: %s",
+            symbol,
+        )
         return None
 
-    current_price = next((item for item in market_watch_data if item["symbol"] == symbol), None)
+    current_price = next(
+        (item for item in market_watch_data if item["symbol"] == symbol), None
+    )
 
     if not current_price or "bid" not in current_price:
-        log.error("Market watch data is missing or 'ask' key not found for symbol: %s", symbol)
+        log.error(
+            "Market watch data is missing or 'ask' key not found for symbol: %s", symbol
+        )
         return None
-    
+
     stop_loss = calc_stop_loss(login_manager, symbol)
     volume = (account_balance * risk_per_trade) / abs(current_price["bid"] - stop_loss)
     return volume
@@ -588,9 +624,7 @@ def run_strategy():
                 continue
 
             if symbol in open_position_symbols:
-                utils.print_boxed_message(
-                    f"Trade already open for {symbol}. Skipping."
-                )
+                utils.print_boxed_message(f"Trade already open for {symbol}. Skipping.")
             else:
                 trend = get_trend(login_manager, symbol)
                 direction = identify_trade_signal(login_manager, symbol, trend)
