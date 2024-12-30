@@ -619,7 +619,7 @@ def run_strategy():
         log.info("Open position symbols: %s", open_position_symbols)
         close_trades_during_swap(login_manager, open_positions)
         for symbol in trading_symbols:
-            log.info("Checking trades for %s", symbol)
+            utils.print_boxed_message(f"Checking trade opportunities for {symbol}")
             if not is_within_trading_hours(symbol):
                 log.info(
                     "Skipping trades for %s as it is outside trading hours", symbol
