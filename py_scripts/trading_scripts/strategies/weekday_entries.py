@@ -284,10 +284,13 @@ def identify_trade_signal(login_manger, symbol, trend):
         close="c",
         name=["engulfing", "shootingstar", "hammer"],
     )
-    current_candle = candlestick.iloc[-1]
-    non_zero_patterns = current_candle[current_candle != 0]
-    if not non_zero_patterns.empty:
-        log.info("Current candle patterns: %s", non_zero_patterns)
+    recent_candles = candlestick.iloc[-5:].dropna(how="all")
+    non_zero_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
+    identified_patterns = non_zero_patterns.columns[(non_zero_patterns != 0).any(axis=0)]
+    log.info(
+        "Current candle patterns: %s",
+        json.dumps(identified_patterns.tolist())
+    )
 
     stoch_rsi = calc_rsi(login_manger, symbol)
     rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
@@ -327,8 +330,8 @@ def identify_trade_signal(login_manger, symbol, trend):
                             kc_values["last_5_middle_min"],
                         )
                         if (
-                            current_candle["CDL_ENGULFING"] != 0
-                            or current_candle["CDL_HAMMER"] != 0
+                            "CDL_ENGULFING" in identified_patterns 
+                            or "CDL_HAMMER" in identified_patterns
                         ):
                             log.info(
                                 "RSI: %s, MACD: %s, KC: %s",
@@ -391,9 +394,9 @@ def identify_trade_signal(login_manger, symbol, trend):
                             kc_values["last_5_middle_max"],
                         )
                         if (
-                            current_candle["CDL_ENGULFING"] != 0
-                            or current_candle["CDL_SHOOTINGSTAR"] != 0
-                            or current_candle["CDL_SPINNINGTOP"] != 0
+                            "CDL_ENGULFING" in identified_patterns
+                            or "CDL_SHOOTINGSTAR" in identified_patterns
+                            or "CDL_SPINNINGTOP" in identified_patterns
                         ):
                             log.info(
                                 "RSI: %s, MACD: %s, KC: %s, pattern: %s",
