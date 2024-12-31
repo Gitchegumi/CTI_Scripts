@@ -208,15 +208,15 @@ def get_trend(login_manager, symbol):
         str: The trend direction ("BUY", "SELL", or None).
     """
     log.info("Calculating trend for %s", symbol)
-    regression_1h = calc_linear_regression(login_manager, symbol, 60)
-    log.info("1H Linear Regression percentage for %s: %s", symbol, regression_1h)
     regression_15m = calc_linear_regression(login_manager, symbol, 15)
     log.info("15M Linear Regression percentage for %s: %s", symbol, regression_15m)
+    regression_5m = calc_linear_regression(login_manager, symbol, 5)
+    log.info("5M Linear Regression percentage for %s: %s", symbol, regression_5m)
 
-    if regression_1h > 0.1 and regression_15m > 0.02:
+    if regression_15m > 0.01 and regression_5m > 0.005:
         log.info("Trend identified: Uptrend")
         return "Uptrend"
-    elif regression_1h < -0.1 and regression_15m < -0.02:
+    elif regression_15m < -0.01 and regression_5m < -0.005:
         log.info("Trend identified: Downtrend")
         return "Downtrend"
     utils.print_boxed_message(f"No trend identified for {symbol}")
