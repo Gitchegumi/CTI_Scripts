@@ -159,7 +159,7 @@ def close_trades_during_swap(login_manager, open_positions):
             )
 
 
-def calc_linear_regression(login_manager, symbol, timeframe):
+def calc_linear_regression(login_manager, symbol, timeframe, length=14):
     """Calculate the linear regression for the given symbol and timeframe.
 
     Args:
@@ -178,14 +178,14 @@ def calc_linear_regression(login_manager, symbol, timeframe):
     df.set_index("t", inplace=True)
     # log.info("Dataframe for %s: %s", symbol, df.head())
 
-    df.ta.linreg(close="c", length=14, append=True)
+    df.ta.linreg(close="c", length=length, append=True)
     # log.info("Linear regression Dataframe for %s: %s", symbol, df.tail())
 
-    if "LR_14" not in df.columns:
+    if f"LR_{length}" not in df.columns:
         log.error("Linear Regression calculation failed for %s", symbol)
         return None
 
-    lr_diff = df["LR_14"].iloc[-1] - df["LR_14"].iloc[-2]
+    lr_diff = df[f"LR_{length}"].iloc[-1] - df[f"LR_{length}"].iloc[-2]
     current_price = df["c"].iloc[-1]
 
     if current_price == 0:
@@ -207,16 +207,19 @@ def get_trend(login_manager, symbol):
     Returns:
         str: The trend direction ("BUY", "SELL", or None).
     """
+    threshold_15m = 0.01
+    threshold_5m = 0.002
+
     log.info("Calculating trend for %s", symbol)
-    regression_15m = calc_linear_regression(login_manager, symbol, 15)
+    regression_15m = calc_linear_regression(login_manager, symbol, 15, 50)
     log.info("15M Linear Regression percentage for %s: %s", symbol, regression_15m)
-    regression_5m = calc_linear_regression(login_manager, symbol, 5)
+    regression_5m = calc_linear_regression(login_manager, symbol, 5, 14)
     log.info("5M Linear Regression percentage for %s: %s", symbol, regression_5m)
 
-    if regression_15m > 0.01 and regression_5m > 0.005:
+    if regression_15m > threshold_15m and regression_5m > threshold_5m:
         log.info("Trend identified: Uptrend")
         return "Uptrend"
-    elif regression_15m < -0.01 and regression_5m < -0.005:
+    elif regression_15m < -threshold_15m and regression_5m < -threshold_5m:
         log.info("Trend identified: Downtrend")
         return "Downtrend"
     utils.print_boxed_message(f"No trend identified for {symbol}")
