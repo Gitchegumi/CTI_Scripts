@@ -25,33 +25,50 @@ ny_timezone = timezone("America/New_York")
 
 trading_hours = {
     "EURUSD": {
-        "market_hours": {
-            "start": "Monday 00:00:00",
-            "end": "Friday 23:59:59",
-        },
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
         "daily_swap": {
             "start": "16:55:00",
             "end": "17:05:00",
         },
     },
     "US500": {
-        "market_hours": {
-            "start": "08:30:00",
-            "end": "16:30:00",
-        }
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
+        "daily_swap": {
+            "start": "16:55:00",
+            "end": "18:59:00",
+        },
     },
     "US30": {
-        "market_hours": {
-            "start": "08:30:00",
-            "end": "16:30:00",
-        }
-    },
-    "BTCUSDC": {
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
         "daily_swap": {
-            "start": "17:55:00",
-            "end": "18:05:00",
-        }
+            "start": "16:55:00",
+            "end": "18:59:00",
+        },
     },
+     "BTCUSDC": {
+        "daily_swap": {
+            "start": "16:55:00",
+            "end": "17:30:00",
+        },
+    }
 }
 
 trading_symbols = ["US500", "US30", "EURUSD", "BTCUSDC"]
@@ -69,7 +86,7 @@ def is_within_trading_hours(symbol):
     now = datetime.now(ny_timezone)
     log.info("Current time: %s", now)
     symbol_hours = trading_hours.get(symbol, {}).get("market_hours")
-    log.info("Symbol hours for %s: %s", symbol, symbol_hours)
+    log.info("Symbol hours for %s: %s", symbol, json.dumps(symbol_hours, indent=2))
 
     if not symbol_hours:
         return True  # No specific trading hours, assume always open
@@ -80,21 +97,26 @@ def is_within_trading_hours(symbol):
     ):
         return False
 
-    # If the config includes full weekday names
-    if " " in symbol_hours["start"]:
-        start = symbol_hours["start"]  # e.g. "Monday 00:00:00"
-        end = symbol_hours["end"]  # e.g. "Friday 23:59:59"
-        # If you still want to parse the specific times, you can do so here,
-        # but the weekday check above will prevent Sunday trades for EURUSD.
-        return True
-    else:
-        # Fallback for times given with no weekday
-        start = datetime.strptime(symbol_hours["start"], "%H:%M:%S").time()
-        end = datetime.strptime(symbol_hours["end"], "%H:%M:%S").time()
+    for period in symbol_hours:
+        start = ny_timezone.localize(
+            datetime.strptime(period["start"], "%A %H:%M:%S").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+        )
+        end = ny_timezone.localize(
+            datetime.strptime(period["end"], "%A %H:%M:%S").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+        )
 
         if start < end:
-            return start <= now.time() <= end
-        return now.time() >= start or now.time() <= end
+            if start <= now <= end:
+                return True
+        else:
+            if now >= start or now <= end:
+                return True
+
+    return False
 
 
 def is_within_daily_swap(symbol):
@@ -297,8 +319,8 @@ def identify_trade_signal(login_manger, symbol, trend):
     stoch_rsi = calc_rsi(login_manger, symbol)
     rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
     rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
-    rsi_prev_3_max = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:-1].max()
-    rsi_prev_3_min = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:-1].min()
+    rsi_prev_3_max = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:].max()
+    rsi_prev_3_min = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:].min()
     macd = calc_macd(login_manger, symbol)
     kc_values = calc_keltner_channel(login_manger, symbol)
     # log.info("kc_values: %s", kc_values)
@@ -602,7 +624,9 @@ def calc_volume(login_manager, symbol):
 
     try:
         if symbol == "EURUSD":
-            volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss) / 100000
+            volume = (
+                (account_balance * risk_per_trade) / abs(bid_price - stop_loss) / 100000
+            )
         else:
             volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss)
     except ZeroDivisionError:
@@ -687,6 +711,12 @@ def run_strategy():
             if not is_within_trading_hours(symbol):
                 log.info(
                     "Skipping trades for %s as it is outside trading hours", symbol
+                )
+                continue
+
+            if is_within_daily_swap(symbol):
+                log.info(
+                    "Skipping trades for %s as it is during the daily swap time", symbol
                 )
                 continue
 
