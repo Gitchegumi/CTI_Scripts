@@ -307,7 +307,7 @@ def identify_trade_signal(login_manger, symbol, trend):
         high="h",
         low="l",
         close="c",
-        name=["engulfing", "shootingstar", "hammer"],
+        name="all",
     )
     recent_candles = candlestick.iloc[-5:].dropna(how="all")
     recent_candle_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
