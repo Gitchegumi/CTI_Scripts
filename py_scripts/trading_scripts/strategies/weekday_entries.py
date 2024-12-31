@@ -40,27 +40,27 @@ trading_hours = {
     "US500": {
         "market_hours": [
             {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+            {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
         ],
         "daily_swap": {
             "start": "16:55:00",
-            "end": "18:59:00",
+            "end": "18:29:00",
         },
     },
     "US30": {
         "market_hours": [
             {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+            {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
         ],
         "daily_swap": {
             "start": "16:55:00",
-            "end": "18:59:00",
+            "end": "18:29:00",
         },
     },
      "BTCUSDC": {
