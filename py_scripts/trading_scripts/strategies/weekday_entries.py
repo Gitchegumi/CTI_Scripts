@@ -25,6 +25,9 @@ forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY"]
 index_symbols = ["US500", "US30"]
 crypto_pairs = ["BTCUSDC"]
 
+jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
+standard_symbols = [pair for pair in forex_pairs if pair not in jpy_symbols]
+
 trading_symbols = forex_pairs + index_symbols + crypto_pairs
 
 ny_timezone = timezone("America/New_York")
@@ -605,8 +608,6 @@ def calc_volume(login_manager, symbol):
     account_balance_data = price_data.fetch_account_balance(login_manager)
     account_balance = float(account_balance_data["balance"])
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
-    jpy_symbols = ["USDJPY", "GBPJPY"]
-    standard_symbols = ["EURUSD", "USDCAD"]
 
     # log.info(
     #     "market watch data for calc_volume: %s",
@@ -724,6 +725,8 @@ def run_strategy():
     utils.setup_logging()
     while True:
         utils.print_boxed_message("Looking for trade opportunities")
+        log.info("JPY symbols: %s", jpy_symbols)
+        log.info("Standard symbols: %s", standard_symbols)
         login_manager.login()
         open_positions_response = utils.fetch_open_positions_once(login_manager)
         open_positions = (
