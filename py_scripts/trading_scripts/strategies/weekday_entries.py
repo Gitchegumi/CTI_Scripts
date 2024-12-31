@@ -708,12 +708,15 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         "User-Agent": "Mozilla/5.0",
     }
 
+    log.info(json.dumps(payload, indent=2))
+
     session = requests.Session()
     session.headers.update(headers)
     try:
         response = session.post(url, headers=headers, data=payload, timeout=10)
         response.raise_for_status()
         utils.print_boxed_message(f"{direction} trade successfully opened for {symbol}!!!")
+        utils.print_boxed_message(json.dumps(response.json(), indent=2))
     except requests.RequestException as e:
         log.error("Failed to open position for %s: %s", symbol, e)
 
