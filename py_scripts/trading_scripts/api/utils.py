@@ -189,16 +189,29 @@ def fetch_open_positions_once(login_manager):
         log.error("An error occurred while processing positions: %s", e)
         return []
 
-def print_boxed_message(message, log_func=log.info):
+def print_boxed_message(message, log_func=log.info, fixed_width=75):
     """Print a message in a box.
 
     Args:
         message (str): The message to print.
     """
+    try:
+        # Try to parse the message as JSON
+        parsed_message = json.loads(message)
+        message = json.dumps(parsed_message, indent=2)
+        is_json = True
+    except json.JSONDecodeError:
+        # If it's not JSON, leave the message as is
+        is_json = False
+
     lines = message.split('\n')
     max_length = max(len(line) for line in lines)
-    border = '*' * (max_length + 4)
+    border_length = max(max_length, fixed_width) + 4
+    border = '*' * border_length
     log_func(border)
     for line in lines:
-        log_func(f"* {line.center(max_length)} *")
+        if is_json:
+            log_func(f"* {line.ljust(border_length - 4)} *")
+        else:
+            log_func(f"* {line.center(border_length - 4)} *")
     log_func(border)

@@ -37,6 +37,45 @@ trading_hours = {
             "end": "17:05:00",
         },
     },
+    "USDJPY": {
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
+        "daily_swap": {
+            "start": "16:55:00",
+            "end": "17:05:00",
+        },
+    },
+    "USDCAD": {
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
+        "daily_swap": {
+            "start": "16:55:00",
+            "end": "17:05:00",
+        },
+    },
+    "GBPJPY": {
+        "market_hours": [
+            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+        ],
+        "daily_swap": {
+            "start": "16:55:00",
+            "end": "17:05:00",
+        },
+    },
     "US500": {
         "market_hours": [
             {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
@@ -71,7 +110,7 @@ trading_hours = {
     }
 }
 
-trading_symbols = ["US500", "US30", "EURUSD", "BTCUSDC"]
+trading_symbols = ["US500", "US30", "EURUSD", "USDJPY", "USDCAD", "GBPJPY", "BTCUSDC"]
 
 
 def is_within_trading_hours(symbol):
@@ -600,6 +639,8 @@ def calc_volume(login_manager, symbol):
     account_balance_data = price_data.fetch_account_balance(login_manager)
     account_balance = float(account_balance_data["balance"])
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
+    jpy_symbols = ["USDJPY", "GBPJPY"]
+    standard_symbols = ["EURUSD", "USDCAD"]
 
     # log.info(
     #     "market watch data for calc_volume: %s",
@@ -640,9 +681,13 @@ def calc_volume(login_manager, symbol):
         return None
 
     try:
-        if symbol == "EURUSD":
+        if symbol in standard_symbols:
             volume = (
                 (account_balance * risk_per_trade) / abs(bid_price - stop_loss) / 100000
+            )
+        elif symbol in jpy_symbols:
+            volume = (
+                (account_balance * risk_per_trade) / abs(bid_price - stop_loss) / 1000
             )
         else:
             volume = (account_balance * risk_per_trade) / abs(bid_price - stop_loss)
@@ -738,7 +783,23 @@ def run_strategy():
                 continue
 
             if symbol in open_position_symbols:
-                utils.print_boxed_message(f"Trade already open for {symbol}. Skipping.")
+                position_data = next(
+                    (pos for pos in open_positions if pos["symbol"] == symbol), None
+                )
+                if position_data:
+                    filtered_data = {
+                        "id": position_data.get("id"),
+                        "volume": position_data.get("volume"),
+                        "side": position_data.get("side"),
+                        "stopLoss": position_data.get("stopLoss"),
+                        "takeProfit": position_data.get("takeProfit"),
+                        "netProfit": position_data.get("netProfit"),
+                        "commission": position_data.get("commission"),
+                    }
+                    utils.print_boxed_message(
+                        f"Trade already open for {symbol}. Skipping...",
+                    )
+                    utils.print_boxed_message(json.dumps(filtered_data, indent=2))
             else:
                 trend = get_trend(login_manager, symbol)
                 direction = identify_trade_signal(login_manager, symbol, trend)
