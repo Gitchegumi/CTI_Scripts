@@ -370,10 +370,17 @@ def identify_trade_signal(login_manger, symbol, trend):
                             log.info("Trade signal identified: BUY")
                             return "BUY"
                         else:
-                            log.error(
-                                "Failed candlestick check for BUY: %s",
+                            log.info(
+                                "RSI: %s, MACD: %s, KC: %s, patterns: %s",
+                                rsi,
+                                macd_hist_current,
+                                kc_values,
                                 json.dumps(identified_patterns.tolist()),
                             )
+                            log.info(
+                                "Trade signal identified without candle pattern: BUY"
+                            )
+                            return "BUY"
                     else:
                         log.error(
                             "Failed Keltner check for BUY: price=%s, middle_band=%s",
@@ -436,10 +443,17 @@ def identify_trade_signal(login_manger, symbol, trend):
                             log.info("Trade signal identified: SELL")
                             return "SELL"
                         else:
-                            log.error(
-                                "Failed candlestick check for SELL: %s",
+                            log.info(
+                                "RSI: %s, MACD: %s, KC: %s, patterns: %s",
+                                rsi,
+                                macd_hist_current,
+                                kc_values,
                                 json.dumps(identified_patterns.tolist()),
                             )
+                            log.info(
+                                "Trade signal identified without candle pattern: SELL"
+                            )
+                            return "SELL"
                     else:
                         log.error(
                             "Failed Keltner check for SELL: price=%s, middle_band=%s",
@@ -687,7 +701,7 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
     try:
         response = session.post(url, headers=headers, data=payload, timeout=10)
         response.raise_for_status()
-        log.info("Successfully opened position for %s: %s", symbol, direction)
+        utils.print_boxed_message(f"{direction} trade successfully opened for {symbol}!!!")
     except requests.RequestException as e:
         log.error("Failed to open position for %s: %s", symbol, e)
 
