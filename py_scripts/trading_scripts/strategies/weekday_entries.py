@@ -21,97 +21,63 @@ from trading_scripts.api.atr_data import (  # pylint: disable=import-error
     calculate_atr_from_market_data,
 )
 
+forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY"]
+index_symbols = ["US500", "US30"]
+crypto_pairs = ["BTCUSDC"]
+
+trading_symbols = forex_pairs + index_symbols + crypto_pairs
+
 ny_timezone = timezone("America/New_York")
 
-trading_hours = {
-    "EURUSD": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "17:05:00",
-        },
-    },
-    "USDJPY": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "17:05:00",
-        },
-    },
-    "USDCAD": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "17:05:00",
-        },
-    },
-    "GBPJPY": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "17:05:00",
-        },
-    },
-    "US500": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "18:29:00",
-        },
-    },
-    "US30": {
-        "market_hours": [
-            {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-            {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
-            {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
-            {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
-            {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
-        ],
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "18:29:00",
-        },
-    },
-     "BTCUSDC": {
-        "daily_swap": {
-            "start": "16:55:00",
-            "end": "17:30:00",
-        },
-    }
+forex_market_hours = [
+    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+    {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
+    {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
+    {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
+    {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+]
+
+forex_daily_swap = {
+    "start": "16:55:00",
+    "end": "17:05:00",
 }
 
-trading_symbols = ["US500", "US30", "EURUSD", "USDJPY", "USDCAD", "GBPJPY", "BTCUSDC"]
+index_market_hours = [
+    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
+    {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
+    {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
+    {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
+    {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
+]
 
+index_daily_swap = {
+    "start": "16:55:00",
+    "end": "18:29:00",
+}
+
+crypto_daily_swap = {
+    "start": "16:55:00",
+    "end": "17:30:00",
+}
+
+trading_hours = {}
+
+for pair in forex_pairs:
+    trading_hours[pair] = {
+        "market_hours": forex_market_hours,
+        "daily_swap": forex_daily_swap,
+    }
+
+for index in index_symbols:
+    trading_hours[index] = {
+        "market_hours": index_market_hours,
+        "daily_swap": index_daily_swap,
+    }
+
+for pair in crypto_pairs:
+    trading_hours[pair] = {
+        "daily_swap": crypto_daily_swap,
+    }
 
 def is_within_trading_hours(symbol):
     """Check if the current time is within the trading hours for the given symbol.
