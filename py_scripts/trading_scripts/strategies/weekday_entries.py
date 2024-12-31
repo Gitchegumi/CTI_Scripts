@@ -21,7 +21,7 @@ from trading_scripts.api.atr_data import (  # pylint: disable=import-error
     calculate_atr_from_market_data,
 )
 
-forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY"]
+forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
 crypto_pairs = ["BTCUSDC"]
 
