@@ -576,10 +576,10 @@ def calc_take_profit(login_manager, symbol):
 
     atr = calculate_atr_from_market_data(login_manager, symbol)
     if side == "BUY":
-        take_profit = float(market_watch["bid"]) + (atr * 9)
+        take_profit = float(market_watch["bid"]) + (atr * 12)
         return take_profit
     if side == "SELL":
-        take_profit = float(market_watch["ask"]) - (atr * 9)
+        take_profit = float(market_watch["ask"]) - (atr * 12)
         return take_profit
     return None
 
