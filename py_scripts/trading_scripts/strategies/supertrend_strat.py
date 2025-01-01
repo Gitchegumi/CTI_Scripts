@@ -441,13 +441,14 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
         position_id = position["id"]
         volume = position["volume"]
         take_profit = position["takeProfit"]
+        decimal_places = abs(Decimal(str(stop_loss)).as_tuple().exponent)
 
         if side == "BUY" and new_stop_loss > stop_loss:
             log.info(
                 "Updating stop loss for %s: %s -> %s",
                 symbol,
                 stop_loss,
-                new_stop_loss,
+                round(new_stop_loss, decimal_places),
             )
             utils.edit_sl_position(
                 login_manager,
@@ -464,7 +465,7 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
                 "Updating stop loss for %s: %s -> %s",
                 symbol,
                 stop_loss,
-                new_stop_loss,
+                round(new_stop_loss, decimal_places),
             )
             utils.edit_sl_position(
                 login_manager,
