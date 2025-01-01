@@ -8,6 +8,7 @@ import os
 import logging as log
 from logging.handlers import RotatingFileHandler
 import time
+from datetime import datetime, timedelta, timezone
 import json
 import csv
 import requests
@@ -75,6 +76,32 @@ def log_trade(trade_details):
                 json.dumps(trade_details["candle_patterns"]),
             ]
         )
+
+def update_csv(trade_id, close_date_time, swap, profit, close_reason):
+    """Update the CSV file with the closed trade details.
+
+    Args:
+        trade_id (str): The ID of the trade to update.
+        close_date_time (str): The close date and time of the trade.
+        swap (float): The swap value of the trade.
+        profit (float): The profit of the trade.
+        close_reason (str): The reason for closing the trade.
+    """
+    updated_rows = []
+    with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['trade_id'] == trade_id:
+                row['close_date_time'] = close_date_time
+                row['swap'] = swap
+                row['profit'] = profit
+                row['close_reason'] = close_reason
+            updated_rows.append(row)
+
+    with open(CSV_FILE, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=reader.fieldnames)
+        writer.writeheader()
+        writer.writerows(updated_rows)
 
 
 def edit_sl_position(
@@ -308,6 +335,44 @@ def detect_candlestick_patterns(df):
     ].tolist()
     return identified_patterns
 
+def fetch_closed_positions(login_manager, countback = 30):
+    """Fetch the closed positions."""
+    to_time = datetime.now(timezone.utc)
+    from_time = to_time - timedelta(days=countback)
+
+    to_time_str = to_time.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    from_time_str = from_time.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+    # log.info(f"Fetching closed positions from {from_time_str} to {to_time_str}")
+
+    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/closed-positions"
+    payload = json.dumps({
+        "from": from_time_str,
+        "to": to_time_str,
+    })
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Auth-trading-api": login_manager.auth_trading_api,
+        "Cookie": f"co-auth={login_manager.cookie}",
+        "Origin": f"{PLATFORM_URL}",
+        "Referer": f"{PLATFORM_URL}/dashboard",
+    }
+
+    session = requests.Session()
+    session.headers.update(headers)
+
+    try:
+        response = session.post(url, data=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to get closed positions: {e}")
+        return None
+
 
 def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit):
     """Enter a trade for the given symbol with the specified parameters.
@@ -359,7 +424,12 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         if not order_id:
             log.error("Failed to open position for %s: No order ID returned.", symbol)
 
-        open_positions = fetch_open_positions_once(login_manager)
+        open_positions_response = fetch_open_positions_once(login_manager)
+        open_positions = (
+            open_positions_response.get("positions", [])
+            if open_positions_response
+            else []
+        )
         position_data = next(
             (pos for pos in open_positions if pos["id"] == order_id), None
         )
@@ -387,3 +457,21 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         )
     except requests.RequestException as e:
         log.error("Failed to open position for %s: %s", symbol, e)
+
+def check_spread(login_manager, symbol):
+    """Check the spread for the given symbol.
+
+    Args:
+        symbol (str): The trading symbol to check.
+
+    Returns:
+        float: The spread value for the symbol.
+    """
+    price_data = PriceData()
+    market_watch = price_data.fetch_market_watch(login_manager, symbol)
+    bid = market_watch.get("bid")
+    ask = market_watch.get("ask")
+    spread = abs(ask - bid)
+    return spread
+
+    

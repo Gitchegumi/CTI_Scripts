@@ -5,9 +5,11 @@ Returns:
     None
 """
 
+import os
 import logging as log
 import time
 import json
+import csv
 from decimal import Decimal
 from datetime import datetime
 import pandas as pd
@@ -22,8 +24,8 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
     Indicators,
 )
 
-forex_pairs = [] # ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
-index_symbols = [] # ["US500", "US30"]
+forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
+index_symbols = ["US500", "US30"]
 crypto_pairs = ["BTCUSDC"]
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
@@ -35,10 +37,10 @@ ny_timezone = timezone("America/New_York")
 
 forex_market_hours = [
     {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-    {"start": "Monday 19:00:00", "end": "Tuesday 16:30:00"},
-    {"start": "Tuesday 19:00:00", "end": "Wednesday 16:30:00"},
-    {"start": "Wednesday 19:00:00", "end": "Thursday 16:30:00"},
-    {"start": "Thursday 19:00:00", "end": "Friday 16:30:00"},
+    {"start": "Monday 18:00:00", "end": "Tuesday 16:30:00"},
+    {"start": "Tuesday 18:00:00", "end": "Wednesday 16:30:00"},
+    {"start": "Wednesday 18:00:00", "end": "Thursday 16:30:00"},
+    {"start": "Thursday 18:00:00", "end": "Friday 16:30:00"},
 ]
 
 forex_daily_swap = {
@@ -243,7 +245,7 @@ def identify_trade_signal(
                     return "BUY"
                 log.info(
                     "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
-is above RSId (%s). No BUY signal.",
+is below RSId (%s). No BUY signal.",
                     symbol,
                     round(rsi_k_last_5_min, decimal_places),
                     round(rsi_k, decimal_places),
@@ -306,7 +308,7 @@ is above RSId (%s). No BUY signal.",
                     return "SELL"
                 log.info(
                     "%s: Stochastic RSI k (%s) is below 70 or RSIk (%s) \
-is not below RSId (%s). No SELL signal.",
+is above RSId (%s). No SELL signal.",
                     symbol,
                     round(rsi_k_last_5_max, decimal_places),
                     round(rsi_k, decimal_places),
@@ -380,7 +382,7 @@ def calc_volume(
     df = pd.DataFrame(ohlc).set_index("t")
     current_price = df["c"].iloc[-1]
     atr = Indicators.calculate_atr(df, length=14)
-    current_atr = atr["ATR_14"].iloc[-1]
+    current_atr = atr.iloc[-1]
     stop_loss_pip_value = abs(current_price - stop_loss)
     min_stop_loss = current_atr * 1.5
 
@@ -442,6 +444,7 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
         volume = position["volume"]
         take_profit = position["takeProfit"]
         decimal_places = abs(Decimal(str(stop_loss)).as_tuple().exponent)
+        new_stop_loss = round(new_stop_loss, decimal_places)
 
         if side == "BUY" and new_stop_loss > stop_loss:
             log.info(
@@ -499,8 +502,34 @@ def run_strategy():
             if open_positions_response
             else []
         )
+        closed_positions_response = utils.fetch_closed_positions(login_manager)
+        closed_positions = (
+            closed_positions_response.get("operations", [])
+            if closed_positions_response
+            else []
+        )
         open_position_symbols = [pos["symbol"] for pos in open_positions]
         price_data = PriceData()
+
+        # check for csv file
+        if not os.path.exists(utils.CSV_FILE):
+            utils.initialize_csv()
+
+        # check csv file for recently closed trades
+        for position in closed_positions:
+            with open(utils.CSV_FILE, "r", encoding="utf-8") as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    if row["trade_id"] == position["id"] and not row["close_date_time"]:
+                        log.info("Trade without close time found: %s", row)
+                        utils.update_csv(
+                            trade_id=position["id"],
+                            close_date_time=position["time"],
+                            swap=position["swap"],
+                            profit=position["netProfit"],
+                            close_reason=position["closeReason"]
+                        )
+
 
         log.info("Open position symbols: %s", open_position_symbols)
         close_trades_during_swap(login_manager, open_positions)
@@ -527,12 +556,14 @@ def run_strategy():
                 if position_data:
                     filtered_data = {
                         "id": position_data.get("id"),
+                        "open time": position_data.get("openTime"),
                         "volume": position_data.get("volume"),
                         "side": position_data.get("side"),
                         "stopLoss": position_data.get("stopLoss"),
                         "takeProfit": position_data.get("takeProfit"),
                         "netProfit": position_data.get("netProfit"),
                         "commission": position_data.get("commission"),
+                        "swap": position_data.get("swap"),
                     }
                     utils.print_boxed_message(
                         f"Trade already open for {symbol}. Checking Stop Loss",
@@ -573,14 +604,20 @@ def run_strategy():
                     )
                     volume = calc_volume(login_manager, symbol, stop_loss)
                     if stop_loss and take_profit and volume:
-                        log.info("Entering trade for %s", symbol)
-                        utils.enter_trade(
-                            login_manager,
-                            symbol,
-                            direction,
-                            volume,
-                            stop_loss,
-                            take_profit,
+                        spread = utils.check_spread(login_manager, symbol)
+                        atr = Indicators.calculate_atr(df, length=14).iloc[-1]
+                        if spread < atr * 1.5:
+                            log.info("Entering trade for %s", symbol)
+                            utils.enter_trade(
+                                login_manager,
+                                symbol,
+                                direction,
+                                volume,
+                                stop_loss,
+                                take_profit,
+                            )
+                        log.info(
+                            "Spread too high for %s: %s, %s", symbol, spread, (atr * 1.5)
                         )
                 else:
                     utils.print_boxed_message(
