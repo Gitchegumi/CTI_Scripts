@@ -8,6 +8,7 @@ Returns:
 import logging as log
 import time
 import json
+from decimal import Decimal
 from datetime import datetime
 import pandas as pd
 import pandas_ta as ta  # pylint: disable=import-error, unused-import
@@ -193,97 +194,141 @@ def identify_trade_signal(
     )
     ema_50 = Indicators.calculate_ema(df, length=ema_length)
     aroon = Indicators.calculate_aroon(df, length=aroon_length)
+    stoch_rsi = Indicators.calculate_stoch_rsi(df)
     current_price = df["c"].iloc[-1]
+    decimal_places = abs(Decimal(str(current_price)).as_tuple().exponent)
 
-    if current_price > supertrend.iloc[-1]:
+    super_trend = round(
+        supertrend[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1],
+        decimal_places
+    )
+    ema_50_value = round(ema_50.iloc[-1], decimal_places)
+    aroon_osc = aroon[f"AROONOSC_{aroon_length}"].iloc[-1]
+    rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
+    rsi_k = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
+
+    if current_price > super_trend:
         log.info(
-            "%s: %s is above the SuperTrend: %s",
+            "%s: Price (%s) is above the SuperTrend (%s) looking for BUY signal.",
             symbol,
             current_price,
-            supertrend.iloc[-1]
+            super_trend
         )
-        if current_price > ema_50.iloc[-1]:
+        if current_price > ema_50_value:
             log.info(
-                "%s: %s is above the EMA50: %s",
+                "%s: Price (%s) is above the EMA50 (%s) checking Aroon Oscillator.",
                 symbol, current_price,
-                ema_50.iloc[-1]
+                ema_50_value
             )
-            if aroon["AROONOSC"].iloc[-1] > aroon_threshold:
+            if aroon_osc > aroon_threshold:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is above %s",
+                    "%s: Aroon Oscillator (%s) is above %s, checking RSI",
                         symbol,
-                        aroon["AROONOSC"].iloc[-1],
+                        aroon_osc,
                         aroon_threshold
                     )
-                return "BUY"
+                if rsi_k < 30 and rsi_d < rsi_k:
+                    log.info(
+                        "%s: Stochastic RSI k (%s) is below 30 is over RSI d (%s).",
+                        symbol,
+                        round(rsi_k, decimal_places),
+                        round(rsi_d, decimal_places)
+                    )
+                    log.info(
+                        "%s: Trade signal identified: BUY",
+                        symbol
+                    )
+                    return "BUY"
+                log.info(
+                    "%s: Stochastic RSIk (%s) is above 30 or RSIk \
+is above RSId (%s). No BUY signal.",
+                    symbol,
+                    round(rsi_k, decimal_places),
+                    round(rsi_d, decimal_places)
+                )
             else:
                 log.info(
-                    "%s: Aroon Oscillator is below %s. No trade.",
+                    "%s: Aroon Oscillator (%s) is below %s. No BUY signal.",
                     symbol,
+                    aroon_osc,
                     aroon_threshold
                 )
         else:
             log.info(
-                "%s: %s is below the EMA50: %s. No trade.",
+                "%s: Price (%s) is below the EMA50: %s. No BUY signal.",
                 symbol,
                 current_price,
-                ema_50.iloc[-1]
+                ema_50_value
             )
     else:
         log.info(
-            "%s: %s is below the SuperTrend: %s. No trade.",
+            "%s: Price (%s) is below the SuperTrend: %s. No BUY signal.",
             symbol,
             current_price,
-            supertrend.iloc[-1]
+            super_trend
         )
 
-    if current_price < supertrend.iloc[-1]:
+    if current_price < super_trend:
         log.info(
-            "%s: %s is below the SuperTrend: %s",
+            "%s: Price (%s) is below the SuperTrend (%s) looking for SELL signal.",
             symbol,
             current_price,
-            supertrend.iloc[-1]
+            super_trend
         )
-        if current_price < ema_50.iloc[-1]:
+        if current_price < ema_50_value:
             log.info(
-                "%s: %s is below the EMA50: %s",
+                "%s: Price (%s) is below the EMA50 (%s) checking Aroon Oscillator.",
                 symbol,
                 current_price,
-                ema_50.iloc[-1]
+                ema_50_value
             )
-            if aroon["AROONOSC"].iloc[-1] < -aroon_threshold:
+            if aroon_osc < -aroon_threshold:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is below %s",
+                    "%s: Aroon Oscillator (%s) is below %s, checking RSI",
                         symbol,
-                        aroon["AROONOSC"].iloc[-1],
+                        aroon_osc,
                         -aroon_threshold
                     )
-                return "SELL"
+                if rsi_k > 70 and rsi_d > rsi_k:
+                    log.info(
+                        "%s: Stochastic RSI k (%s) is above 70 is below RSI d (%s).",
+                        symbol,
+                        round(rsi_k, decimal_places),
+                        round(rsi_d, decimal_places)
+                    )
+                    log.info(
+                        "%s: Trade signal identified: SELL",
+                        symbol
+                    )
+                    return "SELL"
+                log.info(
+                    "%s: Stochastic RSI k (%s) is below 70 or RSIk \
+is not below RSId (%s). No SELL signal.",
+                    symbol,
+                    round(rsi_k, decimal_places),
+                    round(rsi_d, decimal_places)
+                )
             else:
                 log.info(
-                    "%s: Aroon Oscillator is above %s. No trade.",
+                    "%s: Aroon Oscillator (%s) is above %s. No SELL signal.",
                     symbol,
+                    aroon_osc,
                     -aroon_threshold
                 )
         else:
             log.info(
-                "%s: %s is above the EMA50: %s. No trade.",
+                "%s: Price (%s) is above the EMA50: %s. No SELL signal.",
                 symbol,
                 current_price,
-                ema_50.iloc[-1]
+                ema_50_value
             )
     else:
         log.info(
-            "%s: %s is above the SuperTrend: %s. No trade.",
+            "%s: Price (%s) is above the SuperTrend: %s. No SELL signal.",
             symbol,
             current_price,
-            supertrend.iloc[-1]
+            super_trend
         )
-
-    log.info(
-        "%s: No trade signal identified. Skipping.",
-        symbol
-    )
     return None
 
 def calc_take_profit(
@@ -471,7 +516,7 @@ def run_strategy():
                         df,
                         length=st_length,
                         multiplier=st_multiplier
-                    ).iloc[-1]
+                    )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
                     update_stop_loss(login_manager, open_positions, new_stop_loss)
 
             else:
@@ -487,29 +532,34 @@ def run_strategy():
                     ema_length,
                     aroon_length,
                     )
-                stop_loss = Indicators.calculate_super_trend(
-                    df,
-                    length=st_length,
-                    multiplier=st_multiplier
-                ).iloc[-1]
-                take_profit = calc_take_profit(
-                    direction,
-                    current_price,
-                    stop_loss
-                )
-                volume = calc_volume(login_manager, symbol, stop_loss)
-                if direction and stop_loss and take_profit and volume:
-                    log.info("Entering trade for %s", symbol)
-                    utils.enter_trade(
-                        login_manager,
-                        symbol,
+                if direction:
+                    log.info("Setting stop loss and take profit for %s", symbol)
+                    stop_loss = Indicators.calculate_super_trend(
+                        df,
+                        length=st_length,
+                        multiplier=st_multiplier
+                    )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
+                    take_profit = calc_take_profit(
                         direction,
-                        volume,
-                        stop_loss,
-                        take_profit,
+                        current_price,
+                        stop_loss
                     )
+                    volume = calc_volume(login_manager, symbol, stop_loss)
+                    if stop_loss and take_profit and volume:
+                        log.info("Entering trade for %s", symbol)
+                        utils.enter_trade(
+                            login_manager,
+                            symbol,
+                            direction,
+                            volume,
+                            stop_loss,
+                            take_profit,
+                        )
                 else:
                     utils.print_boxed_message(
                         f"No trade signal identified for {symbol}. Skipping."
                     )
         time.sleep(60)
+
+if __name__ == "__main__":
+    run_strategy()
