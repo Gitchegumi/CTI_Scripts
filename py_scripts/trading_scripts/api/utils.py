@@ -215,3 +215,45 @@ def print_boxed_message(message, log_func=log.info, fixed_width=75):
         else:
             log_func(f"* {line.center(border_length - 4)} *")
     log_func(border)
+
+def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit):
+    """Enter a trade for the given symbol with the specified parameters.
+
+    Args:
+        symbol (str): The trading symbol.
+        direction (str): The trade direction ("BUY" or "SELL").
+        volume (float): The volume to trade.
+        stop_loss (float): The stop loss value.
+        take_profit (float): The take profit value.
+    """
+    # Logic to enter trade for the given symbol
+    url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/open"
+    payload = json.dumps(
+        {
+            "instrument": symbol,
+            "orderSide": direction.upper(),
+            "volume": volume,
+            "slPrice": stop_loss,
+            "tpPrice": take_profit,
+            "isMobile": False,
+        }
+    )
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Auth-trading-api": login_manager.auth_trading_api,
+        "Cookie": f"co-auth={login_manager.cookie}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    log.info(json.dumps(payload, indent=2))
+
+    session = requests.Session()
+    session.headers.update(headers)
+    try:
+        response = session.post(url, headers=headers, data=payload, timeout=10)
+        response.raise_for_status()
+        print_boxed_message(f"{direction} trade successfully opened for {symbol}!!!")
+        print_boxed_message(json.dumps(response.json(), indent=2))
+    except requests.RequestException as e:
+        log.error("Failed to open position for %s: %s", symbol, e)

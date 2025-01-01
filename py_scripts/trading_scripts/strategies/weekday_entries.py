@@ -1,4 +1,5 @@
-"""A module for implementing a trading strategy based on weekday entries.
+"""A module for implementing a trading strategy based on Keltner Channels,
+ATR, Stochastic RSI, and MACD indicators.
 
 Returns:
     None
@@ -8,7 +9,6 @@ import logging as log
 import time
 import json
 from datetime import datetime
-import requests
 import pandas as pd
 import pandas_ta as ta  # pylint: disable=import-error, unused-import
 from pytz import timezone
@@ -17,8 +17,8 @@ from trading_scripts.api.login import (  # pylint: disable=import-error
     LoginManager,
 )
 from trading_scripts.api.price_data import PriceData  # pylint: disable=import-error
-from trading_scripts.api.atr_data import (  # pylint: disable=import-error
-    calculate_atr_from_market_data,
+from trading_scripts.api.indicators import (  # pylint: disable=import-error
+    Indicators,
 )
 
 forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
@@ -234,67 +234,6 @@ def get_trend(login_manager, symbol):
     return None
 
 
-def calc_rsi(login_manager, symbol):
-    """Calculate the RSI values for the specified symbol.
-
-    Args:
-        symbol (str): The trading symbol.
-    """
-    log.info("Calculating RSI for %s", symbol)
-    price_data = PriceData()
-    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("t")
-    stoch_rsi = df.ta.stochrsi(high="h", low="l", close="c")
-    return stoch_rsi
-
-
-def calc_macd(login_manager, symbol):
-    """Calculate the MACD values for the specified symbol.
-
-    Args:
-        symbol (str): The trading symbol.
-    """
-    log.info("Calculating MACD for %s", symbol)
-    price_data = PriceData()
-    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("t")
-    macd = df.ta.macd(close="c", fast=12, slow=26, signal=9)
-    return macd
-
-
-def calc_keltner_channel(login_manager, symbol):
-    """Calculate the Keltner Channel values for the specified symbol.
-
-    Args:
-        symbol (str): The trading symbol.
-    """
-    # Calculate Keltner Channel values for the specified symbol
-    log.info("Calculating Keltner Channel for %s", symbol)
-    price_data = PriceData()
-    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
-    df = pd.DataFrame(ohlc).set_index("t")
-    kc = df.ta.kc(close="c", high="h", low="l", length=20, scalar=1.5, mamode="ema")
-
-    # log.info("Keltner Channel values: %s", kc.tail())
-
-    df["KC_Lower"] = kc["KCLe_20_1.5"]
-    df["KC_Middle"] = kc["KCBe_20_1.5"]
-    df["KC_Upper"] = kc["KCUe_20_1.5"]
-    result = {
-        "price": df["c"].iloc[-1],
-        "high": df["h"].iloc[-1],
-        "last_5_high": df["h"].iloc[-6:-1].max(),
-        "low": df["l"].iloc[-1],
-        "last_5_low": df["l"].iloc[-6:-1].min(),
-        "lower_band": df["KC_Lower"].iloc[-1],
-        "middle_band": df["KC_Middle"].iloc[-1],
-        "upper_band": df["KC_Upper"].iloc[-1],
-        "last_5_middle_min": df["KC_Middle"].iloc[-6:-1].min(),
-        "last_5_middle_max": df["KC_Middle"].iloc[-6:-1].max(),
-    }
-    return result
-
-
 def identify_trade_signal(login_manger, symbol, trend):
     """Identify the trade signal based on RSI, MACD, and Keltner Channel.
 
@@ -310,13 +249,7 @@ def identify_trade_signal(login_manger, symbol, trend):
     price_data = PriceData()
     ohlc = price_data.fetch_market_data(login_manger, symbol, 5)
     df = pd.DataFrame(ohlc).set_index("t")
-    candlestick = df.ta.cdl_pattern(
-        open="o",
-        high="h",
-        low="l",
-        close="c",
-        name="all",
-    )
+    candlestick = Indicators.calculate_candlestick_patterns(df)
     recent_candles = candlestick.iloc[-5:].dropna(how="all")
     recent_candle_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
     recent_candle_patterns = recent_candle_patterns.loc[
@@ -325,15 +258,27 @@ def identify_trade_signal(login_manger, symbol, trend):
     identified_patterns = recent_candle_patterns.columns[
         (recent_candle_patterns != 0).any(axis=0)
     ]
-    log.info("Current candle patterns: %s", json.dumps(identified_patterns.tolist()))
+    log.info("Current candle patterns: %s", json.dumps(identified_patterns.tolist(), indent=2))
 
-    stoch_rsi = calc_rsi(login_manger, symbol)
+    stoch_rsi = Indicators.calculate_stoch_rsi(df)
     rsi = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
     rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
     rsi_prev_3_max = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:].max()
     rsi_prev_3_min = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-4:].min()
-    macd = calc_macd(login_manger, symbol)
-    kc_values = calc_keltner_channel(login_manger, symbol)
+    macd = Indicators.calculate_macd(df)
+    kc = Indicators.calculate_keltner_channels(df)
+    kc_values = {
+        "price": df["c"].iloc[-1],
+        "high": df["h"].iloc[-1],
+        "last_5_high": df["h"].iloc[-5:].max(),
+        "low": df["l"].iloc[-1],
+        "last_5_low": df["l"].iloc[-5:].min(),
+        "lower_band": kc["KCLe_20_1.5"].iloc[-1],
+        "middle_band": kc["KCBe_20_1.5"].iloc[-1],
+        "upper_band": kc["KCUe_20_1.5"].iloc[-1],
+        "last_5_middle_min": kc["KCBe_20_1.5"].iloc[-5:].min(),
+        "last_5_middle_max": kc["KCBe_20_1.5"].iloc[-5:].max(),
+    }
     # log.info("kc_values: %s", kc_values)
     # kc_middle_prev_5 = kc_values["middle_band"].iloc[-6:-1]
     macd_hist_current = macd["MACDh_12_26_9"].iloc[-1]
@@ -488,7 +433,7 @@ def identify_trade_signal(login_manger, symbol, trend):
     return None
 
 
-def calc_stop_loss(login_manager, symbol):
+def calc_stop_loss(login_manager, symbol, side):
     """Calculate the stop loss for the given symbol.
 
     Args:
@@ -499,8 +444,6 @@ def calc_stop_loss(login_manager, symbol):
     """
     log.info("Calculating stop loss for %s", symbol)
     price_data = PriceData()
-    trend = get_trend(login_manager, symbol)
-    side = identify_trade_signal(login_manager, symbol, trend)
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
     # log.info(
@@ -530,7 +473,11 @@ def calc_stop_loss(login_manager, symbol):
         )
         return None
 
-    atr = calculate_atr_from_market_data(login_manager, symbol)
+    atr = Indicators.calculate_atr(
+        pd.DataFrame(
+            price_data.fetch_market_data(login_manager, symbol)
+        ).set_index("t")
+    )
     if side == "BUY":
         stop_loss = float(market_watch["bid"]) - (atr * 3)
         return stop_loss
@@ -540,7 +487,7 @@ def calc_stop_loss(login_manager, symbol):
     return None
 
 
-def calc_take_profit(login_manager, symbol):
+def calc_take_profit(login_manager, symbol, side):
     """Calculate the take profit for the given symbol.
 
     Args:
@@ -551,8 +498,6 @@ def calc_take_profit(login_manager, symbol):
     """
     log.info("Calculating take profit for %s", symbol)
     price_data = PriceData()
-    trend = get_trend(login_manager, symbol)
-    side = identify_trade_signal(login_manager, symbol, trend)
     market_watch_data = price_data.fetch_market_watch(login_manager, symbol)
 
     # log.info(
@@ -582,7 +527,11 @@ def calc_take_profit(login_manager, symbol):
         )
         return None
 
-    atr = calculate_atr_from_market_data(login_manager, symbol)
+    atr = Indicators.calculate_atr(
+        pd.DataFrame(
+            price_data.fetch_market_data(login_manager, symbol)
+        ).set_index("t")
+    )
     if side == "BUY":
         take_profit = float(market_watch["bid"]) + (atr * 12)
         return take_profit
@@ -592,7 +541,7 @@ def calc_take_profit(login_manager, symbol):
     return None
 
 
-def calc_volume(login_manager, symbol):
+def calc_volume(login_manager, symbol, stop_loss):
     """Calculate the volume for the given symbol based on account balance.
 
     Args:
@@ -636,7 +585,6 @@ def calc_volume(login_manager, symbol):
         )
         return None
 
-    stop_loss = calc_stop_loss(login_manager, symbol)
     if stop_loss is None:
         log.error("Stop loss calculation failed for %s", symbol)
         return None
@@ -676,50 +624,6 @@ def calc_volume(login_manager, symbol):
     #         ((account_balance * risk_per_trade) / abs(bid_price - stop_loss)),
     #     )
     return round(volume, 2)
-
-
-def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit):
-    """Enter a trade for the given symbol with the specified parameters.
-
-    Args:
-        symbol (str): The trading symbol.
-        direction (str): The trade direction ("BUY" or "SELL").
-        volume (float): The volume to trade.
-        stop_loss (float): The stop loss value.
-        take_profit (float): The take profit value.
-    """
-    # Logic to enter trade for the given symbol
-    url = f"{utils.PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/open"
-    payload = json.dumps(
-        {
-            "instrument": symbol,
-            "orderSide": direction.upper(),
-            "volume": volume,
-            "slPrice": stop_loss,
-            "tpPrice": take_profit,
-            "isMobile": False,
-        }
-    )
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "Auth-trading-api": login_manager.auth_trading_api,
-        "Cookie": f"co-auth={login_manager.cookie}",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0",
-    }
-
-    log.info(json.dumps(payload, indent=2))
-
-    session = requests.Session()
-    session.headers.update(headers)
-    try:
-        response = session.post(url, headers=headers, data=payload, timeout=10)
-        response.raise_for_status()
-        utils.print_boxed_message(f"{direction} trade successfully opened for {symbol}!!!")
-        utils.print_boxed_message(json.dumps(response.json(), indent=2))
-    except requests.RequestException as e:
-        log.error("Failed to open position for %s: %s", symbol, e)
-
 
 def run_strategy():
     """Run the trading strategy based on weekday entries."""
@@ -776,11 +680,11 @@ def run_strategy():
                 trend = get_trend(login_manager, symbol)
                 direction = identify_trade_signal(login_manager, symbol, trend)
                 if direction:
-                    stop_loss = calc_stop_loss(login_manager, symbol)
-                    take_profit = calc_take_profit(login_manager, symbol)
-                    volume = calc_volume(login_manager, symbol)
+                    stop_loss = calc_stop_loss(login_manager, symbol, direction)
+                    take_profit = calc_take_profit(login_manager, symbol, direction)
+                    volume = calc_volume(login_manager, symbol, stop_loss)
                     log.info("Entering trade for %s", symbol)
-                    enter_trade(
+                    utils.enter_trade(
                         login_manager,
                         symbol,
                         direction,

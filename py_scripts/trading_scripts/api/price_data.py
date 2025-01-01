@@ -12,8 +12,8 @@ import requests
 import pandas as pd  # pylint: disable=import-error
 
 
-retries = 3
-retry_delay = 5
+RETRIES = 3
+RETRY_DELAY = 5
 
 class PriceData:
     """A class for fetching and updating market data."""
@@ -46,7 +46,7 @@ class PriceData:
             "countback": countback,
         }
 
-        for attempt in range(retries):
+        for attempt in range(RETRIES):
             try:
                 response = requests.get(url, headers=headers, params=params, timeout=10)
                 response.raise_for_status()
@@ -61,13 +61,13 @@ class PriceData:
                         "Attempt %d: Received %s error. Retrying in %s seconds...",
                         attempt + 1,
                         response.status_code,
-                        retry_delay
+                        RETRY_DELAY
                     )
-                    time.sleep(retry_delay)
+                    time.sleep(RETRY_DELAY)
                 else:
                     log.error("Failed to fetch market data: %s", e)
                     return {}
-        log.error("Failed to fetch market data after %s retries", retries)
+        log.error("Failed to fetch market data after %s RETRIES", RETRIES)
         return {}
 
     def update_swing_values(self, login_manager, symbol, resolution="5", countback=1):
