@@ -379,25 +379,38 @@ def calc_volume(
     ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
     df = pd.DataFrame(ohlc).set_index("t")
     current_price = df["c"].iloc[-1]
+    atr = Indicators.calculate_atr(df, length=14)
+    current_atr = atr["ATR_14"].iloc[-1]
+    stop_loss_pip_value = abs(current_price - stop_loss)
+    min_stop_loss = current_atr * 1.5
 
     if stop_loss is None:
         log.error("Stop loss calculation failed for %s", symbol)
         return None
 
+    if stop_loss_pip_value < min_stop_loss:
+        log.error(
+            "Stop loss too close to current price for %s: %s, %s",
+            symbol,
+            stop_loss_pip_value,
+            min_stop_loss,
+        )
+        return None
+
     try:
         if symbol in standard_symbols:
             volume = (
-                (account_balance * risk_per_trade) / abs(current_price - stop_loss) / 100000
+                (account_balance * risk_per_trade) / stop_loss_pip_value / 100000
             )
         elif symbol in jpy_symbols:
             volume = (
-                (account_balance * risk_per_trade) / abs(current_price - stop_loss) / 1000
+                (account_balance * risk_per_trade) / stop_loss_pip_value / 1000
             )
         else:
-            volume = (account_balance * risk_per_trade) / abs(current_price - stop_loss)
+            volume = (account_balance * risk_per_trade) / stop_loss_pip_value
             if symbol in index_symbols and volume < 0.1:
                 volume = 0.1
-                if ((volume * abs(current_price - stop_loss)) / account_balance) < 0.0075:
+                if ((volume * stop_loss_pip_value) / account_balance) < 0.0075:
                     return round(volume, 1)
                 else:
                     log.error("Risk per trade too high for %s: %s", symbol, volume)
@@ -554,7 +567,8 @@ def run_strategy():
                     take_profit = calc_take_profit(
                         direction,
                         current_price,
-                        stop_loss
+                        stop_loss,
+                        2.5
                     )
                     volume = calc_volume(login_manager, symbol, stop_loss)
                     if stop_loss and take_profit and volume:
