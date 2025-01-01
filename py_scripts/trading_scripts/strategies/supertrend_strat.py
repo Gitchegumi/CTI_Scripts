@@ -60,8 +60,8 @@ index_daily_swap = {
 }
 
 crypto_daily_swap = {
-    "start": "16:55:00",
-    "end": "17:30:00",
+    "start": "15:55:00",
+    "end": "16:30:00",
 }
 
 trading_hours = {}

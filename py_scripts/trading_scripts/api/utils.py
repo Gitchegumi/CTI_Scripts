@@ -3,26 +3,90 @@
 Returns:
     None
 """
+
+import os
 import logging as log
 from logging.handlers import RotatingFileHandler
 import time
 import json
+import csv
 import requests
-from trading_scripts.api.open_positions import OpenPositionsAPI # pylint: disable=import-error
+import pandas as pd
+import pandas_ta as ta  # pylint: disable=unused-import
+from trading_scripts.api.open_positions import (
+    OpenPositionsAPI,
+)
+from trading_scripts.api.indicators import Indicators
+from trading_scripts.api.price_data import PriceData
 
 
 PLATFORM_URL = "https://platform.citytradersimperium.com"
+CSV_FILE = "./logs/trade_log.csv"
+
+
+def initialize_csv():
+    """Initialize the CSV file for logging trade details."""
+    if not os.path.exists(CSV_FILE):
+        with open(CSV_FILE, mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "trade_id",
+                    "symbol",
+                    "open_date_time",
+                    "volume",
+                    "side",
+                    "open_price",
+                    "initial_stop_loss",
+                    "take_profit",
+                    "close_date_time",
+                    "swap",
+                    "commission",
+                    "profit",
+                    "close_reason",
+                    "candle_patterns",
+                ]
+            )
+
+
+def log_trade(trade_details):
+    """Log trade details to a CSV file.
+
+    Args:
+        trade_details (JSON): The trade details to log.
+    """
+    with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(
+            [
+                trade_details["trade_id"],
+                trade_details["symbol"],
+                trade_details["open_date_time"],
+                trade_details["volume"],
+                trade_details["side"],
+                trade_details["open_price"],
+                trade_details["initial_stop_loss"],
+                trade_details["take_profit"],
+                trade_details["close_date_time"],
+                trade_details["swap"],
+                trade_details["commission"],
+                trade_details["profit"],
+                trade_details["close_reason"],
+                json.dumps(trade_details["candle_patterns"]),
+            ]
+        )
+
 
 def edit_sl_position(
-        login_manager,
-        position_id,
-        instrument,
-        order_side,
-        volume,
-        sl_price,
-        tp_price=0,
-        trailing_distance=0
-    ):
+    login_manager,
+    position_id,
+    instrument,
+    order_side,
+    volume,
+    sl_price,
+    tp_price=0,
+    trailing_distance=0,
+):
     """Edit the stop loss position via the Match Trader API.
 
     Args:
@@ -64,7 +128,8 @@ def edit_sl_position(
     except requests.RequestException as e:
         log.error("Failed to update SL for position %s: %s", position_id, e)
         return False
-    
+
+
 def close_position(login_manager, position_id, symbol, side, volume):
     """Close a position via the Match Trader API.
 
@@ -86,12 +151,14 @@ def close_position(login_manager, position_id, symbol, side, volume):
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
     }
-    payload = json.dumps({
-        "positionId": position_id,
-        "instrument": symbol,
-        "orderSide": side,
-        "volume": volume,
-    })
+    payload = json.dumps(
+        {
+            "positionId": position_id,
+            "instrument": symbol,
+            "orderSide": side,
+            "volume": volume,
+        }
+    )
     try:
         response = requests.post(url, headers=headers, data=payload, timeout=10)
         response.raise_for_status()
@@ -101,6 +168,7 @@ def close_position(login_manager, position_id, symbol, side, volume):
         log.error("Failed to close position %s: %s", position_id, e)
         return False
 
+
 def clean_positions(positions):
     """Remove unnecessary nested 'positions' field."""
     for position in positions:
@@ -108,9 +176,9 @@ def clean_positions(positions):
             del position["positions"]
     return positions
 
+
 def setup_logging():
-    """Configure logging for the application.
-    """
+    """Configure logging for the application."""
     log_handler = RotatingFileHandler(
         "./logs/debug.log", maxBytes=1 * 1024 * 1024, backupCount=3
     )  # 1MB per file, 3 backups
@@ -120,6 +188,7 @@ def setup_logging():
         level=log.INFO,
         handlers=[log_handler, log.StreamHandler()],
     )
+
 
 def fetch_open_positions_loop(login_manager, check_interval=1):
     """Fetch open positions periodically."""
@@ -158,6 +227,7 @@ def fetch_open_positions_loop(login_manager, check_interval=1):
             log.error("An error occurred while processing positions: %s", e)
             break
 
+
 def fetch_open_positions_once(login_manager):
     """Fetch open positions periodically."""
     # log.info("Fetching Open Positions.")
@@ -167,7 +237,7 @@ def fetch_open_positions_once(login_manager):
         positions = open_positions_api.get_open_positions()
 
         if positions:
-        #     positions = clean_positions(positions.get("positions", []))
+            #     positions = clean_positions(positions.get("positions", []))
             # filtered_positions = [
             #     {
             #         "symbol": pos["symbol"],
@@ -189,6 +259,7 @@ def fetch_open_positions_once(login_manager):
         log.error("An error occurred while processing positions: %s", e)
         return []
 
+
 def print_boxed_message(message, log_func=log.info, fixed_width=75):
     """Print a message in a box.
 
@@ -204,10 +275,10 @@ def print_boxed_message(message, log_func=log.info, fixed_width=75):
         # If it's not JSON, leave the message as is
         is_json = False
 
-    lines = message.split('\n')
+    lines = message.split("\n")
     max_length = max(len(line) for line in lines)
     border_length = max(max_length, fixed_width) + 4
-    border = '*' * border_length
+    border = "*" * border_length
     log_func(border)
     for line in lines:
         if is_json:
@@ -215,6 +286,28 @@ def print_boxed_message(message, log_func=log.info, fixed_width=75):
         else:
             log_func(f"* {line.center(border_length - 4)} *")
     log_func(border)
+
+
+def detect_candlestick_patterns(df):
+    """Detect candlestick patterns from the latest market data.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing OHLC data.
+
+    Returns:
+        list: List of detected candlestick patterns.
+    """
+    candlestick = Indicators.calculate_candlestick_patterns(df)
+    recent_candles = candlestick.iloc[-5:].dropna(how="all")
+    recent_candle_patterns = recent_candles[(recent_candles != 0).any(axis=1)]
+    recent_candle_patterns = recent_candle_patterns.loc[
+        :, (recent_candle_patterns != 0).any(axis=0)
+    ]
+    identified_patterns = recent_candle_patterns.columns[
+        (recent_candle_patterns != 0).any(axis=0)
+    ].tolist()
+    return identified_patterns
+
 
 def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit):
     """Enter a trade for the given symbol with the specified parameters.
@@ -226,6 +319,13 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         stop_loss (float): The stop loss value.
         take_profit (float): The take profit value.
     """
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(
+        login_manager, symbol, resolution="5", countback=100
+    )
+    df = pd.DataFrame(ohlc).set_index("t")
+    candle_patterns = detect_candlestick_patterns(df)
+
     # Logic to enter trade for the given symbol
     url = f"{PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/position/open"
     payload = json.dumps(
@@ -246,7 +346,7 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         "User-Agent": "Mozilla/5.0",
     }
 
-    log.info(json.dumps(payload, indent=2))
+    print_boxed_message(json.dumps(payload, indent=2))
 
     session = requests.Session()
     session.headers.update(headers)
@@ -255,5 +355,35 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         response.raise_for_status()
         print_boxed_message(f"{direction} trade successfully opened for {symbol}!!!")
         print_boxed_message(json.dumps(response.json(), indent=2))
+        order_id = response.json().get("orderId")
+        if not order_id:
+            log.error("Failed to open position for %s: No order ID returned.", symbol)
+
+        open_positions = fetch_open_positions_once(login_manager)
+        position_data = next(
+            (pos for pos in open_positions if pos["id"] == order_id), None
+        )
+        if not position_data:
+            log.error("Could not find position data for orderId: %s", order_id)
+            return
+
+        log_trade(
+            {
+                "trade_id": order_id,
+                "symbol": symbol,
+                "open_date_time": position_data["openTime"],
+                "volume": volume,
+                "side": direction,
+                "open_price": position_data["openPrice"],
+                "initial_stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "close_date_time": None,
+                "swap": None,
+                "commission": position_data["commission"],
+                "profit": None,
+                "close_reason": None,
+                "candle_patterns": candle_patterns,
+            }
+        )
     except requests.RequestException as e:
         log.error("Failed to open position for %s: %s", symbol, e)
