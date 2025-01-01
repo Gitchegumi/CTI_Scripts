@@ -469,14 +469,14 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
 
 def run_strategy():
     """Run the trading strategy based on weekday entries."""
-    login_manager = LoginManager()
-    open_positions = []
-    utils.setup_logging()
-    st_length=50
-    st_multiplier=3.0
-    ema_length=50
-    aroon_length=50
     while True:
+        st_length=50
+        st_multiplier=3.0
+        ema_length=50
+        aroon_length=50
+        login_manager = LoginManager()
+        open_positions = []
+        utils.setup_logging()
         utils.print_boxed_message("Looking for trade opportunities")
         login_manager.login()
         open_positions_response = utils.fetch_open_positions_once(login_manager)
