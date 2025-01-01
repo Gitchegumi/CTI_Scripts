@@ -222,7 +222,7 @@ def identify_trade_signal(
                 symbol, current_price,
                 ema_50_value
             )
-            if aroon_osc > aroon_threshold:
+            if aroon_osc >= aroon_threshold:
                 log.info(
                     "%s: Aroon Oscillator (%s) is above %s, checking RSI",
                         symbol,
@@ -285,7 +285,7 @@ is above RSId (%s). No BUY signal.",
                 current_price,
                 ema_50_value
             )
-            if aroon_osc < -aroon_threshold:
+            if aroon_osc <= -aroon_threshold:
                 log.info(
                     "%s: Aroon Oscillator (%s) is below %s, checking RSI",
                         symbol,
@@ -459,6 +459,10 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
                 volume,
                 new_stop_loss,
                 take_profit,
+            )
+        else:
+            utils.print_boxed_message(
+                f"Stop loss for {symbol} is already set. Skipping."
             )
 
 def run_strategy():
