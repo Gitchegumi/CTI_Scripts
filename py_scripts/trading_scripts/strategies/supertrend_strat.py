@@ -428,6 +428,7 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
         position_id = position["id"]
         volume = position["volume"]
         take_profit = position["takeProfit"]
+
         if side == "BUY" and new_stop_loss > stop_loss:
             log.info(
                 "Updating stop loss for %s: %s -> %s",
@@ -444,6 +445,7 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
                 new_stop_loss,
                 take_profit,
             )
+
         elif side == "SELL" and new_stop_loss < stop_loss:
             log.info(
                 "Updating stop loss for %s: %s -> %s",
@@ -489,6 +491,8 @@ def run_strategy():
         log.info("Open position symbols: %s", open_position_symbols)
         close_trades_during_swap(login_manager, open_positions)
         for symbol in trading_symbols:
+            ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
+            df = pd.DataFrame(ohlc).set_index("t")
             utils.print_boxed_message(f"Checking trade opportunities for {symbol}")
             if not is_within_trading_hours(symbol):
                 log.info(
