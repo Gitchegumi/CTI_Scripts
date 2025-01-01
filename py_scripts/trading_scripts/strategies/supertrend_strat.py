@@ -206,6 +206,8 @@ def identify_trade_signal(
     aroon_osc = aroon[f"AROONOSC_{aroon_length}"].iloc[-1]
     rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
     rsi_k = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
+    rsi_k_last_5_max = max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:])
+    rsi_k_last_5_min = min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:])
 
     if current_price > super_trend:
         log.info(
@@ -227,11 +229,11 @@ def identify_trade_signal(
                         aroon_osc,
                         aroon_threshold
                     )
-                if rsi_k < 30 and rsi_d < rsi_k:
+                if rsi_k_last_5_min < 30 and rsi_d < rsi_k:
                     log.info(
                         "%s: Stochastic RSI k (%s) is below 30 is over RSI d (%s).",
                         symbol,
-                        round(rsi_k, decimal_places),
+                        round(rsi_k_last_5_min, decimal_places),
                         round(rsi_d, decimal_places)
                     )
                     log.info(
@@ -240,9 +242,10 @@ def identify_trade_signal(
                     )
                     return "BUY"
                 log.info(
-                    "%s: Stochastic RSIk (%s) is above 30 or RSIk \
+                    "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
 is above RSId (%s). No BUY signal.",
                     symbol,
+                    round(rsi_k_last_5_min, decimal_places),
                     round(rsi_k, decimal_places),
                     round(rsi_d, decimal_places)
                 )
@@ -289,11 +292,11 @@ is above RSId (%s). No BUY signal.",
                         aroon_osc,
                         -aroon_threshold
                     )
-                if rsi_k > 70 and rsi_d > rsi_k:
+                if rsi_k_last_5_max > 70 and rsi_d > rsi_k:
                     log.info(
-                        "%s: Stochastic RSI k (%s) is above 70 is below RSI d (%s).",
+                        "%s: Stochastic RSI k (%s) is above 70 and is below RSI d (%s).",
                         symbol,
-                        round(rsi_k, decimal_places),
+                        round(rsi_k_last_5_max, decimal_places),
                         round(rsi_d, decimal_places)
                     )
                     log.info(
@@ -302,9 +305,10 @@ is above RSId (%s). No BUY signal.",
                     )
                     return "SELL"
                 log.info(
-                    "%s: Stochastic RSI k (%s) is below 70 or RSIk \
+                    "%s: Stochastic RSI k (%s) is below 70 or RSIk (%s) \
 is not below RSId (%s). No SELL signal.",
                     symbol,
+                    round(rsi_k_last_5_max, decimal_places),
                     round(rsi_k, decimal_places),
                     round(rsi_d, decimal_places)
                 )
