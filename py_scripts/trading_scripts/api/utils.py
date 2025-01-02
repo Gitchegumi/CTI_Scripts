@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 import json
 import csv
+from decimal import Decimal
 import requests
 import pandas as pd
 import pandas_ta as ta  # pylint: disable=unused-import
@@ -435,7 +436,9 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         )
         if not position_data:
             log.error("Could not find position data for orderId: %s", order_id)
-            return
+            return None
+        
+        decimal_places = abs(Decimal(str(position_data["openPrice"])).as_tuple().exponent)
 
         log_trade(
             {
@@ -445,8 +448,8 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
                 "volume": volume,
                 "side": direction,
                 "open_price": position_data["openPrice"],
-                "initial_stop_loss": stop_loss,
-                "take_profit": take_profit,
+                "initial_stop_loss": round(stop_loss, decimal_places),
+                "take_profit": round(take_profit, decimal_places),
                 "close_date_time": None,
                 "swap": None,
                 "commission": position_data["commission"],
@@ -469,8 +472,8 @@ def check_spread(login_manager, symbol):
     """
     price_data = PriceData()
     market_watch = price_data.fetch_market_watch(login_manager, symbol)
-    bid = market_watch.get("bid")
-    ask = market_watch.get("ask")
+    bid = float(market_watch[0]["bid"])
+    ask = float(market_watch[0]["ask"])
     spread = abs(ask - bid)
     return spread
 

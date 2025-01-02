@@ -97,7 +97,7 @@ def is_within_trading_hours(symbol):
     now = datetime.now(ny_timezone)
     log.info("Current time: %s", now)
     symbol_hours = trading_hours.get(symbol, {}).get("market_hours")
-    log.info("Symbol hours for %s: %s", symbol, json.dumps(symbol_hours, indent=2))
+    # log.info("Symbol hours for %s: %s", symbol, json.dumps(symbol_hours, indent=2))
 
     if not symbol_hours:
         return True  # No specific trading hours, assume always open
@@ -521,7 +521,7 @@ def run_strategy():
                 reader = csv.DictReader(file)
                 for row in reader:
                     if row["trade_id"] == position["id"] and not row["close_date_time"]:
-                        log.info("Trade without close time found: %s", row)
+                        log.info("Trade without close time found: %s", row["trade_id"])
                         utils.update_csv(
                             trade_id=position["id"],
                             close_date_time=position["time"],
@@ -580,33 +580,33 @@ def run_strategy():
                 ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
                 df = pd.DataFrame(ohlc).set_index("t")
                 current_price = df["c"].iloc[-1]
-                direction = identify_trade_signal(
-                    df,
-                    symbol,
-                    current_price,
-                    st_length,
-                    st_multiplier,
-                    ema_length,
-                    aroon_length,
-                    )
-                if direction:
-                    log.info("Setting stop loss and take profit for %s", symbol)
-                    stop_loss = Indicators.calculate_super_trend(
+                spread = utils.check_spread(login_manager, symbol)
+                atr = Indicators.calculate_atr(df, length=14).iloc[-1]
+                if spread < atr * 1.5:
+                    direction = identify_trade_signal(
                         df,
-                        length=st_length,
-                        multiplier=st_multiplier
-                    )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
-                    take_profit = calc_take_profit(
-                        direction,
+                        symbol,
                         current_price,
-                        stop_loss,
-                        2.5
-                    )
-                    volume = calc_volume(login_manager, symbol, stop_loss)
-                    if stop_loss and take_profit and volume:
-                        spread = utils.check_spread(login_manager, symbol)
-                        atr = Indicators.calculate_atr(df, length=14).iloc[-1]
-                        if spread < atr * 1.5:
+                        st_length,
+                        st_multiplier,
+                        ema_length,
+                        aroon_length,
+                        )
+                    if direction:
+                        log.info("Setting stop loss and take profit for %s", symbol)
+                        stop_loss = Indicators.calculate_super_trend(
+                            df,
+                            length=st_length,
+                            multiplier=st_multiplier
+                        )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
+                        take_profit = calc_take_profit(
+                            direction,
+                            current_price,
+                            stop_loss,
+                            2.5
+                        )
+                        volume = calc_volume(login_manager, symbol, stop_loss)
+                        if stop_loss and take_profit and volume:
                             log.info("Entering trade for %s", symbol)
                             utils.enter_trade(
                                 login_manager,
@@ -616,12 +616,13 @@ def run_strategy():
                                 stop_loss,
                                 take_profit,
                             )
-                        log.info(
-                            "Spread too high for %s: %s, %s", symbol, spread, (atr * 1.5)
+                    else:
+                        utils.print_boxed_message(
+                            f"No trade signal identified for {symbol}. Skipping."
                         )
                 else:
                     utils.print_boxed_message(
-                        f"No trade signal identified for {symbol}. Skipping."
+                        f"Spread too high for {symbol}. Skipping."
                     )
         time.sleep(60)
 
