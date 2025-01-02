@@ -148,8 +148,12 @@ def edit_sl_position(
         "tpPrice": tp_price,
         "trailingDistance": trailing_distance,
     }
+
+    session = requests.Session()
+    session.headers.update(headers)
+
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response = session.post(url, json=payload, timeout=10)
         response.raise_for_status()
         log.info("Successfully updated SL for position %s: %s", position_id, sl_price)
         return True
@@ -437,7 +441,7 @@ def enter_trade(login_manager, symbol, direction, volume, stop_loss, take_profit
         if not position_data:
             log.error("Could not find position data for orderId: %s", order_id)
             return None
-        
+
         decimal_places = abs(Decimal(str(position_data["openPrice"])).as_tuple().exponent)
 
         log_trade(

@@ -85,6 +85,7 @@ for pair in crypto_pairs:
         "daily_swap": crypto_daily_swap,
     }
 
+
 def is_within_trading_hours(symbol):
     """Check if the current time is within the trading hours for the given symbol.
 
@@ -169,15 +170,16 @@ def close_trades_during_swap(login_manager, open_positions):
                 position["volume"],
             )
 
+
 def identify_trade_signal(
-        df,
-        symbol,
-        current_price,
-        st_length=50,
-        st_multiplier=3.0,
-        ema_length=50,
-        aroon_length=50
-    ):
+    df,
+    symbol,
+    current_price,
+    st_length=50,
+    st_multiplier=3.0,
+    ema_length=50,
+    aroon_length=50,
+):
     """Get the current trend for the given symbol.
 
     Args:
@@ -190,9 +192,7 @@ def identify_trade_signal(
     aroon_threshold = 50
 
     supertrend = Indicators.calculate_super_trend(
-        df,
-        length=st_length,
-        multiplier=st_multiplier
+        df, length=st_length, multiplier=st_multiplier
     )
     ema_50 = Indicators.calculate_ema(df, length=ema_length)
     aroon = Indicators.calculate_aroon(df, length=aroon_length)
@@ -201,8 +201,7 @@ def identify_trade_signal(
     decimal_places = abs(Decimal(str(current_price)).as_tuple().exponent)
 
     super_trend = round(
-        supertrend[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1],
-        decimal_places
+        supertrend[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1], decimal_places
     )
     ema_50_value = round(ema_50.iloc[-1], decimal_places)
     aroon_osc = aroon[f"AROONOSC_{aroon_length}"].iloc[-1]
@@ -216,32 +215,30 @@ def identify_trade_signal(
             "%s: Price (%s) is above the SuperTrend (%s) looking for BUY signal.",
             symbol,
             current_price,
-            super_trend
+            super_trend,
         )
         if current_price > ema_50_value:
             log.info(
                 "%s: Price (%s) is above the EMA50 (%s) checking Aroon Oscillator.",
-                symbol, current_price,
-                ema_50_value
+                symbol,
+                current_price,
+                ema_50_value,
             )
             if aroon_osc >= aroon_threshold:
                 log.info(
                     "%s: Aroon Oscillator (%s) is above %s, checking RSI",
-                        symbol,
-                        aroon_osc,
-                        aroon_threshold
-                    )
+                    symbol,
+                    aroon_osc,
+                    aroon_threshold,
+                )
                 if rsi_k_last_5_min < 30 and rsi_d < rsi_k:
                     log.info(
                         "%s: Stochastic RSI k (%s) is below 30 is over RSI d (%s).",
                         symbol,
                         round(rsi_k_last_5_min, decimal_places),
-                        round(rsi_d, decimal_places)
+                        round(rsi_d, decimal_places),
                     )
-                    log.info(
-                        "%s: Trade signal identified: BUY",
-                        symbol
-                    )
+                    log.info("%s: Trade signal identified: BUY", symbol)
                     return "BUY"
                 log.info(
                     "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
@@ -249,28 +246,28 @@ is below RSId (%s). No BUY signal.",
                     symbol,
                     round(rsi_k_last_5_min, decimal_places),
                     round(rsi_k, decimal_places),
-                    round(rsi_d, decimal_places)
+                    round(rsi_d, decimal_places),
                 )
             else:
                 log.info(
                     "%s: Aroon Oscillator (%s) is below %s. No BUY signal.",
                     symbol,
                     aroon_osc,
-                    aroon_threshold
+                    aroon_threshold,
                 )
         else:
             log.info(
                 "%s: Price (%s) is below the EMA50: %s. No BUY signal.",
                 symbol,
                 current_price,
-                ema_50_value
+                ema_50_value,
             )
     else:
         log.info(
             "%s: Price (%s) is below the SuperTrend: %s. No BUY signal.",
             symbol,
             current_price,
-            super_trend
+            super_trend,
         )
 
     if current_price < super_trend:
@@ -278,33 +275,30 @@ is below RSId (%s). No BUY signal.",
             "%s: Price (%s) is below the SuperTrend (%s) looking for SELL signal.",
             symbol,
             current_price,
-            super_trend
+            super_trend,
         )
         if current_price < ema_50_value:
             log.info(
                 "%s: Price (%s) is below the EMA50 (%s) checking Aroon Oscillator.",
                 symbol,
                 current_price,
-                ema_50_value
+                ema_50_value,
             )
             if aroon_osc <= -aroon_threshold:
                 log.info(
                     "%s: Aroon Oscillator (%s) is below %s, checking RSI",
-                        symbol,
-                        aroon_osc,
-                        -aroon_threshold
-                    )
+                    symbol,
+                    aroon_osc,
+                    -aroon_threshold,
+                )
                 if rsi_k_last_5_max > 70 and rsi_d > rsi_k:
                     log.info(
                         "%s: Stochastic RSI k (%s) is above 70 and is below RSI d (%s).",
                         symbol,
                         round(rsi_k_last_5_max, decimal_places),
-                        round(rsi_d, decimal_places)
+                        round(rsi_d, decimal_places),
                     )
-                    log.info(
-                        "%s: Trade signal identified: SELL",
-                        symbol
-                    )
+                    log.info("%s: Trade signal identified: SELL", symbol)
                     return "SELL"
                 log.info(
                     "%s: Stochastic RSI k (%s) is below 70 or RSIk (%s) \
@@ -312,37 +306,33 @@ is above RSId (%s). No SELL signal.",
                     symbol,
                     round(rsi_k_last_5_max, decimal_places),
                     round(rsi_k, decimal_places),
-                    round(rsi_d, decimal_places)
+                    round(rsi_d, decimal_places),
                 )
             else:
                 log.info(
                     "%s: Aroon Oscillator (%s) is above %s. No SELL signal.",
                     symbol,
                     aroon_osc,
-                    -aroon_threshold
+                    -aroon_threshold,
                 )
         else:
             log.info(
                 "%s: Price (%s) is above the EMA50: %s. No SELL signal.",
                 symbol,
                 current_price,
-                ema_50_value
+                ema_50_value,
             )
     else:
         log.info(
             "%s: Price (%s) is above the SuperTrend: %s. No SELL signal.",
             symbol,
             current_price,
-            super_trend
+            super_trend,
         )
     return None
 
-def calc_take_profit(
-        direction,
-        current_price,
-        stop_loss,
-        rr_value=2
-    ):
+
+def calc_take_profit(direction, current_price, stop_loss, rr_value=2):
     """Calculate the take profit for the given symbol.
 
     Args:
@@ -360,11 +350,8 @@ def calc_take_profit(
         return current_price - ((stop_loss - current_price) * rr_value)
     return None
 
-def calc_volume(
-        login_manager,
-        symbol, stop_loss,
-        risk_per_trade = 0.0025
-    ):
+
+def calc_volume(login_manager, symbol, stop_loss, risk_per_trade=0.0025):
     """Calculate the volume for the given symbol based on account balance.
 
     Args:
@@ -401,13 +388,9 @@ def calc_volume(
 
     try:
         if symbol in standard_symbols:
-            volume = (
-                (account_balance * risk_per_trade) / stop_loss_pip_value / 100000
-            )
+            volume = (account_balance * risk_per_trade) / stop_loss_pip_value / 100000
         elif symbol in jpy_symbols:
-            volume = (
-                (account_balance * risk_per_trade) / stop_loss_pip_value / 1000
-            )
+            volume = (account_balance * risk_per_trade) / stop_loss_pip_value / 1000
         else:
             volume = (account_balance * risk_per_trade) / stop_loss_pip_value
             if symbol in index_symbols and volume < 0.1:
@@ -428,7 +411,16 @@ def calc_volume(
 
     return round(volume, 2)
 
-def update_stop_loss(login_manager, open_positions, new_stop_loss):
+
+def update_stop_loss(
+        login_manager,
+        position_id,
+        symbol,
+        side,
+        volume,
+        stop_loss,
+        take_profit,
+):
     """Update the stop loss for open positions based on the new value.
 
     Args:
@@ -436,61 +428,50 @@ def update_stop_loss(login_manager, open_positions, new_stop_loss):
         open_positions (list): A list of open positions.
         new_stop_loss (float): The new stop loss value.
     """
-    for position in open_positions:
-        symbol = position["symbol"]
-        side = position["side"]
-        stop_loss = position["stopLoss"]
-        position_id = position["id"]
-        volume = position["volume"]
-        take_profit = position["takeProfit"]
-        decimal_places = abs(Decimal(str(stop_loss)).as_tuple().exponent)
-        new_stop_loss = round(new_stop_loss, decimal_places)
+    price_data = PriceData()
+    ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
+    df = pd.DataFrame(ohlc).set_index("t")
+    new_stop_loss = Indicators.calculate_super_trend(df, length=50, multiplier=3.0)[
+        "SUPERT_50_3.0"
+    ].iloc[-1]
 
-        if side == "BUY" and new_stop_loss > stop_loss:
-            log.info(
-                "Updating stop loss for %s: %s -> %s",
-                symbol,
-                stop_loss,
-                round(new_stop_loss, decimal_places),
-            )
-            utils.edit_sl_position(
-                login_manager,
-                position_id,
-                symbol,
-                side,
-                volume,
-                new_stop_loss,
-                take_profit,
-            )
+    decimal_places = abs(Decimal(str(df['c'].iloc[-1])).as_tuple().exponent)
+    new_stop_loss = round(new_stop_loss, decimal_places)
 
-        elif side == "SELL" and new_stop_loss < stop_loss:
-            log.info(
-                "Updating stop loss for %s: %s -> %s",
-                symbol,
-                stop_loss,
-                round(new_stop_loss, decimal_places),
-            )
-            utils.edit_sl_position(
-                login_manager,
-                position_id,
-                symbol,
-                side,
-                volume,
-                new_stop_loss,
-                take_profit,
-            )
-        else:
-            utils.print_boxed_message(
-                f"Stop loss for {symbol} is already set. Skipping."
-            )
+    # log.info(
+    #     "New stop loss for %s: %s(%s)", symbol, new_stop_loss, type(new_stop_loss)
+    # )
+
+    if (side == "BUY" and new_stop_loss > stop_loss
+        or side == "SELL" and new_stop_loss < stop_loss):
+        log.info(
+            "Updating stop loss for %s: %s -> %s",
+            symbol,
+            stop_loss,
+            round(new_stop_loss, decimal_places),
+        )
+        utils.edit_sl_position(
+            login_manager,
+            position_id,
+            symbol,
+            side,
+            volume,
+            new_stop_loss,
+            take_profit,
+        )
+    else:
+        utils.print_boxed_message(
+            f"Stop loss for {symbol} is already set. Skipping."
+        )
+
 
 def run_strategy():
     """Run the trading strategy based on weekday entries."""
     while True:
-        st_length=50
-        st_multiplier=3.0
-        ema_length=50
-        aroon_length=50
+        st_length = 50
+        st_multiplier = 3.0
+        ema_length = 50
+        aroon_length = 50
         login_manager = LoginManager()
         open_positions = []
         utils.setup_logging()
@@ -527,9 +508,8 @@ def run_strategy():
                             close_date_time=position["time"],
                             swap=position["swap"],
                             profit=position["netProfit"],
-                            close_reason=position["closeReason"]
+                            close_reason=position["closeReason"],
                         )
-
 
         log.info("Open position symbols: %s", open_position_symbols)
         close_trades_during_swap(login_manager, open_positions)
@@ -569,12 +549,20 @@ def run_strategy():
                         f"Trade already open for {symbol}. Checking Stop Loss",
                     )
                     utils.print_boxed_message(json.dumps(filtered_data, indent=2))
-                    new_stop_loss = Indicators.calculate_super_trend(
-                        df,
-                        length=st_length,
-                        multiplier=st_multiplier
-                    )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
-                    update_stop_loss(login_manager, open_positions, new_stop_loss)
+                    position_id = position_data.get("id")
+                    side = position_data.get("side")
+                    volume = position_data.get("volume")
+                    stop_loss = position_data.get("stopLoss")
+                    take_profit = position_data.get("takeProfit")
+                    update_stop_loss(
+                        login_manager,
+                        position_id,
+                        symbol,
+                        side,
+                        volume,
+                        stop_loss,
+                        take_profit,
+                    )
 
             else:
                 ohlc = price_data.fetch_market_data(login_manager, symbol, 5)
@@ -591,19 +579,14 @@ def run_strategy():
                         st_multiplier,
                         ema_length,
                         aroon_length,
-                        )
+                    )
                     if direction:
                         log.info("Setting stop loss and take profit for %s", symbol)
                         stop_loss = Indicators.calculate_super_trend(
-                            df,
-                            length=st_length,
-                            multiplier=st_multiplier
-                        )[f'SUPERT_{st_length}_{st_multiplier}'].iloc[-1]
+                            df, length=st_length, multiplier=st_multiplier
+                        )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
                         take_profit = calc_take_profit(
-                            direction,
-                            current_price,
-                            stop_loss,
-                            2.5
+                            direction, current_price, stop_loss, 2.5
                         )
                         volume = calc_volume(login_manager, symbol, stop_loss)
                         if stop_loss and take_profit and volume:
@@ -625,6 +608,7 @@ def run_strategy():
                         f"Spread too high for {symbol}. Skipping."
                     )
         time.sleep(60)
+
 
 if __name__ == "__main__":
     run_strategy()
