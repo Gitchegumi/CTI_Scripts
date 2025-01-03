@@ -586,7 +586,7 @@ def run_strategy():
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
                         take_profit = calc_take_profit(
-                            direction, current_price, stop_loss, 2.5
+                            direction, current_price, stop_loss, 2.8
                         )
                         volume = calc_volume(login_manager, symbol, stop_loss)
                         if stop_loss and take_profit and volume:
