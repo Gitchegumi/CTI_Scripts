@@ -74,7 +74,7 @@ def log_trade(trade_details):
                 trade_details["commission"],
                 trade_details["profit"],
                 trade_details["close_reason"],
-                json.dumps(trade_details["candle_patterns"]),
+                trade_details["candle_patterns"],
             ]
         )
 

@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Historical Data for backtesting
+historical_data/
+
 # Distribution / packaging
 .Python
 build/
