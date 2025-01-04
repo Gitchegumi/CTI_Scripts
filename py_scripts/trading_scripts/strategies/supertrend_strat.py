@@ -26,7 +26,7 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
 
 forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
-crypto_pairs = ["BTCUSDC"]
+crypto_pairs = ["BTCUSDC", "LTCUSDC", "ETHUSDC"]
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
 standard_symbols = [pair for pair in forex_pairs if pair not in jpy_symbols]
@@ -103,9 +103,14 @@ def is_within_trading_hours(symbol):
     if not symbol_hours:
         return True  # No specific trading hours, assume always open
 
-    # If it's EURUSD, only allow Monday (weekday=0) through Friday (weekday=4).
-    if symbol in ["EURUSD", "US500", "US30"] and (
-        now.weekday() < 0 or now.weekday() > 4
+    # Only allow Monday (weekday=0) through Friday (weekday=4) if closed on weekend.
+    if symbol in forex_pairs + index_symbols and (
+        now.weekday() < 0
+        or now.weekday() > 4
+        or (
+            now.weekday() == 4
+            and (now.hour > 16 or (now.hour == 17 and now.minute >= 00))
+        )
     ):
         return False
 
@@ -413,13 +418,13 @@ def calc_volume(login_manager, symbol, stop_loss, risk_per_trade=0.0025):
 
 
 def update_stop_loss(
-        login_manager,
-        position_id,
-        symbol,
-        side,
-        volume,
-        stop_loss,
-        take_profit,
+    login_manager,
+    position_id,
+    symbol,
+    side,
+    volume,
+    stop_loss,
+    take_profit,
 ):
     """Update the stop loss for open positions based on the new value.
 
@@ -435,15 +440,19 @@ def update_stop_loss(
         "SUPERT_50_3.0"
     ].iloc[-1]
 
-    decimal_places = abs(Decimal(str(df['c'].iloc[-1])).as_tuple().exponent)
+    decimal_places = abs(Decimal(str(df["c"].iloc[-1])).as_tuple().exponent)
     new_stop_loss = round(new_stop_loss, decimal_places)
 
     # log.info(
     #     "New stop loss for %s: %s(%s)", symbol, new_stop_loss, type(new_stop_loss)
     # )
 
-    if (side == "BUY" and new_stop_loss > stop_loss
-        or side == "SELL" and new_stop_loss < stop_loss):
+    if (
+        side == "BUY"
+        and new_stop_loss > stop_loss
+        or side == "SELL"
+        and new_stop_loss < stop_loss
+    ):
         log.info(
             "Updating stop loss for %s: %s -> %s",
             symbol,
@@ -460,9 +469,7 @@ def update_stop_loss(
             take_profit,
         )
     else:
-        utils.print_boxed_message(
-            f"Stop loss for {symbol} is already set. Skipping."
-        )
+        utils.print_boxed_message(f"Stop loss for {symbol} is already set. Skipping.")
 
 
 def run_strategy():
@@ -570,7 +577,7 @@ def run_strategy():
                 current_price = df["c"].iloc[-1]
                 spread = utils.check_spread(login_manager, symbol)
                 atr = Indicators.calculate_atr(df, length=14).iloc[-1]
-                if spread < atr * 1.5:
+                if spread is not None and spread < atr * 1.5:
                     direction = identify_trade_signal(
                         df,
                         symbol,
@@ -605,7 +612,7 @@ def run_strategy():
                         )
                 else:
                     utils.print_boxed_message(
-                        f"Spread too high for {symbol}. Skipping."
+                        f"Spread is None or too high for {symbol}. Skipping."
                     )
         time.sleep(60)
 

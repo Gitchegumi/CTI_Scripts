@@ -476,11 +476,15 @@ def check_spread(login_manager, symbol):
     """
     price_data = PriceData()
     market_watch = price_data.fetch_market_watch(login_manager, symbol)
-    try:
-        bid = float(market_watch[0]["bid"])
-        ask = float(market_watch[0]["ask"])
-        spread = abs(ask - bid)
-        return spread
-    except (KeyError, ValueError) as e:
-        log.error("Failed to get spread for %s: %s", symbol, e)
+    if market_watch:
+        try:
+            bid = float(market_watch[0]["bid"])
+            ask = float(market_watch[0]["ask"])
+            spread = abs(ask - bid)
+            return spread
+        except (KeyError, ValueError) as e:
+            log.error("Failed to get spread for %s: %s", symbol, e)
+            return None
+    else:
+        log.error("Failed to get market watch data for %s", symbol)
         return None
