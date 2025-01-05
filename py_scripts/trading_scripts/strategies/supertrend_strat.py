@@ -214,7 +214,9 @@ def identify_trade_signal(
     last_10_lows_min = last_10_lows.min()
     last_10_lows_index = last_10_lows.idxmin()
     last_10_lows_pos = df.index.get_loc(last_10_lows_index)
-    decimal_places = 5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
+    decimal_places = (
+        5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
+    )
 
     super_trend = round(
         supertrend[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1], decimal_places
@@ -226,12 +228,10 @@ def identify_trade_signal(
     rsi_k_last_5_max = round(max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     rsi_k_last_5_min = round(min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     keltner_upper_at_max = round(
-        keltner_channels["KCUe_20_1.5"].iloc[last_10_highs_pos],
-        decimal_places
+        keltner_channels["KCUe_20_1.5"].iloc[last_10_highs_pos], decimal_places
     )
     keltner_lower_at_min = round(
-        keltner_channels["KCLe_20_1.5"].iloc[last_10_lows_pos],
-        decimal_places
+        keltner_channels["KCLe_20_1.5"].iloc[last_10_lows_pos], decimal_places
     )
     keltner_basis = round(keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places)
 
@@ -663,9 +663,13 @@ def run_strategy():
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
                         if symbol == "BTCUSDC":
                             if direction == "BUY":
-                                take_profit = current_price + (0.75) / abs(current_price - stop_loss)
+                                take_profit = current_price + (0.75) / abs(
+                                    current_price - stop_loss
+                                )
                             elif direction == "SELL":
-                                take_profit = current_price - (0.75) / abs(current_price - stop_loss)
+                                take_profit = current_price - (0.75) / abs(
+                                    current_price - stop_loss
+                                )
                         else:
                             take_profit = calc_take_profit(
                                 direction, current_price, stop_loss, 2.8
