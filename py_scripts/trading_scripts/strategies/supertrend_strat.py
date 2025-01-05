@@ -202,18 +202,36 @@ def identify_trade_signal(
     ema_50 = Indicators.calculate_ema(df, length=ema_length)
     aroon = Indicators.calculate_aroon(df, length=aroon_length)
     stoch_rsi = Indicators.calculate_stoch_rsi(df)
+    keltner_channels = Indicators.calculate_keltner_channels(df)
     current_price = df["c"].iloc[-1]
-    decimal_places = abs(Decimal(str(current_price)).as_tuple().exponent)
+    last_5_highs = df["h"].iloc[-6:-1]
+    last_5_highs_max = last_5_highs.max()
+    last_5_highs_index = last_5_highs.idxmax()
+    last_5_highs_pos = df.index.get_loc(last_5_highs_index)
+    last_5_lows = df["l"].iloc[-6:-1]
+    last_5_lows_min = last_5_lows.min()
+    last_5_lows_index = last_5_lows.idxmin()
+    last_5_lows_pos = df.index.get_loc(last_5_lows_index)
+    decimal_places = 5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
 
     super_trend = round(
         supertrend[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1], decimal_places
     )
     ema_50_value = round(ema_50.iloc[-1], decimal_places)
-    aroon_osc = aroon[f"AROONOSC_{aroon_length}"].iloc[-1]
-    rsi_d = stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1]
-    rsi_k = stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1]
-    rsi_k_last_5_max = max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:])
-    rsi_k_last_5_min = min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:])
+    aroon_osc = round(aroon[f"AROONOSC_{aroon_length}"].iloc[-1], 2)
+    rsi_d = round(stoch_rsi["STOCHRSId_14_14_3_3"].iloc[-1], 2)
+    rsi_k = round(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-1], 2)
+    rsi_k_last_5_max = round(max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
+    rsi_k_last_5_min = round(min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
+    keltner_upper_at_max = round(
+        keltner_channels["KCUe_20_1.5"].iloc[last_5_highs_pos],
+        decimal_places
+    )
+    keltner_lower_at_min = round(
+        keltner_channels["KCLe_20_1.5"].iloc[last_5_lows_pos],
+        decimal_places
+    )
+    keltner_basis = round(keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places)
 
     if current_price > super_trend:
         log.info(
@@ -224,41 +242,69 @@ def identify_trade_signal(
         )
         if current_price > ema_50_value:
             log.info(
-                "%s: Price (%s) is above the EMA50 (%s) checking Aroon Oscillator.",
+                "%s: Price (%s) is above the EMA50 (%s). Continuing ...",
                 symbol,
                 current_price,
                 ema_50_value,
             )
-            if aroon_osc >= aroon_threshold:
+            if last_5_highs_max > keltner_upper_at_max:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is above %s, checking RSI",
+                    "%s: Last 5 highs (%s) are above the Keltner Upper (%s). Continuing...",
                     symbol,
-                    aroon_osc,
-                    aroon_threshold,
+                    last_5_highs_max,
+                    keltner_upper_at_max,
                 )
-                if rsi_k_last_5_min < 30 and rsi_d < rsi_k:
+                if current_price <= keltner_basis:
                     log.info(
-                        "%s: Stochastic RSI k (%s) is below 30 is over RSI d (%s).",
+                        "%s: Price (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        round(rsi_k_last_5_min, decimal_places),
-                        round(rsi_d, decimal_places),
+                        current_price,
+                        keltner_basis,
                     )
-                    log.info("%s: Trade signal identified: BUY", symbol)
-                    return "BUY"
-                log.info(
-                    "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
-is below RSId (%s). No BUY signal.",
-                    symbol,
-                    round(rsi_k_last_5_min, decimal_places),
-                    round(rsi_k, decimal_places),
-                    round(rsi_d, decimal_places),
-                )
+                    if aroon_osc >= aroon_threshold:
+                        log.info(
+                            "%s: Aroon Oscillator (%s) is above the threshold (%s). Continuing ...",
+                            symbol,
+                            aroon_osc,
+                            aroon_threshold,
+                        )
+                        if rsi_k_last_5_min < 30 and rsi_d < rsi_k:
+                            log.info(
+                                "%s: Stochastic RSI k (%s) is below 30 is over RSI d (%s).",
+                                symbol,
+                                round(rsi_k_last_5_min, decimal_places),
+                                round(rsi_d, decimal_places),
+                            )
+                            log.info("%s: Trade signal identified: BUY", symbol)
+                            return "BUY"
+                        log.info(
+                            "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
+    is below RSId (%s). No BUY signal.",
+                            symbol,
+                            round(rsi_k_last_5_min, decimal_places),
+                            round(rsi_k, decimal_places),
+                            round(rsi_d, decimal_places),
+                        )
+                    else:
+                        log.info(
+                            "%s: Aroon Oscillator (%s) is below %s. No BUY signal.",
+                            symbol,
+                            aroon_osc,
+                            aroon_threshold,
+                        )
+                else:
+                    log.info(
+                        "%s: Price (%s) did not pull back to Keltner Basis: %s. No BUY signal.",
+                        symbol,
+                        current_price,
+                        keltner_basis,
+                    )
             else:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is below %s. No BUY signal.",
+                    "%s: Last 5 highs (%s) are below the Keltner Upper (%s). No BUY signal.",
                     symbol,
-                    aroon_osc,
-                    aroon_threshold,
+                    last_5_highs_max,
+                    keltner_upper_at_max,
                 )
         else:
             log.info(
@@ -284,41 +330,69 @@ is below RSId (%s). No BUY signal.",
         )
         if current_price < ema_50_value:
             log.info(
-                "%s: Price (%s) is below the EMA50 (%s) checking Aroon Oscillator.",
+                "%s: Price (%s) is below the EMA50 (%s). Continuing ...",
                 symbol,
                 current_price,
                 ema_50_value,
             )
-            if aroon_osc <= -aroon_threshold:
+            if last_5_lows_min < keltner_lower_at_min:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is below %s, checking RSI",
+                    "%s: Last 5 lows (%s) are below the Keltner Lower (%s). Continuing...",
                     symbol,
-                    aroon_osc,
-                    -aroon_threshold,
+                    last_5_lows_min,
+                    keltner_lower_at_min,
                 )
-                if rsi_k_last_5_max > 70 and rsi_d > rsi_k:
+                if current_price >= keltner_basis:
                     log.info(
-                        "%s: Stochastic RSI k (%s) is above 70 and is below RSI d (%s).",
+                        "%s: Price (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        round(rsi_k_last_5_max, decimal_places),
-                        round(rsi_d, decimal_places),
+                        current_price,
+                        keltner_basis,
                     )
-                    log.info("%s: Trade signal identified: SELL", symbol)
-                    return "SELL"
-                log.info(
-                    "%s: Stochastic RSI k (%s) is below 70 or RSIk (%s) \
+                    if aroon_osc <= -aroon_threshold:
+                        log.info(
+                            "%s: Aroon Oscillator (%s) is below the threshold (%s). Continuing ...",
+                            symbol,
+                            aroon_osc,
+                            -aroon_threshold,
+                        )
+                        if rsi_k_last_5_max > 70 and rsi_d > rsi_k:
+                            log.info(
+                                "%s: Stochastic RSI k (%s) is above 70 and is below RSI d (%s).",
+                                symbol,
+                                round(rsi_k_last_5_max, decimal_places),
+                                round(rsi_d, decimal_places),
+                            )
+                            log.info("%s: Trade signal identified: SELL", symbol)
+                            return "SELL"
+                        log.info(
+                            "%s: Stochastic RSI k (%s) is below 70 or RSIk (%s) \
 is above RSId (%s). No SELL signal.",
-                    symbol,
-                    round(rsi_k_last_5_max, decimal_places),
-                    round(rsi_k, decimal_places),
-                    round(rsi_d, decimal_places),
-                )
+                            symbol,
+                            round(rsi_k_last_5_max, decimal_places),
+                            round(rsi_k, decimal_places),
+                            round(rsi_d, decimal_places),
+                        )
+                    else:
+                        log.info(
+                            "%s: Aroon Oscillator (%s) is above %s. No SELL signal.",
+                            symbol,
+                            aroon_osc,
+                            -aroon_threshold,
+                        )
+                else:
+                    log.info(
+                        "%s: Price (%s) did not rally to Keltner Basis: %s. No SELL signal.",
+                        symbol,
+                        current_price,
+                        keltner_basis,
+                    )
             else:
                 log.info(
-                    "%s: Aroon Oscillator (%s) is above %s. No SELL signal.",
+                    "%s: Last 5 lows (%s) are above the Keltner Lower (%s). No SELL signal.",
                     symbol,
-                    aroon_osc,
-                    -aroon_threshold,
+                    last_5_lows_min,
+                    keltner_lower_at_min,
                 )
         else:
             log.info(
