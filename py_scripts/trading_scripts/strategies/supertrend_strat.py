@@ -194,7 +194,7 @@ def identify_trade_signal(
     Returns:
         str: The current trend ("up", "down", or "none").
     """
-    aroon_threshold = 60
+    aroon_threshold = 40
 
     supertrend = Indicators.calculate_super_trend(
         df, length=st_length, multiplier=st_multiplier
@@ -554,7 +554,7 @@ def run_strategy():
         st_length = 50
         st_multiplier = 3.0
         ema_length = 50
-        aroon_length = 50
+        aroon_length = 24
         login_manager = LoginManager()
         open_positions = []
         utils.setup_logging()
