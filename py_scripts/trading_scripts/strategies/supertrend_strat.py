@@ -668,10 +668,16 @@ def run_strategy():
                         stop_loss = Indicators.calculate_super_trend(
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
-                        take_profit = calc_take_profit(
-                            direction, current_price, stop_loss, 2.8
-                        )
-                        volume = calc_volume(login_manager, symbol, stop_loss)
+                        if symbol == "BTCUSDC":
+                            take_profit = (0.75) / abs(current_price - stop_loss)
+                        else:
+                            take_profit = calc_take_profit(
+                                direction, current_price, stop_loss, 2.8
+                            )
+                        if symbol == "BTCUSDC":
+                            volume = 0.01
+                        else:
+                            volume = calc_volume(login_manager, symbol, stop_loss)
                         if stop_loss and take_profit and volume:
                             log.info("Entering trade for %s", symbol)
                             utils.enter_trade(
