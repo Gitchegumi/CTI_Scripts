@@ -315,15 +315,8 @@ def identify_trade_signal(
                 current_price,
                 ema_50_value,
             )
-    else:
-        log.info(
-            "%s: Price (%s) is below the SuperTrend: %s. No BUY signal.",
-            symbol,
-            current_price,
-            super_trend,
-        )
 
-    if current_price < super_trend:
+    elif current_price < super_trend:
         log.info(
             "%s: Price (%s) is below the SuperTrend (%s) looking for SELL signal.",
             symbol,
