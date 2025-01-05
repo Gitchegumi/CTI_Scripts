@@ -662,7 +662,10 @@ def run_strategy():
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
                         if symbol == "BTCUSDC":
-                            take_profit = (0.75) / abs(current_price - stop_loss)
+                            if direction == "BUY":
+                                take_profit = current_price + (0.75) / abs(current_price - stop_loss)
+                            elif direction == "SELL":
+                                take_profit = current_price - (0.75) / abs(current_price - stop_loss)
                         else:
                             take_profit = calc_take_profit(
                                 direction, current_price, stop_loss, 2.8
