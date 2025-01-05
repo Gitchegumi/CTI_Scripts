@@ -346,7 +346,7 @@ def identify_trade_signal(
                 )
                 if current_high >= keltner_basis:
                     log.info(
-                        "%s: Current high (%s) is below the Keltner Basis (%s). Continuing ...",
+                        "%s: Current high (%s) is above the Keltner Basis (%s). Continuing ...",
                         symbol,
                         current_high,
                         keltner_basis,
