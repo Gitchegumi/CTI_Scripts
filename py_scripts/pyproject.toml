@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "trading_scripts"
-version = "0.1.0"
+version = "0.1.1"
 description = "This is a python script to automate trailing my stop-loss in the CTI match-trader platform"
 authors = ["Gitchegumi <mat@gitchegumi.com>"]
 readme = "README.md"
@@ -15,7 +15,7 @@ python-dotenv = "^1.0.1"
 requests = "^2.32.3"
 cloudscraper = "^1.2.71"
 pandas = "^2.2.3"
-ta-lib = "^0.6.0"
+ta-lib = "0.5.1"
 pandas-ta = "^0.3.14b0"
 setuptools = "^75.6.0"
 numpy = "1.26.4"
@@ -25,6 +25,14 @@ matplotlib = "^3.10.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
+
+
+[tool.poetry.group.back_testing.dependencies]
+plotly = "^5.24.1"
+matplotlib = "^3.10.0"
+nbformat = "^5.10.4"
+ipympl = "^0.9.6"
+backtrader = "^1.9.78.123"
 
 [build-system]
 requires = ["poetry-core"]

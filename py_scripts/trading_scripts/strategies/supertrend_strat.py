@@ -26,7 +26,7 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
 
 forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
-crypto_pairs = ["BTCUSDC", "LTCUSDC", "ETHUSDC"]
+crypto_pairs = ["BTCUSDC"]
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
 standard_symbols = [pair for pair in forex_pairs if pair not in jpy_symbols]
@@ -653,7 +653,7 @@ def run_strategy():
                 current_price = df["c"].iloc[-1]
                 spread = utils.check_spread(login_manager, symbol)
                 atr = Indicators.calculate_atr(df, length=14).iloc[-1]
-                if spread is not None and spread < atr * 1.5:
+                if spread is not None and spread < atr * 1.2:
                     direction = identify_trade_signal(
                         df,
                         symbol,
