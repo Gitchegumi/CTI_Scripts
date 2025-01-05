@@ -204,14 +204,16 @@ def identify_trade_signal(
     stoch_rsi = Indicators.calculate_stoch_rsi(df)
     keltner_channels = Indicators.calculate_keltner_channels(df)
     current_price = df["c"].iloc[-1]
-    last_5_highs = df["h"].iloc[-6:-1]
-    last_5_highs_max = last_5_highs.max()
-    last_5_highs_index = last_5_highs.idxmax()
-    last_5_highs_pos = df.index.get_loc(last_5_highs_index)
-    last_5_lows = df["l"].iloc[-6:-1]
-    last_5_lows_min = last_5_lows.min()
-    last_5_lows_index = last_5_lows.idxmin()
-    last_5_lows_pos = df.index.get_loc(last_5_lows_index)
+    current_high = df["h"].iloc[-1]
+    current_low = df["l"].iloc[-1]
+    last_10_highs = df["h"].iloc[-11:-1]
+    last_10_highs_max = last_10_highs.max()
+    last_10_highs_index = last_10_highs.idxmax()
+    last_10_highs_pos = df.index.get_loc(last_10_highs_index)
+    last_10_lows = df["l"].iloc[-11:-1]
+    last_10_lows_min = last_10_lows.min()
+    last_10_lows_index = last_10_lows.idxmin()
+    last_10_lows_pos = df.index.get_loc(last_10_lows_index)
     decimal_places = 5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
 
     super_trend = round(
@@ -224,11 +226,11 @@ def identify_trade_signal(
     rsi_k_last_5_max = round(max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     rsi_k_last_5_min = round(min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     keltner_upper_at_max = round(
-        keltner_channels["KCUe_20_1.5"].iloc[last_5_highs_pos],
+        keltner_channels["KCUe_20_1.5"].iloc[last_10_highs_pos],
         decimal_places
     )
     keltner_lower_at_min = round(
-        keltner_channels["KCLe_20_1.5"].iloc[last_5_lows_pos],
+        keltner_channels["KCLe_20_1.5"].iloc[last_10_lows_pos],
         decimal_places
     )
     keltner_basis = round(keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places)
@@ -247,18 +249,18 @@ def identify_trade_signal(
                 current_price,
                 ema_50_value,
             )
-            if last_5_highs_max > keltner_upper_at_max:
+            if last_10_highs_max > keltner_upper_at_max:
                 log.info(
-                    "%s: Last 5 highs (%s) are above the Keltner Upper (%s). Continuing...",
+                    "%s: Recent high (%s) is above the Keltner Upper (%s). Continuing...",
                     symbol,
-                    last_5_highs_max,
+                    last_10_highs_max,
                     keltner_upper_at_max,
                 )
-                if current_price <= keltner_basis:
+                if current_low <= keltner_basis:
                     log.info(
-                        "%s: Price (%s) is below the Keltner Basis (%s). Continuing ...",
+                        "%s: Current low (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        current_price,
+                        current_low,
                         keltner_basis,
                     )
                     if aroon_osc >= aroon_threshold:
@@ -296,14 +298,14 @@ def identify_trade_signal(
                     log.info(
                         "%s: Price (%s) did not pull back to Keltner Basis: %s. No BUY signal.",
                         symbol,
-                        current_price,
+                        current_low,
                         keltner_basis,
                     )
             else:
                 log.info(
-                    "%s: Last 5 highs (%s) are below the Keltner Upper (%s). No BUY signal.",
+                    "%s: Recent high (%s) is below the Keltner Upper (%s). No BUY signal.",
                     symbol,
-                    last_5_highs_max,
+                    last_10_highs_max,
                     keltner_upper_at_max,
                 )
         else:
@@ -335,18 +337,18 @@ def identify_trade_signal(
                 current_price,
                 ema_50_value,
             )
-            if last_5_lows_min < keltner_lower_at_min:
+            if last_10_lows_min < keltner_lower_at_min:
                 log.info(
-                    "%s: Last 5 lows (%s) are below the Keltner Lower (%s). Continuing...",
+                    "%s: Recent low (%s) is below the Keltner Lower (%s). Continuing...",
                     symbol,
-                    last_5_lows_min,
+                    last_10_lows_min,
                     keltner_lower_at_min,
                 )
-                if current_price >= keltner_basis:
+                if current_high >= keltner_basis:
                     log.info(
-                        "%s: Price (%s) is below the Keltner Basis (%s). Continuing ...",
+                        "%s: Current high (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        current_price,
+                        current_high,
                         keltner_basis,
                     )
                     if aroon_osc <= -aroon_threshold:
@@ -384,14 +386,14 @@ is above RSId (%s). No SELL signal.",
                     log.info(
                         "%s: Price (%s) did not rally to Keltner Basis: %s. No SELL signal.",
                         symbol,
-                        current_price,
+                        current_high,
                         keltner_basis,
                     )
             else:
                 log.info(
-                    "%s: Last 5 lows (%s) are above the Keltner Lower (%s). No SELL signal.",
+                    "%s: Recent low (%s) is above the Keltner Lower (%s). No SELL signal.",
                     symbol,
-                    last_5_lows_min,
+                    last_10_lows_min,
                     keltner_lower_at_min,
                 )
         else:
