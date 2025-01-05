@@ -1,10 +1,17 @@
 📦CTI_Scripts
- ┣ 📂.git [truncated]
  ┣ 📂py_scripts
+ ┃ ┣ 📂logs
+ ┃ ┃ ┣ 📜debug.log
+ ┃ ┃ ┣ 📜debug.log.1
+ ┃ ┃ ┣ 📜debug.log.2
+ ┃ ┃ ┗ 📜debug.log.3
  ┃ ┣ 📂trading_scripts
+ ┃ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┃ ┗ 📜__init__.cpython-312.pyc
  ┃ ┃ ┣ 📂api
  ┃ ┃ ┃ ┣ 📂__pycache__
  ┃ ┃ ┃ ┃ ┣ 📜__init__.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜atr_data.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜fetch_price_data.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜login.cpython-312.pyc
  ┃ ┃ ┃ ┃ ┣ 📜open_positions.cpython-312.pyc
@@ -17,20 +24,22 @@
  ┃ ┃ ┃ ┣ 📜open_positions.py
  ┃ ┃ ┃ ┣ 📜price_data.py
  ┃ ┃ ┃ ┗ 📜utils.py
- ┃ ┃ ┣ 📂logs
- ┃ ┃ ┃ ┗ 📜debug.log
  ┃ ┃ ┣ 📂strategies
  ┃ ┃ ┃ ┣ 📂__pycache__
  ┃ ┃ ┃ ┃ ┣ 📜__init__.cpython-312.pyc
- ┃ ┃ ┃ ┃ ┗ 📜trailing_sl.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜trailing_sl.cpython-312.pyc
+ ┃ ┃ ┃ ┃ ┗ 📜trailing_sl_atr.cpython-312.pyc
  ┃ ┃ ┃ ┣ 📜__init__.py
- ┃ ┃ ┃ ┗ 📜trailing_sl.py
+ ┃ ┃ ┃ ┣ 📜trailing_sl_atr.py
+ ┃ ┃ ┃ ┗ 📜weekday_entries.py
  ┃ ┃ ┣ 📜.env
  ┃ ┃ ┣ 📜__init__.py
  ┃ ┃ ┗ 📜main.py
  ┃ ┣ 📜README.md
+ ┃ ┣ 📜get_info.ipynb
  ┃ ┣ 📜poetry.lock
  ┃ ┗ 📜pyproject.toml
+ ┣ 📜.env
  ┣ 📜.gitignore
- ┣ 📜get_info.ipynb
+ ┣ 📜fetch_strings.txt
  ┗ 📜tree.txt

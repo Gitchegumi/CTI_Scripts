@@ -8,6 +8,7 @@ Returns:
 """
 
 import os
+import sys
 import time
 import logging as log
 import requests
@@ -70,6 +71,10 @@ class LoginManager:
                 raise ValueError("Login failed: No trading accounts found.")
         except requests.exceptions.RequestException as e:
             log.error("Login failed: %s", e)
+            os.execv(
+                        sys.executable,
+                        [sys.executable] + sys.argv,
+                    )
             raise
 
     def refresh_token(self, rt_token, refresh_interval=REFRESH_INTERVAL):

@@ -5,28 +5,30 @@ Returns:
 """
 
 import logging as log
+import time
 from datetime import datetime
 from trading_scripts.api import utils  # pylint: disable=import-error
 import requests
-import pandas as pd # pylint: disable=import-error
+import pandas as pd  # pylint: disable=import-error
 
+
+RETRIES = 3
+RETRY_DELAY = 5
 
 class PriceData:
     """A class for fetching and updating market data."""
 
-    def __init__(self, login_manager):
-        self.system_uuid = login_manager.system_uuid
-        self.auth_trading_api = login_manager.auth_trading_api
-        self.cookie = login_manager.cookie
+    def __init__(self):
         self.stored_values = {}  # To store the most recent swing values per position
 
-    def fetch_market_data(self, symbol, resolution="5", countback=500):
+    def fetch_market_data(self, login_manager, symbol, resolution="5", countback=500):
         """Fetch market data for the given symbols."""
-        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/history"
+        log.info("Fetching market data for symbol: %s, timeframe %s", symbol, resolution)
+        url = f"{utils.PLATFORM_URL}/market-data-api/{login_manager.system_uuid}/api/trading-view/history" # pylint: disable=line-too-long
 
         headers = {
-            "Auth-trading-api": self.auth_trading_api,
-            "Cookie": f"co-auth={self.cookie}",
+            "Auth-trading-api": login_manager.auth_trading_api,
+            "Cookie": f"co-auth={login_manager.cookie}",
             "User-Agent": "Mozilla/5.0",
             "Accept": "*/*",
         }
@@ -44,24 +46,33 @@ class PriceData:
             "countback": countback,
         }
 
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-            response.raise_for_status()
-            # log.info("Market data fetched successfully.")
-            data = response.json()
-            if data.get("s") == "ok":
-                # log.info("Market data fetched for %s: %s", symbol, data)
-                return data
-            else:
+        for attempt in range(RETRIES):
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                if data.get("s") == "ok":
+                    return data
                 log.error("Failed to fetch market data for %s: %s", symbol, data)
                 return {}
-        except requests.exceptions.RequestException as e:
-            log.error("Failed to fetch market data: %s", e)
-            return {}
+            except requests.exceptions.RequestException as e:
+                if response.status_code in [502, 504]:
+                    log.warning(
+                        "Attempt %d: Received %s error. Retrying in %s seconds...",
+                        attempt + 1,
+                        response.status_code,
+                        RETRY_DELAY
+                    )
+                    time.sleep(RETRY_DELAY)
+                else:
+                    log.error("Failed to fetch market data: %s", e)
+                    return {}
+        log.error("Failed to fetch market data after %s RETRIES", RETRIES)
+        return {}
 
-    def update_swing_values(self, symbol, resolution="5", countback=1):
+    def update_swing_values(self, login_manager, symbol, resolution="5", countback=1):
         """Update the most recent swing values for each open position."""
-        market_data = self.fetch_market_data(symbol, resolution, countback)
+        market_data = self.fetch_market_data(login_manager, symbol, resolution, countback)
         # log.info("Market data: %s", market_data)
 
         if not market_data:
@@ -105,7 +116,7 @@ class PriceData:
         """Retrieve the current stored swing values."""
         return self.stored_values
 
-    def fetch_atr_data(self, symbol, resolution="5", period=14):
+    def fetch_atr_data(self, login_manager, symbol, resolution="5", period=14):
         """
         Fetch market data to calculate ATR.
 
@@ -117,7 +128,7 @@ class PriceData:
         Returns:
         - DataFrame with 'high', 'low', and 'close' columns for ATR calculation.
         """
-        market_data = self.fetch_market_data(symbol, resolution, countback=period)
+        market_data = self.fetch_market_data(login_manager, symbol, resolution, countback=period)
         # log.info(
         #     "Market data fetched for ATR calculation for %s: %s", symbol, market_data
         # )
@@ -152,18 +163,18 @@ class PriceData:
         # Convert timestamp to datetime for readability
         data["timestamp"] = pd.to_datetime(data["timestamp"], unit="ms")
         return data
-    
-    def fetch_account_balance(self):
+
+    def fetch_account_balance(self, login_manager):
         """Fetch account balance data."""
-        url = f"{utils.PLATFORM_URL}/mtr-api/{self.system_uuid}/balance"
+        url = f"{utils.PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/balance"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
             "Origin": "https://platform.citytradersimperium.com",
             "Referer": "https://platform.citytradersimperium.com/dashboard",
-            "Auth-trading-api": self.auth_trading_api,
-            "Cookie": f"co-auth={self.cookie}",
+            "Auth-trading-api": login_manager.auth_trading_api,
+            "Cookie": f"co-auth={login_manager.cookie}",
             "Accept-Encoding": "gzip, deflate, br",
             "Accept-Language": "en-US,en;q=0.8",
             "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -183,14 +194,14 @@ class PriceData:
         except requests.exceptions.RequestException as e:
             log.error("Failed to fetch account balance: %s", e)
             return {}
-        
-    def fetch_symbol_data(self, symbol):
+
+    def fetch_symbol_data(self, login_manager, symbol):
         """Get the latest news for a symbol."""
-        url = f"{utils.PLATFORM_URL}/market-data-api/{self.system_uuid}/api/trading-view/symbols?symbol={symbol}"
+        url = f"{utils.PLATFORM_URL}/market-data-api/{login_manager.system_uuid}/api/trading-view/symbols?symbol={symbol}" # pylint: disable=line-too-long
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
             "Origin": "https://platform.citytradersimperium.com",
             "Referer": "https://platform.citytradersimperium.com/dashboard",
             "Accept-Encoding": "gzip, deflate, br",
@@ -206,7 +217,12 @@ class PriceData:
 
         session = requests.Session()
         session.headers.update(headers)
-        session.cookies.set("co-auth", self.cookie, domain="citytradersimperium.com", path="/mtr-backend/refresh-token")
+        session.cookies.set(
+            "co-auth",
+            login_manager.cookie,
+            domain="citytradersimperium.com",
+            path="/mtr-backend/refresh-token",
+        )
         try:
             response = session.get(url)
             response.raise_for_status()
@@ -214,4 +230,37 @@ class PriceData:
             return symbol_data
         except requests.exceptions.RequestException as e:
             print(f"Failed to get symbol data: {e}")
+            return None
+
+    def fetch_market_watch(self, login_manager, symbol):
+        """Fetch market watch data."""
+        url = f"{utils.PLATFORM_URL}/mtr-api/{login_manager.system_uuid}/quotations?symbols={symbol}" # pylint: disable=line-too-long
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", # pylint: disable=line-too-long
+            "Origin": utils.PLATFORM_URL,
+            "Referer": f"{utils.PLATFORM_URL}/dashboard",
+            "Auth-trading-api": login_manager.auth_trading_api,
+            "Cookie": f"co-auth={login_manager.cookie}",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Sec-CH-UA": '"Brave";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": "Windows",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-GPC": "1",
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            market_watch_data = response.json()
+            return market_watch_data
+        except requests.exceptions.RequestException as e:
+            log.error("Failed to fetch market watch data: %s", e)
             return None

@@ -27,9 +27,9 @@ def calculate_atr_from_market_data(
     Returns:
     - ATR value for the given symbol.
     """
-    atr_data = PriceData(login_manager)
+    atr_data = PriceData()
     try:
-        data = atr_data.fetch_atr_data(symbol, resolution, 50)
+        data = atr_data.fetch_atr_data(login_manager, symbol, resolution, 50)
         # log.info("ATR data: %s", data)
         if data is None or data.empty:
             log.error("Failed to fetch data for ATR calculation.")
