@@ -36,11 +36,11 @@ trading_symbols = forex_pairs + index_symbols + crypto_pairs
 ny_timezone = timezone("America/New_York")
 
 forex_market_hours = [
-    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-    {"start": "Monday 18:00:00", "end": "Tuesday 16:30:00"},
-    {"start": "Tuesday 18:00:00", "end": "Wednesday 16:30:00"},
-    {"start": "Wednesday 18:00:00", "end": "Thursday 16:30:00"},
-    {"start": "Thursday 18:00:00", "end": "Friday 16:30:00"},
+    {"start": "Monday 00:00:00", "end": "Monday 16:59:00"},
+    {"start": "Monday 18:00:00", "end": "Tuesday 16:59:00"},
+    {"start": "Tuesday 18:00:00", "end": "Wednesday 16:59:00"},
+    {"start": "Wednesday 18:00:00", "end": "Thursday 16:59:00"},
+    {"start": "Thursday 18:00:00", "end": "Friday 16:59:00"},
 ]
 
 forex_daily_swap = {
@@ -49,11 +49,11 @@ forex_daily_swap = {
 }
 
 index_market_hours = [
-    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-    {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
-    {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
-    {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
-    {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
+    {"start": "Monday 00:00:00", "end": "Monday 16:59:00"},
+    {"start": "Monday 18:30:00", "end": "Tuesday 16:59:00"},
+    {"start": "Tuesday 18:30:00", "end": "Wednesday 16:59:00"},
+    {"start": "Wednesday 18:30:00", "end": "Thursday 16:59:00"},
+    {"start": "Thursday 18:30:00", "end": "Friday 16:59:00"},
 ]
 
 index_daily_swap = {
