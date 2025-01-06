@@ -24,9 +24,9 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
     Indicators,
 )
 
-forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
+forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
-crypto_pairs = ["BTCUSDC"]
+crypto_pairs = []
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
 standard_symbols = [pair for pair in forex_pairs if pair not in jpy_symbols]
@@ -669,7 +669,10 @@ def run_strategy():
                 current_price = df["c"].iloc[-1]
                 spread = utils.check_spread(login_manager, symbol)
                 atr = Indicators.calculate_atr(df, length=14).iloc[-1]
-                if spread is not None and spread < atr * 1.2:
+                if (
+                    spread is not None
+                    and spread < atr * 1.2
+                ):
                     direction = identify_trade_signal(
                         df,
                         symbol,
@@ -684,10 +687,11 @@ def run_strategy():
                         stop_loss = Indicators.calculate_super_trend(
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
+                        stop_loss_distance = abs(current_price - stop_loss)
                         if symbol == "BTCUSDC":
-                            account_balance = price_data.fetch_account_balance(
+                            account_balance = float(price_data.fetch_account_balance(
                                 login_manager
-                            )
+                            )["balance"])
                             if direction == "BUY":
                                 take_profit = current_price + (account_balance * 0.75)
                             elif direction == "SELL":
@@ -700,16 +704,24 @@ def run_strategy():
                             volume = 0.01
                         else:
                             volume = calc_volume(login_manager, symbol, stop_loss)
-                        if stop_loss and take_profit and volume:
-                            log.info("Entering trade for %s", symbol)
-                            utils.enter_trade(
-                                login_manager,
-                                symbol,
-                                direction,
-                                volume,
-                                stop_loss,
-                                take_profit,
-                            )
+                        if (stop_loss
+                            and take_profit
+                            and volume
+                        ):
+                            if stop_loss_distance > atr * 1.5:
+                                log.info("Entering trade for %s", symbol)
+                                utils.enter_trade(
+                                    login_manager,
+                                    symbol,
+                                    direction,
+                                    volume,
+                                    stop_loss,
+                                    take_profit,
+                                )
+                            else:
+                                utils.print_boxed_message(
+                                    f"Stop loss too close to current price for {symbol}. Skipping."
+                                )
                     else:
                         utils.print_boxed_message(
                             f"No trade signal identified for {symbol}. Skipping."
@@ -718,6 +730,29 @@ def run_strategy():
                     utils.print_boxed_message(
                         f"Spread is None or too high for {symbol}. Skipping."
                     )
+
+        # Fetch open positions again and build the DataFrame
+        open_positions_response = utils.fetch_open_positions_once(login_manager)
+        open_positions = (
+            open_positions_response.get("positions", [])
+            if open_positions_response
+            else []
+        )
+        df_open_positions = pd.DataFrame(open_positions)
+        if not df_open_positions.empty:
+            df_open_positions = df_open_positions[["id", "symbol", "volume", "side", "netProfit"]]
+            df_open_positions["netProfit"] = df_open_positions["netProfit"].astype(float)
+            total_net_profit = df_open_positions["netProfit"].sum()
+            df_open_positions.loc["Total"] = df_open_positions.sum(numeric_only=True)
+            df_open_positions.at["Total", "id"] = ""
+            df_open_positions.at["Total", "symbol"] = ""
+            df_open_positions["volume"] = df_open_positions["volume"].astype(str)
+            df_open_positions.at["Total", "volume"] = ""    
+            df_open_positions.at["Total", "side"] = ""
+            df_open_positions.at["Total", "netProfit"] = total_net_profit
+            df_open_positions.fillna("", inplace=True)
+            print(df_open_positions)
+
         time.sleep(60)
 
 
