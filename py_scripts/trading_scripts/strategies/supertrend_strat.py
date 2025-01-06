@@ -24,9 +24,9 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
     Indicators,
 )
 
-forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "GBPJPY", "NZDUSD", "AUDUSD"]
+forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
-crypto_pairs = ["BTCUSDC"]
+crypto_pairs = []
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]
 standard_symbols = [pair for pair in forex_pairs if pair not in jpy_symbols]
@@ -36,11 +36,11 @@ trading_symbols = forex_pairs + index_symbols + crypto_pairs
 ny_timezone = timezone("America/New_York")
 
 forex_market_hours = [
-    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-    {"start": "Monday 18:00:00", "end": "Tuesday 16:30:00"},
-    {"start": "Tuesday 18:00:00", "end": "Wednesday 16:30:00"},
-    {"start": "Wednesday 18:00:00", "end": "Thursday 16:30:00"},
-    {"start": "Thursday 18:00:00", "end": "Friday 16:30:00"},
+    {"start": "Monday 00:00:00", "end": "Monday 16:59:00"},
+    {"start": "Monday 18:00:00", "end": "Tuesday 16:59:00"},
+    {"start": "Tuesday 18:00:00", "end": "Wednesday 16:59:00"},
+    {"start": "Wednesday 18:00:00", "end": "Thursday 16:59:00"},
+    {"start": "Thursday 18:00:00", "end": "Friday 16:59:00"},
 ]
 
 forex_daily_swap = {
@@ -49,11 +49,11 @@ forex_daily_swap = {
 }
 
 index_market_hours = [
-    {"start": "Monday 00:00:00", "end": "Monday 16:30:00"},
-    {"start": "Monday 18:30:00", "end": "Tuesday 16:30:00"},
-    {"start": "Tuesday 18:30:00", "end": "Wednesday 16:30:00"},
-    {"start": "Wednesday 18:30:00", "end": "Thursday 16:30:00"},
-    {"start": "Thursday 18:30:00", "end": "Friday 16:30:00"},
+    {"start": "Monday 00:00:00", "end": "Monday 16:59:00"},
+    {"start": "Monday 18:30:00", "end": "Tuesday 16:59:00"},
+    {"start": "Tuesday 18:30:00", "end": "Wednesday 16:59:00"},
+    {"start": "Wednesday 18:30:00", "end": "Thursday 16:59:00"},
+    {"start": "Thursday 18:30:00", "end": "Friday 16:59:00"},
 ]
 
 index_daily_swap = {
@@ -194,7 +194,7 @@ def identify_trade_signal(
     Returns:
         str: The current trend ("up", "down", or "none").
     """
-    aroon_threshold = 60
+    aroon_threshold = 40
 
     supertrend = Indicators.calculate_super_trend(
         df, length=st_length, multiplier=st_multiplier
@@ -206,15 +206,25 @@ def identify_trade_signal(
     current_price = df["c"].iloc[-1]
     current_high = df["h"].iloc[-1]
     current_low = df["l"].iloc[-1]
+    last_5_highs = df["h"].iloc[-5:]
+    last_5_highs_max = last_5_highs.max()
+    last_5_highs_index = last_5_highs.idxmax()
+    last_5_highs_pos = df.index.get_loc(last_5_highs_index)
     last_10_highs = df["h"].iloc[-11:-1]
     last_10_highs_max = last_10_highs.max()
     last_10_highs_index = last_10_highs.idxmax()
     last_10_highs_pos = df.index.get_loc(last_10_highs_index)
+    last_5_lows = df["l"].iloc[-5:]
+    last_5_lows_min = last_5_lows.min()
+    last_5_lows_index = last_5_lows.idxmin()
+    last_5_lows_pos = df.index.get_loc(last_5_lows_index)
     last_10_lows = df["l"].iloc[-11:-1]
     last_10_lows_min = last_10_lows.min()
     last_10_lows_index = last_10_lows.idxmin()
     last_10_lows_pos = df.index.get_loc(last_10_lows_index)
-    decimal_places = 5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
+    decimal_places = (
+        5 if symbol in standard_symbols else 3 if symbol in jpy_symbols else 2
+    )
 
     super_trend = round(
         supertrend[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1], decimal_places
@@ -226,14 +236,21 @@ def identify_trade_signal(
     rsi_k_last_5_max = round(max(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     rsi_k_last_5_min = round(min(stoch_rsi["STOCHRSIk_14_14_3_3"].iloc[-5:]), 2)
     keltner_upper_at_max = round(
-        keltner_channels["KCUe_20_1.5"].iloc[last_10_highs_pos],
-        decimal_places
+        keltner_channels["KCUe_20_1.5"].iloc[last_10_highs_pos], decimal_places
     )
     keltner_lower_at_min = round(
-        keltner_channels["KCLe_20_1.5"].iloc[last_10_lows_pos],
-        decimal_places
+        keltner_channels["KCLe_20_1.5"].iloc[last_10_lows_pos], decimal_places
     )
-    keltner_basis = round(keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places)
+    keltner_basis_at_max = round(
+        keltner_channels["KCBe_20_1.5"].iloc[last_5_highs_pos], decimal_places
+    )
+    keltner_basis_at_min = round(
+        keltner_channels["KCBe_20_1.5"].iloc[last_5_lows_pos], decimal_places
+    )
+    keltner_basis = round(
+        keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places
+    )
+    atr = round(Indicators.calculate_atr(df, length=14).iloc[-1], decimal_places)
 
     if current_price > super_trend:
         log.info(
@@ -256,12 +273,15 @@ def identify_trade_signal(
                     last_10_highs_max,
                     keltner_upper_at_max,
                 )
-                if current_low <= keltner_basis:
+                if (
+                    last_5_lows_min <= (keltner_basis_at_min + (atr / 2))
+                    and current_high > keltner_basis
+                ):
                     log.info(
-                        "%s: Current low (%s) is below the Keltner Basis (%s). Continuing ...",
+                        "%s: Recent low (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        current_low,
-                        keltner_basis,
+                        last_5_lows_min,
+                        keltner_basis_at_min,
                     )
                     if aroon_osc >= aroon_threshold:
                         log.info(
@@ -281,7 +301,7 @@ def identify_trade_signal(
                             return "BUY"
                         log.info(
                             "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
-    is below RSId (%s). No BUY signal.",
+is below RSId (%s). No BUY signal.",
                             symbol,
                             round(rsi_k_last_5_min, decimal_places),
                             round(rsi_k, decimal_places),
@@ -298,8 +318,8 @@ def identify_trade_signal(
                     log.info(
                         "%s: Price (%s) did not pull back to Keltner Basis: %s. No BUY signal.",
                         symbol,
-                        current_low,
-                        keltner_basis,
+                        last_5_lows_min,
+                        keltner_basis_at_min,
                     )
             else:
                 log.info(
@@ -315,15 +335,8 @@ def identify_trade_signal(
                 current_price,
                 ema_50_value,
             )
-    else:
-        log.info(
-            "%s: Price (%s) is below the SuperTrend: %s. No BUY signal.",
-            symbol,
-            current_price,
-            super_trend,
-        )
 
-    if current_price < super_trend:
+    elif current_price < super_trend:
         log.info(
             "%s: Price (%s) is below the SuperTrend (%s) looking for SELL signal.",
             symbol,
@@ -344,12 +357,15 @@ def identify_trade_signal(
                     last_10_lows_min,
                     keltner_lower_at_min,
                 )
-                if current_high >= keltner_basis:
+                if (
+                    last_5_highs_max >= (keltner_basis_at_max - (atr / 2))
+                    and current_low < keltner_basis
+                ):
                     log.info(
                         "%s: Current high (%s) is above the Keltner Basis (%s). Continuing ...",
                         symbol,
-                        current_high,
-                        keltner_basis,
+                        last_5_highs_max,
+                        keltner_basis_at_max,
                     )
                     if aroon_osc <= -aroon_threshold:
                         log.info(
@@ -386,8 +402,8 @@ is above RSId (%s). No SELL signal.",
                     log.info(
                         "%s: Price (%s) did not rally to Keltner Basis: %s. No SELL signal.",
                         symbol,
-                        current_high,
-                        keltner_basis,
+                        last_5_highs_max,
+                        keltner_basis_at_max,
                     )
             else:
                 log.info(
@@ -554,7 +570,7 @@ def run_strategy():
         st_length = 50
         st_multiplier = 3.0
         ema_length = 50
-        aroon_length = 50
+        aroon_length = 24
         login_manager = LoginManager()
         open_positions = []
         utils.setup_logging()
@@ -653,7 +669,10 @@ def run_strategy():
                 current_price = df["c"].iloc[-1]
                 spread = utils.check_spread(login_manager, symbol)
                 atr = Indicators.calculate_atr(df, length=14).iloc[-1]
-                if spread is not None and spread < atr * 1.2:
+                if (
+                    spread is not None
+                    and spread < atr * 1.2
+                ):
                     direction = identify_trade_signal(
                         df,
                         symbol,
@@ -668,8 +687,15 @@ def run_strategy():
                         stop_loss = Indicators.calculate_super_trend(
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
+                        stop_loss_distance = abs(current_price - stop_loss)
                         if symbol == "BTCUSDC":
-                            take_profit = (0.75) / abs(current_price - stop_loss)
+                            account_balance = float(price_data.fetch_account_balance(
+                                login_manager
+                            )["balance"])
+                            if direction == "BUY":
+                                take_profit = current_price + (account_balance * 0.75)
+                            elif direction == "SELL":
+                                take_profit = current_price - (account_balance * 0.75)
                         else:
                             take_profit = calc_take_profit(
                                 direction, current_price, stop_loss, 2.8
@@ -678,16 +704,24 @@ def run_strategy():
                             volume = 0.01
                         else:
                             volume = calc_volume(login_manager, symbol, stop_loss)
-                        if stop_loss and take_profit and volume:
-                            log.info("Entering trade for %s", symbol)
-                            utils.enter_trade(
-                                login_manager,
-                                symbol,
-                                direction,
-                                volume,
-                                stop_loss,
-                                take_profit,
-                            )
+                        if (stop_loss
+                            and take_profit
+                            and volume
+                        ):
+                            if stop_loss_distance > atr * 1.5:
+                                log.info("Entering trade for %s", symbol)
+                                utils.enter_trade(
+                                    login_manager,
+                                    symbol,
+                                    direction,
+                                    volume,
+                                    stop_loss,
+                                    take_profit,
+                                )
+                            else:
+                                utils.print_boxed_message(
+                                    f"Stop loss too close to current price for {symbol}. Skipping."
+                                )
                     else:
                         utils.print_boxed_message(
                             f"No trade signal identified for {symbol}. Skipping."
@@ -696,6 +730,29 @@ def run_strategy():
                     utils.print_boxed_message(
                         f"Spread is None or too high for {symbol}. Skipping."
                     )
+
+        # Fetch open positions again and build the DataFrame
+        open_positions_response = utils.fetch_open_positions_once(login_manager)
+        open_positions = (
+            open_positions_response.get("positions", [])
+            if open_positions_response
+            else []
+        )
+        df_open_positions = pd.DataFrame(open_positions)
+        if not df_open_positions.empty:
+            df_open_positions = df_open_positions[["id", "symbol", "volume", "side", "netProfit"]]
+            df_open_positions["netProfit"] = df_open_positions["netProfit"].astype(float)
+            total_net_profit = df_open_positions["netProfit"].sum()
+            df_open_positions.loc["Total"] = df_open_positions.sum(numeric_only=True)
+            df_open_positions.at["Total", "id"] = ""
+            df_open_positions.at["Total", "symbol"] = ""
+            df_open_positions["volume"] = df_open_positions["volume"].astype(str)
+            df_open_positions.at["Total", "volume"] = ""    
+            df_open_positions.at["Total", "side"] = ""
+            df_open_positions.at["Total", "netProfit"] = total_net_profit
+            df_open_positions.fillna("", inplace=True)
+            print(df_open_positions)
+
         time.sleep(60)
 
 
