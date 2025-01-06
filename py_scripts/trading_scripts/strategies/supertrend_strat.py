@@ -204,9 +204,9 @@ def identify_trade_signal(
     stoch_rsi = Indicators.calculate_stoch_rsi(df)
     keltner_channels = Indicators.calculate_keltner_channels(df)
     current_price = df["c"].iloc[-1]
-    # current_high = df["h"].iloc[-1]
-    # current_low = df["l"].iloc[-1]
-    last_5_highs = df["h"].iloc[-6:-1]
+    current_high = df["h"].iloc[-1]
+    current_low = df["l"].iloc[-1]
+    last_5_highs = df["h"].iloc[-5:]
     last_5_highs_max = last_5_highs.max()
     last_5_highs_index = last_5_highs.idxmax()
     last_5_highs_pos = df.index.get_loc(last_5_highs_index)
@@ -214,7 +214,7 @@ def identify_trade_signal(
     last_10_highs_max = last_10_highs.max()
     last_10_highs_index = last_10_highs.idxmax()
     last_10_highs_pos = df.index.get_loc(last_10_highs_index)
-    last_5_lows = df["l"].iloc[-6:-1]
+    last_5_lows = df["l"].iloc[-5:]
     last_5_lows_min = last_5_lows.min()
     last_5_lows_index = last_5_lows.idxmin()
     last_5_lows_pos = df.index.get_loc(last_5_lows_index)
@@ -247,6 +247,10 @@ def identify_trade_signal(
     keltner_basis_at_min = round(
         keltner_channels["KCBe_20_1.5"].iloc[last_5_lows_pos], decimal_places
     )
+    keltner_basis = round(
+        keltner_channels["KCBe_20_1.5"].iloc[-1], decimal_places
+    )
+    atr = round(Indicators.calculate_atr(df, length=14).iloc[-1], decimal_places)
 
     if current_price > super_trend:
         log.info(
@@ -269,7 +273,10 @@ def identify_trade_signal(
                     last_10_highs_max,
                     keltner_upper_at_max,
                 )
-                if last_5_lows_min <= keltner_basis_at_min:
+                if (
+                    last_5_lows_min <= (keltner_basis_at_min + (atr / 2))
+                    and current_high > keltner_basis
+                ):
                     log.info(
                         "%s: Recent low (%s) is below the Keltner Basis (%s). Continuing ...",
                         symbol,
@@ -294,7 +301,7 @@ def identify_trade_signal(
                             return "BUY"
                         log.info(
                             "%s: Stochastic RSIk (%s) is above 30 or RSIk (%s) \
-    is below RSId (%s). No BUY signal.",
+is below RSId (%s). No BUY signal.",
                             symbol,
                             round(rsi_k_last_5_min, decimal_places),
                             round(rsi_k, decimal_places),
@@ -350,7 +357,10 @@ def identify_trade_signal(
                     last_10_lows_min,
                     keltner_lower_at_min,
                 )
-                if last_5_highs_max >= keltner_basis_at_max:
+                if (
+                    last_5_highs_max >= (keltner_basis_at_max - (atr / 2))
+                    and current_low < keltner_basis
+                ):
                     log.info(
                         "%s: Current high (%s) is above the Keltner Basis (%s). Continuing ...",
                         symbol,
@@ -675,14 +685,13 @@ def run_strategy():
                             df, length=st_length, multiplier=st_multiplier
                         )[f"SUPERT_{st_length}_{st_multiplier}"].iloc[-1]
                         if symbol == "BTCUSDC":
+                            account_balance = price_data.fetch_account_balance(
+                                login_manager
+                            )
                             if direction == "BUY":
-                                take_profit = current_price + (0.75) / abs(
-                                    current_price - stop_loss
-                                )
+                                take_profit = current_price + (account_balance * 0.75)
                             elif direction == "SELL":
-                                take_profit = current_price - (0.75) / abs(
-                                    current_price - stop_loss
-                                )
+                                take_profit = current_price - (account_balance * 0.75)
                         else:
                             take_profit = calc_take_profit(
                                 direction, current_price, stop_loss, 2.8
