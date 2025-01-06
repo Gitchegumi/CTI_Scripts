@@ -204,8 +204,8 @@ def identify_trade_signal(
     stoch_rsi = Indicators.calculate_stoch_rsi(df)
     keltner_channels = Indicators.calculate_keltner_channels(df)
     current_price = df["c"].iloc[-1]
-    current_high = df["h"].iloc[-1]
-    current_low = df["l"].iloc[-1]
+    # current_high = df["h"].iloc[-1]
+    # current_low = df["l"].iloc[-1]
     last_5_highs = df["h"].iloc[-6:-1]
     last_5_highs_max = last_5_highs.max()
     last_5_highs_index = last_5_highs.idxmax()
