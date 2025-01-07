@@ -1,8 +1,5 @@
 """A module for implementing a trading strategy based on Keltner Channels,
 ATR, Stochastic RSI, and MACD indicators.
-
-Returns:
-    None
 """
 
 import os
