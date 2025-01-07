@@ -21,7 +21,7 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
     Indicators,
 )
 
-forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "NZDUSD", "AUDUSD"]
+forex_pairs = ["EURUSD", "USDJPY", "NZDUSD", "AUDUSD"]
 index_symbols = ["US500", "US30"]
 crypto_pairs = []
 
