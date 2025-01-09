@@ -1,8 +1,5 @@
 """A module for implementing a trading strategy based on Keltner Channels,
 ATR, Stochastic RSI, and MACD indicators.
-
-Returns:
-    None
 """
 
 import os
@@ -24,8 +21,8 @@ from trading_scripts.api.indicators import (  # pylint: disable=import-error
     Indicators,
 )
 
-forex_pairs = ["EURUSD", "USDJPY", "USDCAD", "NZDUSD", "AUDUSD"]
-index_symbols = ["US500", "US30"]
+forex_pairs = ["EURUSD", "NZDUSD", "AUDUSD"]
+index_symbols = []
 crypto_pairs = []
 
 jpy_symbols = [pair for pair in forex_pairs if "JPY" in pair]

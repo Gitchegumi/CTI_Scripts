@@ -15,7 +15,7 @@ python-dotenv = "^1.0.1"
 requests = "^2.32.3"
 cloudscraper = "^1.2.71"
 pandas = "^2.2.3"
-ta-lib = "0.5.1"
+ta-lib = "0.5.3"
 pandas-ta = "^0.3.14b0"
 setuptools = "^75.6.0"
 numpy = "1.26.4"
@@ -33,6 +33,7 @@ matplotlib = "^3.10.0"
 nbformat = "^5.10.4"
 ipympl = "^0.9.6"
 backtrader = "^1.9.78.123"
+beautifulsoup4 = "^4.12.3"
 
 [build-system]
 requires = ["poetry-core"]
