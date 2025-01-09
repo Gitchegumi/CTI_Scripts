@@ -4,6 +4,8 @@ Returns:
     dict: A dictionary containing market data.
 """
 
+import os
+import sys
 import logging as log
 import time
 from datetime import datetime
@@ -55,18 +57,21 @@ class PriceData:
                     return data
                 log.error("Failed to fetch market data for %s: %s", symbol, data)
                 return {}
-            except requests.exceptions.RequestException as e:
-                if response.status_code in [502, 504]:
+            except requests.exceptions.ReadTimeout:
+                if attempt < RETRIES - 1:
                     log.warning(
-                        "Attempt %d: Received %s error. Retrying in %s seconds...",
+                        "Attempt %d: Read timeout occurred. Retrying in %s seconds...",
                         attempt + 1,
-                        response.status_code,
                         RETRY_DELAY
                     )
                     time.sleep(RETRY_DELAY)
                 else:
-                    log.error("Failed to fetch market data: %s", e)
-                    return {}
+                    log.error("Read timeout occurred after %d retries.", RETRIES)
+                    os.execv(
+                        sys.executable,
+                        [sys.executable] + sys.argv,
+                    )
+                    raise
         log.error("Failed to fetch market data after %s RETRIES", RETRIES)
         return {}
 
