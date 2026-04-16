@@ -4,22 +4,19 @@ version = "0.2.0"
 description = "CTI prop firm trading tools — signal engine (TradeGumi), legacy scripts, backtesting"
 authors = ["Gitchegumi <mat@gitchegumi.com>"]
 readme = "README.md"
-packages = [
-    { include = "tradegumi" },
-    { include = "trading_scripts" },
-]
+packages = [{ include = "tradegumi" }, { include = "trading_scripts" }]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.13"
 selenium = "^4.27.1"
 python-dotenv = "^1.0.1"
 requests = "^2.32.3"
 cloudscraper = "^1.2.71"
 pandas = "^2.2.3"
-ta-lib = "0.6.3"
-pandas-ta = "^0.3.14b0"
+ta-lib = ">=0.6.3"
+pandas-ta = "^0.4.71b0"
 setuptools = "^78.1.0"
-numpy = "2.2.4"
+numpy = "2.2.6"
 backtrader = "^1.9.78.123"
 matplotlib = "^3.10.0"
 pytz = ">=2024.1"
