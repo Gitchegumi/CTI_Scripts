@@ -1,0 +1,6 @@
+[virtualenvs]
+# Create virtual environment in project directory
+in-project = true
+
+# Path relative to project root where .venv will be created
+path = ".venv"
