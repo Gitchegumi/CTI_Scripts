@@ -1,8 +1,27 @@
 """Configuration for TradeGumi.
 
-All values sourced from environment variables. No hardcoded secrets.
+All values sourced from environment variables or .env file. No hardcoded secrets.
 """
 import os
+from pathlib import Path
+
+# Load .env file from project root (CTI_Scripts/.env)
+_project_root = Path(__file__).resolve().parent.parent
+_env_file = _project_root / ".env"
+if _env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_file)
+    except ImportError:
+        # python-dotenv not installed — manual fallback
+        with open(_env_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, _, val = line.partition("=")
+                    os.environ.setdefault(key.strip(), val.strip())
 
 # ── Oanda ──────────────────────────────────────────────────────────────────────
 OANDA_API_KEY = os.getenv("OANDA_API_KEY", "")
