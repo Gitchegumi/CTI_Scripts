@@ -194,14 +194,12 @@ def run_scan(client: ExecutionClient) -> dict:
     tier1 = [s for s, d in ranked if d["tier"] == "Tier 1"]
     tier2 = [s for s, d in ranked if d["tier"] == "Tier 2"]
     below = [s for s, d in ranked if d["tier"] == "Below Threshold"]
-    observation = [s for s in config.OBSERVATION_ONLY]
 
     output = {
         "timestamp": now.isoformat(),
         "tier1": tier1,
         "tier2": tier2,
         "below": below,
-        "observation": observation,
         "detail": results,
     }
 
@@ -243,9 +241,5 @@ def format_watchlist_text(scan_result: dict) -> str:
         lines.append(f"⬛ Below Threshold: {', '.join(below[:10])}")
         if len(below) > 10:
             lines.append(f"...and {len(below) - 10} more")
-
-    obs = scan_result.get("observation", [])
-    if obs:
-        lines.append(f"👁️ Observation Only: {', '.join(obs)}")
 
     return "\n".join(lines)

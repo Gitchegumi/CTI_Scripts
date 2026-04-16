@@ -41,12 +41,11 @@ CRYPTO = ["BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "SOLUSD", "ADAUSD"]
 
 ALL_SYMBOLS = FOREX_MAJORS + FOREX_MINORS + COMMODITIES + INDICES + CRYPTO
 
-# GBPJPY is observation-only — never execute, only watch
-OBSERVATION_ONLY = {"GBPJPY"}
-EXECUTION_SYMBOLS = [s for s in ALL_SYMBOLS if s not in OBSERVATION_ONLY]
+# Pre-session scanner determines daily watchlist — no hardcoded symbol restrictions
+EXECUTION_SYMBOLS = ALL_SYMBOLS
 
-JPY_SYMBOLS = [s for s in EXECUTION_SYMBOLS if "JPY" in s]
-STANDARD_SYMBOLS = [s for s in EXECUTION_SYMBOLS if s not in JPY_SYMBOLS]
+JPY_SYMBOLS = [s for s in ALL_SYMBOLS if "JPY" in s]
+STANDARD_SYMBOLS = [s for s in ALL_SYMBOLS if s not in JPY_SYMBOLS]
 
 # ── Validate ─────────────────────────────────────────────────────────────────
 def validate_config():

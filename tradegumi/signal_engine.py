@@ -250,10 +250,6 @@ class SignalEngine:
 
         Returns None if symbol fails any filter.
         """
-        if symbol in config.OBSERVATION_ONLY:
-            log.debug("%s is observation-only, skipping", symbol)
-            return None
-
         if symbol not in self.watchlist:
             log.debug("%s not on watchlist, skipping", symbol)
             return None
