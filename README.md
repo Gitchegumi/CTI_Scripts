@@ -7,6 +7,12 @@ Pure Python signal engine for the City Traders Imperium (CTI) prop firm strategy
 ### 1. Install dependencies
 
 ```bash
+cd src && poetry install
+```
+
+Or without Poetry:
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -44,6 +50,14 @@ TRADEGUMI_MODE=alert_only
 ### 3. Run it
 
 ```bash
+cd src
+poetry run python -m tradegumi.main
+```
+
+Or without Poetry:
+
+```bash
+cd src
 python -m tradegumi.main
 ```
 
@@ -126,20 +140,28 @@ Each indicator also produces a **0-1 strength score** (Layer 2 quality scoring).
 ## Architecture
 
 ```
-tradegumi/
-├── main.py                 # Entry point, mode switch, 60s main loop
-├── config.py               # .env loader + all configuration
-├── api/
-│   ├── base_client.py      # Abstract ExecutionClient interface
-│   ├── oanda_client.py      # Oanda v20 REST implementation
-│   └── matchtrader_client.py # Stub (Stage 2)
-├── indicators.py            # pandas_ta wrappers + Layer 2 scoring
-├── signal_engine.py         # Trend filter + 4-layer stack + confidence
-├── pre_session_scanner.py   # Morning ranked watchlist (Layer 1)
-├── alerts.py                # Discord webhook alerter
-├── risk.py                  # Position sizing, daily drawdown checks
-├── session_rules.py         # Trading hours, swap blackout, DOW bias
-└── trailing_sl.py           # 4-tier ATR trailing stop manager
+CTI_Scripts/
+├── .env.example            # Template for your API keys
+├── requirements.txt        # pip deps (Poetry preferred)
+├── README.md
+└── src/
+    ├── pyproject.toml      # Poetry project (both packages)
+    ├── tradegumi/           # Signal engine (active development)
+    │   ├── main.py          # Entry point, mode switch, 60s main loop
+    │   ├── config.py        # .env loader + all configuration
+    │   ├── api/
+    │   │   ├── base_client.py    # Abstract ExecutionClient interface
+    │   │   ├── oanda_client.py    # Oanda v20 REST implementation
+    │   │   └── matchtrader_client.py  # Stub (Stage 2)
+    │   ├── indicators.py    # pandas_ta wrappers + Layer 2 scoring
+    │   ├── signal_engine.py  # Trend filter + 4-layer stack + confidence
+    │   ├── pre_session_scanner.py  # Morning ranked watchlist (Layer 1)
+    │   ├── alerts.py        # Discord webhook alerter
+    │   ├── risk.py          # Position sizing, daily drawdown checks
+    │   ├── session_rules.py # Trading hours, swap blackout, DOW bias
+    │   └── trailing_sl.py   # 4-tier ATR trailing stop manager
+    ├── trading_scripts/     # Legacy MT5/MetaTrader scripts (reference)
+    └── backtesting/         # Historical data + backtest notebooks
 ```
 
 **Provider swap:** Oanda and MatchTrader both implement the same `ExecutionClient` interface. Stage 2 = swap the client, keep the signal engine.
@@ -161,15 +183,17 @@ Oanda API reference: https://developer.oanda.com/rest-live-v20/introduction/
 
 ## Dependencies
 
-```
-pandas
-pandas_ta
-requests
-python-dotenv
-pytz
+**Poetry (recommended):**
+```bash
+cd src && poetry install
 ```
 
-Install all: `pip install -r requirements.txt`
+**pip:**
+```bash
+pip install -r requirements.txt
+```
+
+Core: pandas, pandas_ta, requests, python-dotenv, pytz
 
 ## Stage 2 Roadmap
 

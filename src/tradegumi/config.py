@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 # Load .env file from project root (CTI_Scripts/.env)
-_project_root = Path(__file__).resolve().parent.parent
+_project_root = Path(__file__).resolve().parent.parent.parent
 _env_file = _project_root / ".env"
 if _env_file.exists():
     try:

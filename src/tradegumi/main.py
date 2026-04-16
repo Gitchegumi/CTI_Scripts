@@ -21,7 +21,7 @@ import requests
 from pytz import timezone
 
 # Setup paths so tradegumi is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # src/tradegumi → src/
 
 from tradegumi import config
 from tradegumi.api.oanda_client import OandaClient
