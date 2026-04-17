@@ -159,16 +159,23 @@ def tier_from_score(score: float) -> str:
     return "Below Threshold"
 
 
-def run_scan(client: ExecutionClient) -> dict:
-    """Run full Layer 1 scan across all execution symbols.
+def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict:
+    """Run full Layer 1 scan across available execution symbols.
+
+    Args:
+        client: Execution client for market data.
+        available: Set of CTI symbols available on this account.
+                   If None, scans all EXECUTION_SYMBOLS.
 
     Returns dict suitable for Discord embed + watchlist persistence.
     """
     now = datetime.now(NY_TZ)
     dow_bias = day_of_week_bias("EURUSD", now)  # same bias for all
 
+    # Only scan instruments that are actually available on this account
+    scan_symbols = available if available else set(config.EXECUTION_SYMBOLS)
     results = {}
-    for symbol in config.EXECUTION_SYMBOLS:
+    for symbol in scan_symbols:
         try:
             adr_consumed  = calc_adr_consumed(client, symbol)
             vol_regime    = calc_volatility_regime(client, symbol)

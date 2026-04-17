@@ -103,11 +103,11 @@ def check_available_instruments(client: ExecutionClient) -> set[str]:
 
 # ── Symbol scanning ────────────────────────────────────────────────────────────
 
-def scan_and_alert(client: ExecutionClient) -> None:
+def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -> None:
     """Run the pre-session Layer 1 scanner and post watchlist to Discord."""
     log.info("Running pre-session Layer 1 scan...")
     try:
-        result = run_scan(client)
+        result = run_scan(client, available=available)
         text   = format_watchlist_text(result)
         post_watchlist(text)
         log.info("Pre-session scan complete: Tier1=%s Tier2=%s",
@@ -205,7 +205,7 @@ def run(mode: str):
 
     log.info("Connected to Oanda — account=%s", config.OANDA_ACCOUNT_ID)
 
-    scan_and_alert(client)
+    scan_and_alert(client, available=available)
 
     log.info("Entering main loop — checking %d available symbols every 60s", len(available))
     while True:
@@ -256,7 +256,8 @@ def main():
     client = make_client(mode)
 
     if args.scan_only:
-        scan_and_alert(client)
+        available = check_available_instruments(client)
+        scan_and_alert(client, available=available)
         return
 
     # Graceful shutdown on SIGINT/SIGTERM
