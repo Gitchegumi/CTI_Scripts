@@ -106,6 +106,20 @@ def check_available_instruments(client: ExecutionClient) -> set[str]:
 
 def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -> None:
     """Run the pre-session Layer 1 scanner and post watchlist to Discord."""
+    from tradegumi.session_rules import is_trading_day
+    now_ny = datetime.now(NY_TZ)
+
+    # Weekend / holiday check
+    if not is_trading_day("EURUSD", when=now_ny):
+        day_name = now_ny.strftime("%A")
+        log.info("Market closed (%s) — sending weekend message", day_name)
+        post_watchlist(
+            f"🌅 **Morning Watchlist**\n"
+            f"It's {day_name} — markets are closed.\n"
+            f"All quiet here. Enjoy the time off! 🌴",
+        )
+        return
+
     log.info("Running pre-session Layer 1 scan...")
     try:
         result = run_scan(client, available=available)
