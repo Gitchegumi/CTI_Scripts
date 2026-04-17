@@ -90,6 +90,10 @@ All settings are in `.env` or environment variables. Defaults are sane for CTI s
 | `DISCORD_WEBHOOK_URL` | *(required)* | Discord webhook for trade alerts |
 | `TRADEGUMI_MODE` | `alert_only` | alert_only / demo / live |
 | `MAX_OPEN_POSITIONS` | `5` | Max simultaneous positions |
+| `CTI_PROGRAM` | `challenge` | `challenge` (2-step) or `instant` (instant funding) |
+| `CTI_PHASE` | `1` | `1` = Phase 1 (10% target), `2` = Phase 2 (5% target), `3` = Funded (10% target) |
+| `CTI_DAILY_LOSS_PCT` | `0.05` | 5% daily loss limit |
+| `CTI_MAX_DD_PCT` | `0.10` | 10% max drawdown |
 | `RISK_PER_TRADE` | `0.0025` | 0.25% account risk per trade |
 | `SL_ATR_MULTIPLIER` | `3` | Stop loss = 3× ATR |
 | `TP_ATR_MULTIPLIER` | `12` | Take profit = 12× ATR (1:4 R:R) |
