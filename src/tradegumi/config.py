@@ -127,92 +127,59 @@ def from_oanda_symbol(oanda_sym: str) -> str:
     return oanda_sym.replace("_", "")
 
 
-# ── CTI Account Tiers ──────────────────────────────────────────────────────
-# Two program types: "challenge" (2-step) and "instant" (instant funding)
-# The bot auto-detects the tier from account balance.
-# Set CTI_PROGRAM env var to override: "challenge" (default) or "instant".
+# ── CTI Challenge Rules ────────────────────────────────────────────────────
+# All CTI accounts use the same percentages regardless of size.
+# The bot reads balance from Oanda API and calculates dollar amounts dynamically.
+# No hardcoded tier sizes — everything derives from live balance.
+#
+# CTI_PHASE env var:
+#   1 = Phase 1 (10% profit target)
+#   2 = Phase 2 (5% profit target)
+#   3 = Funded (5% first payout target, then scaling)
+#
+# CTI_PROGRAM env var:
+#   challenge = 2-Step Challenge (default)
+#   instant = Instant Funding
+#
+# Both programs: 5% daily loss limit, 10% max DD, 1:30 leverage
 
 CTI_PROGRAM = os.getenv("CTI_PROGRAM", "challenge").lower()  # "challenge" or "instant"
 CTI_PHASE = int(os.getenv("CTI_PHASE", "1"))  # 1=Phase 1, 2=Phase 2, 3=Funded
 
-# 2-Step Challenge tiers: profit targets 10% (Phase 1) / 5% (Phase 2)
-# Daily loss: 5% of start-of-day balance. Max drawdown: 10% of initial balance.
-CTI_CHALLENGE_TIERS = {
-    2500:   {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    5000:   {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    10000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    25000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    50000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    100000: {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-}
-
-# Instant Funding tiers: profit targets 10% (first payout) then scaling
-# Daily loss: same 5%. Max drawdown: 10% of initial balance.
-CTI_INSTANT_TIERS = {
-    2500:   {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    5000:   {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    10000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    20000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    40000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-    80000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
-}
+CTI_DAILY_LOSS_PCT = float(os.getenv("CTI_DAILY_LOSS_PCT", "0.05"))    # 5%
+CTI_MAX_DD_PCT = float(os.getenv("CTI_MAX_DD_PCT", "0.10"))             # 10%
 
 
 def get_cti_tier(balance: float) -> dict:
-    """Get CTI tier parameters based on account balance and configured phase.
+    """Get CTI parameters based on account balance and configured phase.
 
-    Phase is set via CTI_PHASE env var:
-      1 = Phase 1 (10% target)
-      2 = Phase 2 (5% target)
-      3 = Funded (no target — trade for profit share; risk limits still apply)
+    All CTI accounts use the same percentages. Balance comes from Oanda API.
+    Dollar amounts are calculated dynamically: e.g. daily loss = 5% of balance.
 
-    For instant funding: always funded, 10% target resets on each scale-up.
-    When CTI scales your account, the balance auto-updates and the bot
-    picks up the new tier.
-
-    Returns dict with: size, profit target, daily loss, max DD, phase, program.
+    When CTI issues a new (scaled) account, the balance changes automatically
+    and the bot picks up the correct dollar amounts.
     """
-    tiers = CTI_INSTANT_TIERS if CTI_PROGRAM == "instant" else CTI_CHALLENGE_TIERS
-    tier_sizes = sorted(tiers.keys(), reverse=True)
-    for size in tier_sizes:
-        if balance >= size:
-            tier_data = tiers[size].copy()
-            tier_data["size"] = size
-            tier_data["program"] = CTI_PROGRAM
-            # Determine active target from explicit phase
-            if CTI_PROGRAM == "instant":
-                tier_data["phase"] = 3
-                tier_data["phase_label"] = "Instant Funded"
-                tier_data["active_target_pct"] = tier_data["profit_target"]
-                tier_data["has_profit_target"] = True
-            elif CTI_PHASE == 3:
-                # Funded challenge account: no profit target, trade for profit share
-                tier_data["phase"] = 3
-                tier_data["phase_label"] = "Funded"
-                tier_data["active_target_pct"] = 0.0  # no target
-                tier_data["has_profit_target"] = False
-            elif CTI_PHASE == 1:
-                tier_data["phase"] = 1
-                tier_data["phase_label"] = "Phase 1"
-                tier_data["active_target_pct"] = tier_data["profit_target_p1"]
-                tier_data["has_profit_target"] = True
-            else:  # CTI_PHASE == 2
-                tier_data["phase"] = 2
-                tier_data["phase_label"] = "Phase 2"
-                tier_data["active_target_pct"] = tier_data["profit_target_p2"]
-                tier_data["has_profit_target"] = True
-            return tier_data
-    # Below smallest tier
-    smallest = tier_sizes[-1]
-    tier_data = tiers[smallest].copy()
-    tier_data["size"] = smallest
-    tier_data["program"] = CTI_PROGRAM
-    tier_data["phase"] = CTI_PHASE
-    tier_data["phase_label"] = "Phase 1" if CTI_PHASE == 1 else "Phase 2" if CTI_PHASE == 2 else "Funded"
-    tier_data["active_target_pct"] = tier_data.get("profit_target_p1", tier_data.get("profit_target", 0.10))
-    tier_data["has_profit_target"] = True
-    tier_data["underfunded"] = True
-    return tier_data
+    if CTI_PROGRAM == "instant":
+        phase_label = "Instant Funded"
+        active_target_pct = 0.10  # 10% for all instant accounts
+    elif CTI_PHASE == 1:
+        phase_label = "Phase 1"
+        active_target_pct = 0.10  # 10%
+    elif CTI_PHASE == 2:
+        phase_label = "Phase 2"
+        active_target_pct = 0.05  # 5%
+    else:  # Phase 3 = Funded
+        phase_label = "Funded"
+        active_target_pct = 0.05  # 5% first payout target
+
+    return {
+        "program": CTI_PROGRAM,
+        "phase": CTI_PHASE,
+        "phase_label": phase_label,
+        "active_target_pct": active_target_pct,
+        "daily_loss_pct": CTI_DAILY_LOSS_PCT,
+        "max_dd_pct": CTI_MAX_DD_PCT,
+    }
 
 
 # ── Validate ─────────────────────────────────────────────────────────────────

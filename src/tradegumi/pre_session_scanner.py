@@ -280,24 +280,20 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
                 _save_session_state(state)
             start_balance = float(state.get("start_balance", balance))
 
-            # CTI tier detection
+            # CTI metrics — all percentages, dollar amounts derived from live balance
             cti_tier = config.get_cti_tier(balance)
-            tier_size = cti_tier["size"]
-            daily_loss_pct = cti_tier["daily_loss"]
-            max_dd_pct = cti_tier["max_dd"]
+            daily_loss_pct = cti_tier["daily_loss_pct"]
+            max_dd_pct = cti_tier["max_dd_pct"]
             active_target_pct = cti_tier["active_target_pct"]
             program = cti_tier["program"]
             phase = cti_tier["phase"]
-            underfunded = cti_tier.get("underfunded", False)
+            phase_label = cti_tier["phase_label"]
 
-            # CTI metrics based on tier rules
-            # Daily loss limit = daily_loss_pct * start_of_day balance
-            # Max drawdown = max_dd_pct * initial (tier) balance
             session_pnl = nav - start_balance
             session_pnl_pct = (session_pnl / start_balance * 100) if start_balance else 0
 
-            # Profit target: active_target_pct * tier_size
-            profit_target_dollars = active_target_pct * tier_size
+            # Profit target: active_target_pct * start_balance (derived from balance)
+            profit_target_dollars = active_target_pct * start_balance
             profit_target_remaining = profit_target_dollars - max(0, session_pnl)
             profit_target_remaining_pct = max(0, (1 - max(0, session_pnl) / profit_target_dollars) * 100) if profit_target_dollars else 0
 
@@ -307,21 +303,11 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
             daily_loss_remaining = daily_loss_limit - daily_loss_used
             daily_loss_remaining_pct = max(0, (1 - daily_loss_used / daily_loss_limit) * 100) if daily_loss_limit else 0
 
-            # Max drawdown remaining: max_dd_pct * tier_size - total drawdown from tier size
-            max_dd_dollars = max_dd_pct * tier_size
-            drawdown_from_tier = tier_size - nav  # how far NAV is below tier starting balance
-            dd_remaining = max_dd_dollars - max(0, drawdown_from_tier)
-            dd_remaining_pct = max(0, (1 - max(0, drawdown_from_tier) / max_dd_dollars) * 100) if max_dd_dollars else 0
-
-            # Phase label
-            if program == "challenge":
-                phase_label = f"Phase {phase}"
-            elif program == "instant":
-                phase_label = "Instant"
-            else:
-                phase_label = program.title()
-            if underfunded:
-                phase_label += " (underfunded)"
+            # Max drawdown remaining: max_dd_pct * start_balance - total drawdown from start
+            max_dd_dollars = max_dd_pct * start_balance
+            drawdown_from_start = start_balance - nav  # how far NAV is below starting balance
+            dd_remaining = max_dd_dollars - max(0, drawdown_from_start)
+            dd_remaining_pct = max(0, (1 - max(0, drawdown_from_start) / max_dd_dollars) * 100) if max_dd_dollars else 0
 
             output["account"] = {
                 "balance": balance,
@@ -332,11 +318,12 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
                 "start_balance": start_balance,
                 "session_pnl": session_pnl,
                 "session_pnl_pct": session_pnl_pct,
-                # CTI tier info
+                # CTI info
                 "cti_program": program,
                 "cti_phase": phase,
                 "cti_phase_label": phase_label,
-                "cti_tier_size": tier_size,
+                "active_target_pct": active_target_pct,
+                "has_profit_target": True,
                 "profit_target_dollars": profit_target_dollars,
                 "profit_target_remaining": profit_target_remaining,
                 "profit_target_remaining_pct": profit_target_remaining_pct,
@@ -394,16 +381,10 @@ def format_watchlist_text(scan_result: dict) -> str:
         lines.append(f"📊 **Session PnL:** {pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)")
 
         # CTI program and phase
-        if acct.get('has_profit_target', True):
-            lines.append(f"🏷️ **CTI:** ${acct['cti_tier_size']:,} {acct['cti_phase_label']} ({acct['active_target_pct']*100:.0f}% target)")
-        else:
-            lines.append(f"🏷️ **CTI:** ${acct['cti_tier_size']:,} {acct['cti_phase_label']} (profit share — no target)")
+        lines.append(f"🏷️ **CTI:** {acct['cti_phase_label']} ({acct['active_target_pct']*100:.0f}% target)")
 
-        # Profit target progress (only if there is one)
-        if acct.get('has_profit_target', True):
-            lines.append(f"🎯 **Profit Target:** ${acct['profit_target_remaining']:,.2f} remaining ({acct['profit_target_remaining_pct']:.1f}% left)")
-        else:
-            lines.append(f"🎯 **Profit Target:** N/A — Funded account, trading for profit share")
+        # Profit target progress
+        lines.append(f"🎯 **Profit Target:** ${acct['profit_target_remaining']:,.2f} remaining ({acct['profit_target_remaining_pct']:.1f}% left)")
 
         # Daily loss remaining
         lines.append(f"🛡️ **Daily Loss:** ${acct['daily_loss_remaining']:,.2f} remaining ({acct['daily_loss_remaining_pct']:.1f}% left of {acct['daily_loss_pct']*100:.0f}%)")

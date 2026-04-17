@@ -114,27 +114,18 @@ def post_watchlist(watchlist_text: str, scan_result: dict | None = None) -> bool
         pnl_sign = "+" if acct["session_pnl"] >= 0 else ""
         program = acct.get("cti_program", "challenge").title()
         phase = acct.get("cti_phase_label", "Phase 1")
-        has_target = acct.get("has_profit_target", True)
 
-        # Build fields
         fields = [
             {"name": "Balance", "value": f"${acct['balance']:,.2f}", "inline": True},
             {"name": "NAV", "value": f"${acct['nav']:,.2f}", "inline": True},
             {"name": "Session PnL", "value": f"{pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)", "inline": True},
-        ]
-
-        if has_target:
-            fields.append({"name": f"🎯 Profit Target ({acct['active_target_pct']*100:.0f}%)", "value": f"${acct['profit_target_remaining']:,.2f} left ({acct['profit_target_remaining_pct']:.1f}%)", "inline": True})
-        else:
-            fields.append({"name": "🎯 Profit Target", "value": "N/A — Profit share", "inline": True})
-
-        fields.extend([
+            {"name": f"🎯 Target ({acct['active_target_pct']*100:.0f}%)", "value": f"${acct['profit_target_remaining']:,.2f} left ({acct['profit_target_remaining_pct']:.1f}%)", "inline": True},
             {"name": f"🛡️ Daily Loss ({acct['daily_loss_pct']*100:.0f}%)", "value": f"${acct['daily_loss_remaining']:,.2f} left ({acct['daily_loss_remaining_pct']:.1f}%)", "inline": True},
             {"name": f"⚠️ Max DD ({acct['max_dd_pct']*100:.0f}%)", "value": f"${acct['dd_remaining']:,.2f} left ({acct['dd_remaining_pct']:.1f}%)", "inline": True},
-        ])
+        ]
 
         embeds.append({
-            "title": f"💰 ${acct['cti_tier_size']:,} {phase}",
+            "title": f"💰 {phase}",
             "color": 0x00FF00 if acct["session_pnl"] >= 0 else 0xFF0000,
             "fields": fields,
             "footer": {"text": f"TradeGumi {MODE} — {program}"},
