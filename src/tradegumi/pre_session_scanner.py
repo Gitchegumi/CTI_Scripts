@@ -394,10 +394,16 @@ def format_watchlist_text(scan_result: dict) -> str:
         lines.append(f"📊 **Session PnL:** {pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)")
 
         # CTI program and phase
-        lines.append(f"🏷️ **CTI:** ${acct['cti_tier_size']:,} {acct['cti_phase_label']} ({acct['active_target_pct']*100:.0f}% target)")
+        if acct.get('has_profit_target', True):
+            lines.append(f"🏷️ **CTI:** ${acct['cti_tier_size']:,} {acct['cti_phase_label']} ({acct['active_target_pct']*100:.0f}% target)")
+        else:
+            lines.append(f"🏷️ **CTI:** ${acct['cti_tier_size']:,} {acct['cti_phase_label']} (profit share — no target)")
 
-        # Profit target progress
-        lines.append(f"🎯 **Profit Target:** ${acct['profit_target_remaining']:,.2f} remaining ({acct['profit_target_remaining_pct']:.1f}% left)")
+        # Profit target progress (only if there is one)
+        if acct.get('has_profit_target', True):
+            lines.append(f"🎯 **Profit Target:** ${acct['profit_target_remaining']:,.2f} remaining ({acct['profit_target_remaining_pct']:.1f}% left)")
+        else:
+            lines.append(f"🎯 **Profit Target:** N/A — Funded account, trading for profit share")
 
         # Daily loss remaining
         lines.append(f"🛡️ **Daily Loss:** ${acct['daily_loss_remaining']:,.2f} remaining ({acct['daily_loss_remaining_pct']:.1f}% left of {acct['daily_loss_pct']*100:.0f}%)")
