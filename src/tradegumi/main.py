@@ -217,8 +217,8 @@ def run(mode: str):
     scan_and_alert(client, available=available)
 
     # Pre-session scan schedule: 06:30 CT (America/Chicago) every trading day
-    SCAN_HOUR_CT = 6
-    SCAN_MINUTE_CT = 30
+    SCAN_HOUR_CT = 2
+    SCAN_MINUTE_CT = 0
     last_scan_date = None
 
     log.info("Entering main loop — checking %d available symbols every 60s", len(available))
