@@ -20,6 +20,9 @@ import requests
 
 from pytz import timezone
 
+NY_TZ = timezone("America/New_York")
+CT_TZ = timezone("America/Chicago")
+
 # Setup paths so tradegumi is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))  # src/tradegumi → src/
 
@@ -33,8 +36,6 @@ from tradegumi.session_rules import is_market_open
 from tradegumi.alerts import post_signal, post_watchlist
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, format_watchlist_text
-
-NY_TZ = timezone("America/New_York")
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -215,10 +216,32 @@ def run(mode: str):
 
     scan_and_alert(client, available=available)
 
+    # Pre-session scan schedule: 06:30 CT (America/Chicago) every trading day
+    SCAN_HOUR_CT = 6
+    SCAN_MINUTE_CT = 30
+    last_scan_date = None
+
     log.info("Entering main loop — checking %d available symbols every 60s", len(available))
+    log.info("Scheduled daily re-scan at %02d:%02d CT", SCAN_HOUR_CT, SCAN_MINUTE_CT)
     while True:
-        now = datetime.now(NY_TZ)
-        log.debug("Loop iteration at %s", now.isoformat())
+        now_ct = datetime.now(CT_TZ)
+        now_ny = datetime.now(NY_TZ)
+        log.debug("Loop iteration at %s", now_ct.isoformat())
+
+        # ── Scheduled daily re-scan ──────────────────────────────────────────
+        today_str = now_ct.strftime("%Y-%m-%d")
+        if now_ct.hour == SCAN_HOUR_CT and now_ct.minute == SCAN_MINUTE_CT and today_str != last_scan_date:
+            log.info("Scheduled re-scan triggered at %s CT", now_ct.strftime("%H:%M"))
+            try:
+                # Re-check availability in case account instruments changed
+                available = check_available_instruments(client)
+                scan_and_alert(client, available=available)
+                # Refresh engine watchlist from newly saved JSON
+                engine = SignalEngine(client, watchlist=load_watchlist())
+                last_scan_date = today_str
+                log.info("Re-scan complete — watchlist refreshed")
+            except Exception as e:
+                log.error("Scheduled re-scan failed: %s", e)
 
         # Run trailing SL on each iteration
         try:
