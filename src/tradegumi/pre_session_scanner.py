@@ -349,7 +349,7 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
 
 
 def load_watchlist() -> set[str]:
-    """Load today's watchlist from persisted file."""
+    """Load today's watchlist from persisted file (tier1 + tier2 symbols only)."""
     if not WATCHLIST_FILE.exists():
         return set(config.EXECUTION_SYMBOLS)
     with open(WATCHLIST_FILE) as f:
@@ -357,6 +357,27 @@ def load_watchlist() -> set[str]:
     tier1 = set(data.get("tier1", []))
     tier2 = set(data.get("tier2", []))
     return tier1 | tier2
+
+
+def load_watchlist_with_scores() -> dict[str, dict]:
+    """Load watchlist with tier and score info for loop sorting.
+
+    Returns dict mapping symbol -> {"tier": str, "score": float}.
+    Only includes Tier 1 and Tier 2 symbols.
+    """
+    if not WATCHLIST_FILE.exists():
+        return {s: {"tier": "unranked", "score": 0.0} for s in config.EXECUTION_SYMBOLS}
+    with open(WATCHLIST_FILE) as f:
+        data = json.load(f)
+    tier1 = set(data.get("tier1", []))
+    tier2 = set(data.get("tier2", []))
+    ranked = data.get("ranked", [])
+    result = {}
+    for entry in ranked:
+        symbol, score, tier_label = entry[0], entry[1], entry[2]
+        if symbol in tier1 or symbol in tier2:
+            result[symbol] = {"tier": tier_label, "score": score}
+    return result
 
 
 def format_watchlist_text(scan_result: dict) -> str:

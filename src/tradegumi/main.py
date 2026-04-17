@@ -35,7 +35,7 @@ from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open
 from tradegumi.alerts import post_signal, post_watchlist
 from tradegumi.trailing_sl import TrailingSLManager
-from tradegumi.pre_session_scanner import run_scan, load_watchlist, format_watchlist_text
+from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -261,17 +261,23 @@ def run(mode: str):
         except Exception as e:
             log.error("TrailingSL error: %s", e)
 
-        # Check each available symbol in the watchlist
-        watchlist = load_watchlist()
+        # Check each available symbol in the watchlist (Tier 1 + Tier 2 only)
+        watchlist_data = load_watchlist_with_scores()
+        watchlist_set = set(watchlist_data.keys())
+        # Only scan symbols that are both on the watchlist AND available
+        scan_symbols = [s for s in watchlist_data if s in available and s not in config.UNAVAILABLE_INSTRUMENTS]
         loop_summary = []
-        for symbol in available:
-            if symbol in config.UNAVAILABLE_INSTRUMENTS:
-                continue
+        for symbol in scan_symbols:
             tag = check_and_execute(engine, client, symbol, mode, trailing_manager)
-            loop_summary.append(f"{symbol}={tag}")
+            score = watchlist_data[symbol]["score"]
+            tier = watchlist_data[symbol]["tier"]
+            loop_summary.append((symbol, tag, tier, score))
 
-        # Per-loop summary at INFO level
-        log.info("Loop: %s", " | ".join(loop_summary))
+        # Sort by score descending — most relevant first
+        loop_summary.sort(key=lambda x: x[3], reverse=True)
+        log.info("Loop: %s", " | ".join(
+            f"{s}={tag}" for s, tag, _, _ in loop_summary
+        ))
 
         # Sleep until the next minute boundary (00 seconds)
         now_ct = datetime.now(CT_TZ)
