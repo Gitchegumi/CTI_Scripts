@@ -112,22 +112,20 @@ def post_watchlist(watchlist_text: str, scan_result: dict | None = None) -> bool
     if scan_result and "account" in scan_result:
         acct = scan_result["account"]
         pnl_sign = "+" if acct["session_pnl"] >= 0 else ""
-        profit_pct = acct.get("remaining_profit_pct", 0)
-        dd_pct = acct.get("remaining_dd_pct", 0)
-        target_pct = acct.get("daily_target_pct", 2)
-        dd_limit = acct.get("daily_dd_limit_pct", 3)
+        program = acct.get("cti_program", "challenge").title()
+        phase = acct.get("cti_phase_label", "Phase 1")
         embeds.append({
-            "title": "💰 Account Status",
+            "title": f"💰 Account Status — ${acct['cti_tier_size']:,} {phase}",
             "color": 0x00FF00 if acct["session_pnl"] >= 0 else 0xFF0000,
             "fields": [
                 {"name": "Balance", "value": f"${acct['balance']:,.2f}", "inline": True},
                 {"name": "NAV", "value": f"${acct['nav']:,.2f}", "inline": True},
                 {"name": "Session PnL", "value": f"{pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)", "inline": True},
-                {"name": f"Profit Target ({target_pct:.0f}%)", "value": f"${acct.get('remaining_profit_target', 0):,.2f} left ({profit_pct:.1f}%)", "inline": True},
-                {"name": f"DD Limit ({dd_limit:.0f}%)", "value": f"${acct.get('remaining_dd', 0):,.2f} headroom ({dd_pct:.1f}%)", "inline": True},
-                {"name": "Open Trades", "value": str(acct["open_trades"]), "inline": True},
+                {"name": f"🎯 Profit Target ({acct['active_target_pct']*100:.0f}%)", "value": f"${acct['profit_target_remaining']:,.2f} left ({acct['profit_target_remaining_pct']:.1f}%)", "inline": True},
+                {"name": f"🛡️ Daily Loss ({acct['daily_loss_pct']*100:.0f}%)", "value": f"${acct['daily_loss_remaining']:,.2f} left ({acct['daily_loss_remaining_pct']:.1f}%)", "inline": True},
+                {"name": f"⚠️ Max DD ({acct['max_dd_pct']*100:.0f}%)", "value": f"${acct['dd_remaining']:,.2f} left ({acct['dd_remaining_pct']:.1f}%)", "inline": True},
             ],
-            "footer": {"text": f"TradeGumi {MODE}"},
+            "footer": {"text": f"TradeGumi {MODE} — {program}"},
         })
 
     payload = {

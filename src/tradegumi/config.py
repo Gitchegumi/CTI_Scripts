@@ -127,6 +127,76 @@ def from_oanda_symbol(oanda_sym: str) -> str:
     return oanda_sym.replace("_", "")
 
 
+# ── CTI Account Tiers ──────────────────────────────────────────────────────
+# Two program types: "challenge" (2-step) and "instant" (instant funding)
+# The bot auto-detects the tier from account balance.
+# Set CTI_PROGRAM env var to override: "challenge" (default) or "instant".
+
+CTI_PROGRAM = os.getenv("CTI_PROGRAM", "challenge").lower()  # "challenge" or "instant"
+
+# 2-Step Challenge tiers: profit targets 10% (Phase 1) / 5% (Phase 2)
+# Daily loss: 5% of start-of-day balance. Max drawdown: 10% of initial balance.
+CTI_CHALLENGE_TIERS = {
+    2500:   {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    5000:   {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    10000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    25000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    50000:  {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    100000: {"profit_target_p1": 0.10, "profit_target_p2": 0.05, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+}
+
+# Instant Funding tiers: profit targets 10% (first payout) then scaling
+# Daily loss: same 5%. Max drawdown: 10% of initial balance.
+CTI_INSTANT_TIERS = {
+    2500:   {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    5000:   {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    10000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    20000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    40000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+    80000:  {"profit_target": 0.10, "daily_loss": 0.05, "max_dd": 0.10, "leverage": 30},
+}
+
+
+def get_cti_tier(balance: float) -> dict:
+    """Auto-detect CTI tier from account balance.
+
+    Finds the largest tier size ≤ balance. If balance is between tiers,
+    rounds down (e.g. $7,500 → $5,000 tier).
+
+    Returns dict with: size, profit_target (or p1/p2), daily_loss_pct, max_dd_pct, phase.
+    """
+    tiers = CTI_INSTANT_TIERS if CTI_PROGRAM == "instant" else CTI_CHALLENGE_TIERS
+    # Find the largest tier size that is ≤ balance
+    tier_sizes = sorted(tiers.keys(), reverse=True)
+    for size in tier_sizes:
+        if balance >= size:
+            tier_data = tiers[size].copy()
+            tier_data["size"] = size
+            tier_data["program"] = CTI_PROGRAM
+            # Determine phase for challenge
+            if CTI_PROGRAM == "challenge":
+                profit_target_dollars = size * tier_data["profit_target_p1"]
+                if balance >= size + profit_target_dollars:
+                    tier_data["phase"] = 2
+                    tier_data["active_target_pct"] = tier_data["profit_target_p2"]
+                else:
+                    tier_data["phase"] = 1
+                    tier_data["active_target_pct"] = tier_data["profit_target_p1"]
+            else:
+                tier_data["phase"] = 0  # Instant has no phases
+                tier_data["active_target_pct"] = tier_data["profit_target"]
+            return tier_data
+    # Below smallest tier — use smallest tier rules but flag as underfunded
+    smallest = tier_sizes[-1]
+    tier_data = tiers[smallest].copy()
+    tier_data["size"] = smallest
+    tier_data["program"] = CTI_PROGRAM
+    tier_data["phase"] = 1 if CTI_PROGRAM == "challenge" else 0
+    tier_data["active_target_pct"] = tier_data.get("profit_target_p1", tier_data.get("profit_target", 0.10))
+    tier_data["underfunded"] = True
+    return tier_data
+
+
 # ── Validate ─────────────────────────────────────────────────────────────────
 def validate_config():
     """Raise if required config is missing for the current mode."""
