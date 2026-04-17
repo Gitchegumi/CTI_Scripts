@@ -4,6 +4,7 @@ Posts signals and pre-session watchlists to Discord.
 Format is explicit and scannable; every signal gets a message regardless of
 whether execution follows.
 """
+import json
 import logging as log
 import requests
 from typing import Optional
@@ -98,16 +99,35 @@ def post_signal(signal: Signal) -> bool:
     return ok
 
 
-def post_watchlist(watchlist_text: str) -> bool:
-    """Post the morning pre-session watchlist to Discord."""
-    return _post({
+def post_watchlist(watchlist_text: str, json_path: str | None = None) -> bool:
+    """Post the morning pre-session watchlist to Discord with JSON attachment."""
+    payload = {
         "content": watchlist_text,
         "embeds": [{
             "title": "🌅 Morning Watchlist — TradeGumi",
             "color": 0x1E90FF,
             "footer": {"text": f"TradeGumi {MODE}"},
         }]
-    })
+    }
+
+    if json_path:
+        try:
+            with open(json_path, "rb") as f:
+                files = {"file": ("watchlist.json", f, "application/json")}
+                # When sending files, payload goes as form_data["payload_json"]
+                resp = requests.post(
+                    WEBHOOK_URL,
+                    data={"payload_json": json.dumps(payload)},
+                    files=files,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                return True
+        except Exception as e:
+            log.error("Discord webhook (file attach) error: %s — falling back to text-only", e)
+            return _post(payload)
+    else:
+        return _post(payload)
 
 
 def post_blocked_signal(signal: Signal, reason: str) -> bool:

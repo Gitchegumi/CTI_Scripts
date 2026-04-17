@@ -22,6 +22,7 @@ from tradegumi.session_rules import day_of_week_bias
 
 log = log.getLogger(__name__)
 NY_TZ = timezone("America/New_York")
+CT_TZ = timezone("America/Chicago")
 
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 
@@ -169,8 +170,8 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
 
     Returns dict suitable for Discord embed + watchlist persistence.
     """
-    now = datetime.now(NY_TZ)
-    dow_bias = day_of_week_bias("EURUSD", now)  # same bias for all
+    now = datetime.now(CT_TZ)
+    dow_bias = day_of_week_bias("EURUSD", datetime.now(NY_TZ))  # market TZ for bias
 
     # Only scan instruments that are actually available on this account
     scan_symbols = available if available else set(config.EXECUTION_SYMBOLS)
@@ -211,6 +212,7 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
         "tier1": tier1,
         "tier2": tier2,
         "below": below,
+        "ranked": [(s, d["factors"].get("scores", {}).get("total", 0), d["tier"]) for s, d in ranked],
         "detail": results,
     }
 
@@ -234,23 +236,30 @@ def load_watchlist() -> set[str]:
 
 
 def format_watchlist_text(scan_result: dict) -> str:
-    """Format scan result as a readable Discord message."""
-    lines = [
-        "**Morning Watchlist**",
-        f"Generated: {scan_result['timestamp']}",
-        "",
-    ]
-    for tier, label in [("tier1", "🟢 Tier 1 — Trade"), ("tier2", "🟡 Tier 2 — Alert Only")]:
-        symbols = scan_result.get(tier, [])
-        if symbols:
-            lines.append(f"{label}: {', '.join(symbols)}")
-        else:
-            lines.append(f"{label}: None")
+    """Format scan result as a readable Discord message.
 
-    below = scan_result.get("below", [])
-    if below:
-        lines.append(f"⬛ Below Threshold: {', '.join(below[:10])}")
-        if len(below) > 10:
-            lines.append(f"...and {len(below) - 10} more")
+    Shows each pair with tier and score, sorted by score descending.
+    """
+    now = datetime.now(CT_TZ)
+    ranked = scan_result.get("ranked", [])
+    lines = [
+        f"**🌅 Morning Watchlist**",
+        f"Generated: {now.strftime('%A %b %d, %Y %I:%M %p CDT')}",
+        "",
+        "```",
+        f"{'Pair':<10} {'Tier':<8} {'Score'}",
+        f"{'─'*10} {'─'*8} {'─'*5}",
+    ]
+    for symbol, score, tier in ranked:
+        tier_emoji = "🟢" if tier == "Tier 1" else "🟡" if tier == "Tier 2" else "⬛"
+        tier_short = tier.replace("Tier ", "T") if tier.startswith("Tier") else "T-"
+        lines.append(f"{symbol:<10} {tier_emoji}{tier_short:<7} {score:.3f}")
+    lines.append("```")
+
+    # Summary counts
+    tier1_count = len(scan_result.get("tier1", []))
+    tier2_count = len(scan_result.get("tier2", []))
+    below_count = len(scan_result.get("below", []))
+    lines.append(f"🟢 Tier 1: {tier1_count} | 🟡 Tier 2: {tier2_count} | ⬛ Below: {below_count}")
 
     return "\n".join(lines)
