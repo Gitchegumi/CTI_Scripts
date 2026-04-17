@@ -76,7 +76,7 @@ def calc_lot_size(
         divisor = 1
 
     lots = risk_amount / (sl_distance * divisor)
-    return round(lots, 2)
+    return max(0.01, round(lots, 2))  # minimum 0.01 lots
 
 
 def _price_decimals(price: float) -> int:

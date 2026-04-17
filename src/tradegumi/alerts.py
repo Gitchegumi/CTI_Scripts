@@ -49,15 +49,15 @@ def format_signal_message(signal: Signal) -> dict:
         fields = []
     else:
         color = 0x00FF00 if dirn == "BUY" else 0xFF0000
-        title = f"{'🟢' if dirn == 'BUY' else '🔴'} {sym} {dirn} | CTI Strategy"
-        desc  = f"Confidence: **{conf_pct}%**"
+        title = f"{'🟢' if dirn == 'BUY' else '🔴'} {sym} {dirn}"
+        desc  = f"Confidence: **{conf_pct}%** | Risk: {signal.risk_pct:.2f}%"
         fields = [
-            {"name": "Entry",   "value": str(signal.entry_price), "inline": True},
-            {"name": "SL",      "value": f"{signal.stop_loss} ({signal.atr:.5f} ATR)", "inline": True},
-            {"name": "TP",      "value": f"{signal.take_profit} ({signal.atr:.5f} ATR)", "inline": True},
-            {"name": "Size",    "value": f"{signal.lot_size} lots", "inline": True},
-            {"name": "Risk",    "value": f"{signal.risk_pct:.2f}%", "inline": True},
-            {"name": "Mode",    "value": MODE, "inline": True},
+            {"name": "Buy Price",   "value": str(signal.entry_price), "inline": True},
+            {"name": "Stop Loss",   "value": str(signal.stop_loss), "inline": True},
+            {"name": "Take Profit", "value": str(signal.take_profit), "inline": True},
+            {"name": "Lot Size",    "value": f"{signal.lot_size:.2f}", "inline": True},
+            {"name": "ATR",         "value": f"{signal.atr:.5f}", "inline": True},
+            {"name": "R:R Ratio",    "value": "1:4", "inline": True},
         ]
 
         if signal.patterns_found:
@@ -67,7 +67,8 @@ def format_signal_message(signal: Signal) -> dict:
         # Layer 2 breakdown
         br = signal.breakdown
         score_lines = "\n".join(
-            f"• {k}: {v}" for k, v in br.items()
+            f"• {k}: {v:.3f}" if isinstance(v, float) else f"• {k}: {v}"
+            for k, v in br.items()
         )
         fields.append({"name": "Layer 2 Scoring", "value": score_lines, "inline": False})
 

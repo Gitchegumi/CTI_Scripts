@@ -146,30 +146,30 @@ def check_and_execute(
         log.debug("%s: no signal", symbol)
         return "flat"
 
+    # ── Lot sizing (always calculate for alerts, even if blocked) ──────
+    try:
+        balance = client.get_account_balance()
+    except Exception as e:
+        log.error("%s: failed to get balance: %s", symbol, e)
+        balance = 0.0
+
+    if balance > 0:
+        try:
+            signal_obj.lot_size = calc_lot_size(
+                account_balance=balance,
+                entry_price=signal_obj.entry_price,
+                stop_loss_price=signal_obj.stop_loss,
+                symbol=symbol,
+            )
+        except Exception as e:
+            log.error("%s: lot sizing failed: %s", symbol, e)
+
     # ── Risk checks ──────────────────────────────────────────────────────────
     can_open, reason = can_open_position(client)
     if not can_open:
         signal_obj.blocked_reason = reason
         post_signal(signal_obj)
         return f"{signal_obj.direction[0]}(blocked)"
-
-    # Fetch balance for lot sizing
-    try:
-        balance = client.get_account_balance()
-    except Exception as e:
-        log.error("%s: failed to get balance: %s", symbol, e)
-        return f"{signal_obj.direction[0]}(bal_err)"
-
-    try:
-        signal_obj.lot_size = calc_lot_size(
-            account_balance=balance,
-            entry_price=signal_obj.entry_price,
-            stop_loss_price=signal_obj.stop_loss,
-            symbol=symbol,
-        )
-    except Exception as e:
-        log.error("%s: lot sizing failed: %s", symbol, e)
-        return f"{signal_obj.direction[0]}(lots_err)"
 
     # Post signal to Discord (alert_only and demo both alert)
     post_signal(signal_obj)
