@@ -124,35 +124,38 @@ def check_and_execute(
     symbol: str,
     mode: str,
     trailing_manager: TrailingSLManager,
-) -> None:
-    """Run signal engine for one symbol; execute if allowed."""
+) -> str:
+    """Run signal engine for one symbol; execute if allowed.
+
+    Returns a summary tag like 'flat', 'U(no_sig)', 'U(conf=0.7)', 'blocked', 'err'.
+    """
     if not is_market_open(symbol):
         log.debug("%s: outside trading hours", symbol)
-        return
+        return "closed"
 
     try:
         signal_obj = engine.check_symbol(symbol)
     except Exception as e:
         log.error("%s: signal engine error: %s", symbol, e)
-        return
+        return "err"
 
     if signal_obj is None:
         log.debug("%s: no signal", symbol)
-        return
+        return "flat"
 
     # ── Risk checks ──────────────────────────────────────────────────────────
     can_open, reason = can_open_position(client)
     if not can_open:
         signal_obj.blocked_reason = reason
         post_signal(signal_obj)
-        return
+        return f"{signal_obj.direction[0]}(blocked)"
 
     # Fetch balance for lot sizing
     try:
         balance = client.get_account_balance()
     except Exception as e:
         log.error("%s: failed to get balance: %s", symbol, e)
-        return
+        return f"{signal_obj.direction[0]}(bal_err)"
 
     try:
         signal_obj.lot_size = calc_lot_size(
@@ -163,10 +166,11 @@ def check_and_execute(
         )
     except Exception as e:
         log.error("%s: lot sizing failed: %s", symbol, e)
-        return
+        return f"{signal_obj.direction[0]}(lots_err)"
 
     # Post signal to Discord (alert_only and demo both alert)
     post_signal(signal_obj)
+    tag = f"{signal_obj.direction[0]}(conf={signal_obj.confidence:.2f})"
 
     # Execute only in demo/live
     if mode in ("demo", "live"):
@@ -186,6 +190,8 @@ def check_and_execute(
             trailing_manager.init_position(pos)
         except Exception as e:
             log.error("%s: order failed: %s", symbol, e)
+
+    return tag
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -220,10 +226,15 @@ def run(mode: str):
 
         # Check each available symbol in the watchlist
         watchlist = load_watchlist()
+        loop_summary = []
         for symbol in available:
             if symbol in config.UNAVAILABLE_INSTRUMENTS:
                 continue
-            check_and_execute(engine, client, symbol, mode, trailing_manager)
+            tag = check_and_execute(engine, client, symbol, mode, trailing_manager)
+            loop_summary.append(f"{symbol}={tag}")
+
+        # Per-loop summary at INFO level
+        log.info("Loop: %s", " | ".join(loop_summary))
 
         time.sleep(60)
 
