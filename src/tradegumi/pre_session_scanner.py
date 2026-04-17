@@ -178,7 +178,7 @@ def tier_from_score(score: float) -> str:
     """
     if score >= 0.55:
         return "Tier 1"
-    if score >= 0.35:
+    if score >= 0.50:
         return "Tier 2"
     return "Below Threshold"
 
