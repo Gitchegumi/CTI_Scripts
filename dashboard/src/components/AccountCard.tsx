@@ -54,55 +54,61 @@ export default function AccountCard({ account }: AccountCardProps) {
   const ddPct = Math.round(account.dd_remaining_pct);
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
-      {/* Top row: balances */}
-      <div className="flex flex-wrap gap-6">
-        <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Balance</div>
-          <div className="text-lg font-semibold text-white">${fmt(account.balance)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">NAV</div>
-          <div className="text-lg font-semibold text-white">${fmt(account.nav)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Session PnL</div>
-          <div className={`text-lg font-semibold ${pnlColor}`}>
-            {pnlSign}${fmt(Math.abs(account.session_pnl))}
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+        Account Metrics
+      </h2>
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+        {/* Top row: balances */}
+        <div className="flex flex-wrap gap-6">
+          <div>
+            <div className="text-xs text-slate-500 uppercase tracking-wide">Balance</div>
+            <div className="text-lg font-semibold text-white">${fmt(account.balance)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 uppercase tracking-wide">NAV</div>
+            <div className="text-lg font-semibold text-white">${fmt(account.nav)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 uppercase tracking-wide">Session PnL</div>
+            <div className={`text-lg font-semibold ${pnlColor}`}>
+              {pnlSign}${fmt(Math.abs(account.session_pnl))}
+            </div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="px-2.5 py-1 text-xs font-bold rounded bg-purple-600 text-purple-100">
+              {account.cti_phase_label}
+            </span>
+            {account.open_trades > 0 && (
+              <span className="px-2 py-0.5 text-xs rounded bg-orange-600 text-orange-100">
+                {account.open_trades} open
+              </span>
+            )}
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="px-2.5 py-1 text-xs font-bold rounded bg-purple-600 text-purple-100">
-            {account.cti_phase_label}
-          </span>
-          {account.open_trades > 0 && (
-            <span className="px-2 py-0.5 text-xs rounded bg-orange-600 text-orange-100">
-              {account.open_trades} open
-            </span>
-          )}
-        </div>
-      </div>
 
-      {/* Progress bars */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <ProgressBar
-          label="Profit Target"
-          remaining={account.profit_target_remaining}
-          total={account.profit_target_dollars}
-          colorClass={getBarColor(profitTargetPct)}
-        />
-        <ProgressBar
-          label="Daily Loss Buffer"
-          remaining={account.daily_loss_remaining}
-          total={account.daily_loss_limit}
-          colorClass={getBarColor(dailyLossPct)}
-        />
-        <ProgressBar
-          label="Max Drawdown Buffer"
-          remaining={account.dd_remaining}
-          total={account.max_dd_dollars}
-          colorClass={getBarColor(ddPct)}
-        />
+
+        {/* Progress bars */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <ProgressBar
+            label="Profit Target"
+            remaining={account.profit_target_remaining}
+            total={account.profit_target_dollars}
+            colorClass={getBarColor(profitTargetPct)}
+          />
+          <ProgressBar
+            label="Daily Loss Buffer"
+            remaining={account.daily_loss_remaining}
+            total={account.daily_loss_limit}
+            colorClass={getBarColor(dailyLossPct)}
+          />
+          <ProgressBar
+            label="Max Drawdown Buffer"
+            remaining={account.dd_remaining}
+            total={account.max_dd_dollars}
+            colorClass={getBarColor(ddPct)}
+          />
+        </div>
       </div>
     </div>
   );
