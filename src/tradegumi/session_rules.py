@@ -7,18 +7,26 @@ from pytz import timezone
 NY_TZ = timezone("America/New_York")
 
 # ── Market Hours ─────────────────────────────────────────────────────────────
-# Format: list of (start_time, end_time) tuples per weekday (0=Mon … 4=Fri)
+# Oanda forex: Open Sun 17:05 ET, close Fri 16:59 ET
+# Mon–Thu: two windows (pre-break and post-break with swap gap)
+# Friday: closes at 16:59, no evening session
+# Indexed by weekday (0=Mon … 4=Fri), each entry is a list of (start, end) tuples
 
-FOREX_HOURS = [
-    # Monday
-    (time(0, 0),  time(16, 30)),
-    (time(19, 0), time(23, 59)),
-    # Tuesday–Thursday
-    (time(0, 0),  time(16, 30)),
-    (time(19, 0), time(23, 59)),
-    # Friday
-    (time(0, 0),  time(16, 30)),
-]
+FOREX_HOURS = {
+    0: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Monday
+    1: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Tuesday
+    2: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Wednesday
+    3: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Thursday
+    4: [(time(0, 0), time(16, 59))],                                # Friday (closes for week)
+}
+
+INDEX_HOURS = {
+    0: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
+    1: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
+    2: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
+    3: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
+    4: [(time(0, 0), time(16, 30))],                                # Friday
+}
 
 INDEX_HOURS = [
     (time(0, 0),  time(16, 30)),
@@ -26,7 +34,8 @@ INDEX_HOURS = [
 ]
 
 # ── Swap Blackout Windows ───────────────────────────────────────────────────
-FOREX_SWAP_BLACKOUT = (time(16, 55), time(17, 5))
+# Oanda swaps at ~17:00 ET; blackout 16:55–17:30 for safety
+FOREX_SWAP_BLACKOUT = (time(16, 55), time(17, 30))
 INDEX_SWAP_BLACKOUT = (time(16, 55), time(18, 29))
 CRYPTO_SWAP_BLACKOUT = (time(16, 55), time(17, 30))
 
@@ -72,20 +81,16 @@ def is_trading_open(symbol: str, when: Optional[datetime] = None) -> bool:
 
     cat = _symbol_category(symbol)
     if cat == "forex":
-        windows = FOREX_HOURS
+        hours = FOREX_HOURS
     elif cat == "index":
-        windows = INDEX_HOURS
+        hours = INDEX_HOURS
     else:
         return True  # Crypto — always open
 
     now_t = when.time()
-    # Flatten weekday to Mon–Fri index
-    day_offset = weekday * 2  # each day has 2 windows (pre/post-break)
+    day_windows = hours.get(weekday, [])
 
-    for start, end in windows:
-        # Adjust start/end for each day
-        current_start = start
-        current_end = end
+    for start, end in day_windows:
         if start <= end:
             if start <= now_t <= end:
                 return True
@@ -96,7 +101,11 @@ def is_trading_open(symbol: str, when: Optional[datetime] = None) -> bool:
 
 
 def is_swap_blackout(symbol: str, when: Optional[datetime] = None) -> bool:
-    """Check if symbol is in its daily swap blackout window."""
+    """Check if symbol is in its daily swap blackout window.
+
+    On Fridays, skip blackout — the market closes for the week, so
+    there's no swap rollover to worry about.
+    """
     if when is None:
         when = datetime.now(NY_TZ)
     else:
@@ -104,6 +113,10 @@ def is_swap_blackout(symbol: str, when: Optional[datetime] = None) -> bool:
             when = NY_TZ.localize(when)
         else:
             when = when.astimezone(NY_TZ)
+
+    # Friday close: no swap blackout (market closes for the week)
+    if when.weekday() == 4:
+        return False
 
     cat = _symbol_category(symbol)
     if cat == "forex":
