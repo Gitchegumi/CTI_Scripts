@@ -23,8 +23,15 @@ from tradegumi.session_rules import day_of_week_bias
 log = log.getLogger(__name__)
 NY_TZ = timezone("America/New_York")
 CT_TZ = timezone("America/Chicago")
+NY_TZ = timezone("America/New_York")
 
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
+SESSION_FILE = Path(__file__).parent / "data" / "session_state.json"
+
+# CTI risk rules
+DAILY_PROFIT_TARGET_PCT = 0.02    # 2% daily profit target
+DAILY_DRAWDOWN_LIMIT_PCT = 0.03   # 3% daily drawdown limit
+SESSION_PROFIT_TARGET_PCT = 0.05  # 5% session profit target
 
 
 def calc_adr(client: ExecutionClient, symbol: str, lookback: int = 20) -> float:
@@ -183,6 +190,24 @@ def tier_from_score(score: float) -> str:
     return "Below Threshold"
 
 
+def _load_session_state() -> dict:
+    """Load or create session state tracking starting balance."""
+    if SESSION_FILE.exists():
+        try:
+            with open(SESSION_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_session_state(state: dict) -> None:
+    """Persist session state."""
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SESSION_FILE, "w") as f:
+        json.dump(state, f, indent=2, default=str)
+
+
 def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict:
     """Run full Layer 1 scan across available execution symbols.
 
@@ -239,6 +264,54 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
         "detail": results,
     }
 
+    # ── Account info for watchlist header ────────────────────────────────────
+    try:
+        from tradegumi.api.oanda_client import OandaClient
+        if isinstance(client, OandaClient):
+            acct_data = client._request("GET", f"/v3/accounts/{client.account_id}/summary")
+            acct = acct_data.get("account", {})
+            balance = float(acct.get("balance", 0))
+            unrealized_pl = float(acct.get("unrealizedPL", 0))
+            realized_pl = float(acct.get("pl", 0))
+            nav = float(acct.get("NAV", 0))
+            open_trades = int(acct.get("openTradeCount", 0))
+
+            # Track session starting balance
+            state = _load_session_state()
+            today_str = now.strftime("%Y-%m-%d")
+            if state.get("start_date") != today_str or "start_balance" not in state:
+                state["start_date"] = today_str
+                state["start_balance"] = balance
+                _save_session_state(state)
+            start_balance = float(state.get("start_balance", balance))
+
+            # CTI metrics
+            session_pnl = nav - start_balance  # total PnL since session start
+            session_pnl_pct = (session_pnl / start_balance * 100) if start_balance else 0
+            remaining_profit = (DAILY_PROFIT_TARGET_PCT * start_balance) - session_pnl
+            remaining_profit_pct = max(0, (DAILY_PROFIT_TARGET_PCT - session_pnl / start_balance) * 100) if start_balance else 0
+            remaining_dd = (DAILY_DRAWDOWN_LIMIT_PCT * start_balance) + session_pnl  # how much more you can lose
+            remaining_dd_pct = max(0, (DAILY_DRAWDOWN_LIMIT_PCT + session_pnl / start_balance) * 100) if start_balance else 0
+
+            output["account"] = {
+                "balance": balance,
+                "nav": nav,
+                "unrealized_pl": unrealized_pl,
+                "realized_pl": realized_pl,
+                "open_trades": open_trades,
+                "start_balance": start_balance,
+                "session_pnl": session_pnl,
+                "session_pnl_pct": session_pnl_pct,
+                "remaining_profit_target": remaining_profit,
+                "remaining_profit_pct": remaining_profit_pct,
+                "remaining_dd": remaining_dd,
+                "remaining_dd_pct": remaining_dd_pct,
+                "daily_target_pct": DAILY_PROFIT_TARGET_PCT * 100,
+                "daily_dd_limit_pct": DAILY_DRAWDOWN_LIMIT_PCT * 100,
+            }
+    except Exception as e:
+        log.warning("Failed to fetch account info for watchlist: %s", e)
+
     # Persist watchlist
     WATCHLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(WATCHLIST_FILE, "w") as f:
@@ -262,17 +335,43 @@ def format_watchlist_text(scan_result: dict) -> str:
     """Format scan result as a readable Discord message.
 
     Shows each pair with tier and score, sorted by score descending.
+    Includes account balance, PnL, and CTI risk metrics.
     """
     now = datetime.now(CT_TZ)
     ranked = scan_result.get("ranked", [])
-    lines = [
-        f"**🌅 Morning Watchlist**",
-        f"Generated: {now.strftime('%A %b %d, %Y %I:%M %p CDT')}",
-        "",
-        "```",
-        f"{'Pair':<10} {'Tier':<8} {'Score'}",
-        f"{'─'*10} {'─'*8} {'─'*5}",
-    ]
+    acct = scan_result.get("account")
+
+    # ── Account header ──────────────────────────────────────────────────────
+    lines = [f"**🌅 Morning Watchlist**"]
+    lines.append(f"Generated: {now.strftime('%A %b %d, %Y %I:%M %p CDT')}")
+
+    if acct:
+        lines.append("")
+        lines.append(f"💰 **Balance:** ${acct['balance']:,.2f} | **NAV:** ${acct['nav']:,.2f}")
+
+        pnl_sign = "+" if acct['session_pnl'] >= 0 else ""
+        lines.append(f"📊 **Session PnL:** {pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)")
+
+        # Profit target progress
+        profit_pct = acct.get('remaining_profit_pct', 0)
+        target_pct = acct.get('daily_target_pct', 2)
+        lines.append(f"🎯 **Profit Target ({target_pct:.0f}%):** ${acct.get('remaining_profit_target', 0):,.2f} remaining ({profit_pct:.1f}% left)")
+
+        # Drawdown headroom
+        dd_pct = acct.get('remaining_dd_pct', 0)
+        dd_limit = acct.get('daily_dd_limit_pct', 3)
+        lines.append(f"⚠️ **Drawdown Limit ({dd_limit:.0f}%):** ${acct.get('remaining_dd', 0):,.2f} headroom ({dd_pct:.1f}% left)")
+
+        if acct['open_trades'] > 0:
+            u_pnl = acct['unrealized_pl']
+            u_sign = "+" if u_pnl >= 0 else ""
+            lines.append(f"📐 **Open Trades:** {acct['open_trades']} | Unrealized: {u_sign}${u_pnl:,.2f}")
+
+    # ── Ranked pairs ────────────────────────────────────────────────────────
+    lines.append("")
+    lines.append("```")
+    lines.append(f"{'Pair':<10} {'Tier':<8} {'Score'}")
+    lines.append(f"{'─'*10} {'─'*8} {'─'*5}")
     for symbol, score, tier in ranked:
         tier_emoji = "🟢" if tier == "Tier 1" else "🟡" if tier == "Tier 2" else "⬛"
         tier_short = tier.replace("Tier ", "T") if tier.startswith("Tier") else "T-"

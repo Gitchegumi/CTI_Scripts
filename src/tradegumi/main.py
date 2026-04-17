@@ -112,7 +112,7 @@ def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -
         text   = format_watchlist_text(result)
         # Pass JSON file path so Discord attaches it as a file
         from tradegumi.pre_session_scanner import WATCHLIST_FILE
-        post_watchlist(text, json_path=str(WATCHLIST_FILE))
+        post_watchlist(text, json_path=str(WATCHLIST_FILE), scan_result=result)
         log.info("Pre-session scan complete: Tier1=%s Tier2=%s",
                  result["tier1"], result["tier2"])
     except Exception as e:

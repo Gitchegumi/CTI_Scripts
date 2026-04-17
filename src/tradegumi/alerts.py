@@ -100,15 +100,39 @@ def post_signal(signal: Signal) -> bool:
     return ok
 
 
-def post_watchlist(watchlist_text: str, json_path: str | None = None) -> bool:
+def post_watchlist(watchlist_text: str, json_path: str | None = None, scan_result: dict | None = None) -> bool:
     """Post the morning pre-session watchlist to Discord with JSON attachment."""
+    embeds = [{
+        "title": "🌅 Morning Watchlist — TradeGumi",
+        "color": 0x1E90FF,
+        "footer": {"text": f"TradeGumi {MODE}"},
+    }]
+
+    # Add account info embed if available
+    if scan_result and "account" in scan_result:
+        acct = scan_result["account"]
+        pnl_sign = "+" if acct["session_pnl"] >= 0 else ""
+        profit_pct = acct.get("remaining_profit_pct", 0)
+        dd_pct = acct.get("remaining_dd_pct", 0)
+        target_pct = acct.get("daily_target_pct", 2)
+        dd_limit = acct.get("daily_dd_limit_pct", 3)
+        embeds.append({
+            "title": "💰 Account Status",
+            "color": 0x00FF00 if acct["session_pnl"] >= 0 else 0xFF0000,
+            "fields": [
+                {"name": "Balance", "value": f"${acct['balance']:,.2f}", "inline": True},
+                {"name": "NAV", "value": f"${acct['nav']:,.2f}", "inline": True},
+                {"name": "Session PnL", "value": f"{pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)", "inline": True},
+                {"name": f"Profit Target ({target_pct:.0f}%)", "value": f"${acct.get('remaining_profit_target', 0):,.2f} left ({profit_pct:.1f}%)", "inline": True},
+                {"name": f"DD Limit ({dd_limit:.0f}%)", "value": f"${acct.get('remaining_dd', 0):,.2f} headroom ({dd_pct:.1f}%)", "inline": True},
+                {"name": "Open Trades", "value": str(acct["open_trades"]), "inline": True},
+            ],
+            "footer": {"text": f"TradeGumi {MODE}"},
+        })
+
     payload = {
         "content": watchlist_text,
-        "embeds": [{
-            "title": "🌅 Morning Watchlist — TradeGumi",
-            "color": 0x1E90FF,
-            "footer": {"text": f"TradeGumi {MODE}"},
-        }]
+        "embeds": embeds,
     }
 
     if json_path:
