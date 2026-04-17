@@ -32,8 +32,8 @@ def calc_adr(client: ExecutionClient, symbol: str, lookback: int = 20) -> float:
     if len(candles) < lookback:
         return 0.0
     df = candles_to_df(candles)
-    adr = calculate_atr(df.tail(lookback)).mean()
-    last_close = df["c"].iloc[-1]
+    adr = float(calculate_atr(df.tail(lookback)).mean())
+    last_close = float(df["c"].iloc[-1])
     return (adr / last_close) * 100 if last_close else 0.0
 
 
@@ -51,10 +51,11 @@ def calc_adr_consumed(client: ExecutionClient, symbol: str, lookback: int = 20) 
     # ADR baseline from prior sessions
     prior_candles = client.get_candles(symbol, "D", count=lookback + 1)
     prior_df = candles_to_df(prior_candles[:-1])
-    adr = calculate_atr(prior_df).mean()
+    adr = float(calculate_atr(prior_df).mean())
 
-    if adr == 0:
+    if adr == 0 or adr != adr:  # catch NaN
         return 0.0
+    range_used = float(range_used)
     return min(100.0, (range_used / adr) * 100)
 
 
@@ -63,15 +64,18 @@ def calc_volatility_regime(client: ExecutionClient, symbol: str) -> float:
 
     > 1.0 = expanding (high volatility), < 1.0 = contracting.
     """
-    candles_5  = client.get_candles(symbol, "D", count=6)
-    candles_20 = client.get_candles(symbol, "D", count=21)
-    if len(candles_5) < 6 or len(candles_20) < 21:
+    # ATR(14) needs ~15 rows warmup; request enough for both windows
+    candles_5  = client.get_candles(symbol, "D", count=20)
+    candles_20 = client.get_candles(symbol, "D", count=35)
+    if len(candles_5) < 20 or len(candles_20) < 35:
         return 1.0
     df_5  = candles_to_df(candles_5)
     df_20 = candles_to_df(candles_20)
-    atr_5  = calculate_atr(df_5).iloc[-1]
-    atr_20 = calculate_atr(df_20).mean()
-    return atr_5 / atr_20 if atr_20 else 1.0
+    atr_5  = float(calculate_atr(df_5).iloc[-1])
+    atr_20 = float(calculate_atr(df_20).mean())
+    if atr_20 == 0 or atr_20 != atr_20 or atr_5 != atr_5:  # catch NaN/zero
+        return 1.0
+    return atr_5 / atr_20
 
 
 def calc_breakout_probability(client: ExecutionClient, symbol: str, sessions: int = 20) -> float:

@@ -10,7 +10,7 @@ from typing import Optional
 @dataclass
 class Candle:
     """OHLCV candle."""
-    t: int          # timestamp (seconds)
+    t: str          # ISO timestamp (Oanda returns strings)
     o: float
     h: float
     l: float

@@ -36,11 +36,21 @@ def validate_data(data: pd.DataFrame) -> None:
 
 
 def prepare_data(data: pd.DataFrame) -> pd.DataFrame:
-    """Rename o/h/l/c/s → open/high/low/close/volume for pandas_ta compat."""
+    """Rename o/h/l/c/s → open/high/low/close/volume for pandas_ta compat.
+
+    Drops the 't' (timestamp) column before passing to pandas_ta — it's a
+    string and causes TypeError when pandas_ta tries to compute .mean()
+    across all columns (e.g. in ATR).
+    """
     validate_data(data)
-    return data.rename(columns={
+    df = data.rename(columns={
         "o": "open", "h": "high", "l": "low", "c": "close", "s": "volume"
     })
+    # Drop non-numeric columns that pandas_ta can't reduce
+    for col in ("t",):
+        if col in df.columns:
+            df = df.drop(columns=[col])
+    return df
 
 
 # ── Individual Indicators ────────────────────────────────────────────────────
@@ -69,8 +79,17 @@ def calculate_macd(data: pd.DataFrame, fast: int = 12, slow: int = 26, signal: i
 
 
 def calculate_atr(data: pd.DataFrame, length: int = 14) -> pd.Series:
-    """Average True Range."""
-    return prepare_data(data).ta.atr(length=length)
+    """Average True Range.
+
+    Returns a pandas Series. If insufficient data for warmup, returns
+    a Series of NaN with the same index as the input.
+    """
+    result = prepare_data(data).ta.atr(length=length)
+    if isinstance(result, pd.DataFrame):
+        # pandas_ta returns a DataFrame when ATR can't be computed
+        # (insufficient warmup rows). Return NaN series.
+        return pd.Series(float('nan'), index=data.index, name=f'ATRr_{length}')
+    return result
 
 
 def calculate_keltner_channels(data: pd.DataFrame, length: int = 20, multiplier: float = 1.5, mamode: str = "ema") -> pd.DataFrame:
