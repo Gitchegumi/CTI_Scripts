@@ -68,6 +68,39 @@ def make_client(mode: str) -> ExecutionClient:
     return OandaClient()
 
 
+# ── Instrument availability ───────────────────────────────────────────────────
+
+def check_available_instruments(client: ExecutionClient) -> set[str]:
+    """Query Oanda for tradeable instruments and mark unavailable ones.
+
+    Returns set of CTI symbols that are available on this account.
+    """
+    if not isinstance(client, OandaClient):
+        return set(config.EXECUTION_SYMBOLS)
+
+    try:
+        data = client._request("GET", f"/v3/accounts/{client.account_id}/instruments")
+        oanda_instruments = {i["name"] for i in data.get("instruments", [])}
+    except Exception as e:
+        log.warning("Failed to fetch available instruments: %s — assuming all available", e)
+        return set(config.EXECUTION_SYMBOLS)
+
+    available = set()
+    unavailable = []
+    for cti_sym in config.EXECUTION_SYMBOLS:
+        oanda_sym = config.to_oanda_symbol(cti_sym)
+        if oanda_sym in oanda_instruments:
+            available.add(cti_sym)
+        else:
+            unavailable.append(f"{cti_sym} ({oanda_sym})")
+
+    if unavailable:
+        log.info("Unavailable instruments (skipping): %s", ", ".join(unavailable))
+        config.UNAVAILABLE_INSTRUMENTS = set(config.EXECUTION_SYMBOLS) - available
+
+    return available
+
+
 # ── Symbol scanning ────────────────────────────────────────────────────────────
 
 def scan_and_alert(client: ExecutionClient) -> None:
@@ -163,6 +196,10 @@ def run(mode: str):
     config.validate_config()
 
     client = make_client(mode)
+
+    # Check which instruments are actually available on this Oanda account
+    available = check_available_instruments(client)
+
     engine = SignalEngine(client, watchlist=load_watchlist())
     trailing_manager = TrailingSLManager(client)
 
@@ -170,7 +207,7 @@ def run(mode: str):
 
     scan_and_alert(client)
 
-    log.info("Entering main loop — checking symbols every 60s")
+    log.info("Entering main loop — checking %d available symbols every 60s", len(available))
     while True:
         now = datetime.now(NY_TZ)
         log.debug("Loop iteration at %s", now.isoformat())
@@ -181,9 +218,11 @@ def run(mode: str):
         except Exception as e:
             log.error("TrailingSL error: %s", e)
 
-        # Check each symbol in the watchlist
+        # Check each available symbol in the watchlist
         watchlist = load_watchlist()
-        for symbol in config.EXECUTION_SYMBOLS:
+        for symbol in available:
+            if symbol in config.UNAVAILABLE_INSTRUMENTS:
+                continue
             check_and_execute(engine, client, symbol, mode, trailing_manager)
 
         time.sleep(60)

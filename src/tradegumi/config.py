@@ -47,7 +47,7 @@ TP_ATR_MULTIPLIER = float(os.getenv("TP_ATR_MULTIPLIER", "12"))
 # ── Symbols ─────────────────────────────────────────────────────────────────
 FOREX_MAJORS = ["EURUSD", "GBPUSD", "NZDUSD", "AUDUSD", "USDCHF", "USDCAD", "USDJPY"]
 FOREX_MINORS = [
-    "EURNZD", "GBPNZD", "NZDAUD", "AUDCHF", "CADCHF", "EURAUD", "GBPAUD", "NZDCHF",
+    "EURNZD", "GBPNZD", "AUDNZD", "AUDCHF", "CADCHF", "EURAUD", "GBPAUD", "NZDCHF",
     "AUDCAD", "CADJPY", "EURCHF", "GBPCHF", "NZDCAD", "AUDJPY", "CHFJPY", "EURCAD",
     "GBPCAD", "NZDJPY", "EURJPY", "GBPJPY", "EURGBP",
 ]
@@ -56,7 +56,7 @@ INDICES = [
     "US500", "NAS100", "US30", "DAX", "FTSE100", "F40", "JP225", "EUR50", "AUS200",
     "CHC50", "ES35", "N25", "SWI20", "RUS2000",
 ]
-CRYPTO = ["BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "SOLUSD", "ADAUSD"]
+CRYPTO = ["BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD"]  # SOLUSD, ADAUSD not on Oanda
 
 ALL_SYMBOLS = FOREX_MAJORS + FOREX_MINORS + COMMODITIES + INDICES + CRYPTO
 
@@ -65,6 +65,67 @@ EXECUTION_SYMBOLS = ALL_SYMBOLS
 
 JPY_SYMBOLS = [s for s in ALL_SYMBOLS if "JPY" in s]
 STANDARD_SYMBOLS = [s for s in ALL_SYMBOLS if s not in JPY_SYMBOLS]
+
+# ── Symbol Mapping (CTI → Oanda) ──────────────────────────────────────────────
+# Oanda v20 instrument names per https://developer.oanda.com/rest-live-v20/instrument-ep/
+# Corrected per task spec — verify CFD indices on practice account if they 400.
+OANDA_SYMBOL_MAP = {
+    # Indices — Oanda CFD instrument names
+    "US500":    "SPX500_USD",
+    "NAS100":   "NAS100_USD",
+    "US30":     "US30_USD",
+    "DAX":      "DE30_EUR",
+    "FTSE100":  "UK100_GBP",
+    "F40":      "FR40_EUR",
+    "JP225":    "JP225_USD",
+    "EUR50":    "EU50_EUR",
+    "AUS200":   "AU200_AUD",
+    "CHC50":    "CHF50_CHF",
+    "ES35":     "ESP35_EUR",
+    "N25":      "NL25_EUR",
+    "SWI20":    "CH20_CHF",
+    "RUS2000":  "RUS200_USD",
+    # Commodities
+    "XAUUSD": "XAU_USD",
+    "XAGUSD": "XAG_USD",
+    "OIL":    "WTICO_USD",   # WTI Crude; BCO_USD = Brent Crude
+    # Crypto — Oanda uses underscore format
+    "BTCUSD": "BTC_USD",
+    "ETHUSD": "ETH_USD",
+    "LTCUSD": "LTC_USD",
+    "XRPUSD": "XRP_USD",
+    # SOLUSD, ADAUSD — NOT offered on Oanda; excluded from CRYPTO list above
+}
+
+# Reverse map: Oanda instrument → CTI symbol
+CTI_SYMBOL_MAP = {v: k for k, v in OANDA_SYMBOL_MAP.items()}
+
+# Oanda instruments confirmed unavailable on this account
+# Populated at startup by querying GET /v3/accounts/{id}/instruments
+UNAVAILABLE_INSTRUMENTS: set[str] = set()
+
+
+def to_oanda_symbol(symbol: str) -> str:
+    """Convert CTI symbol to Oanda v20 format.
+
+    Uses explicit mapping table first, then falls back to 3-char split.
+    EURUSD → EUR_USD, US500 → SPX500_USD, XAUUSD → XAU_USD
+    """
+    if symbol in OANDA_SYMBOL_MAP:
+        return OANDA_SYMBOL_MAP[symbol]
+    # Default: split after first 3 chars (works for standard forex: EURUSD, GBPJPY, etc.)
+    return symbol[:3] + "_" + symbol[3:]
+
+
+def from_oanda_symbol(oanda_sym: str) -> str:
+    """Convert Oanda v20 format back to CTI symbol.
+
+    EUR_USD → EURUSD, SPX500_USD → US500, XAU_USD → XAUUSD
+    """
+    if oanda_sym in CTI_SYMBOL_MAP:
+        return CTI_SYMBOL_MAP[oanda_sym]
+    return oanda_sym.replace("_", "")
+
 
 # ── Validate ─────────────────────────────────────────────────────────────────
 def validate_config():
@@ -78,14 +139,3 @@ def validate_config():
         errors.append(f"Invalid TRADEGUMI_MODE={TRADEGUMI_MODE}")
     if errors:
         raise ValueError("Config errors: " + "; ".join(errors))
-
-
-def to_oanda_symbol(symbol: str) -> str:
-    """Convert generic symbol to Oanda v20 format (EURUSD → EUR_USD)."""
-    # Split after first 3 chars: EUR + USD = EUR_USD
-    return symbol[:3] + "_" + symbol[3:]
-
-
-def from_oanda_symbol(oanda_sym: str) -> str:
-    """Convert Oanda v20 format back to generic (EUR_USD → EURUSD)."""
-    return oanda_sym.replace("_", "")

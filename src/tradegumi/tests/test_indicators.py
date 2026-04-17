@@ -129,17 +129,48 @@ class TestSignalScoring:
 # ── Oanda symbol conversion ─────────────────────────────────────────────────
 
 class TestSymbolConversion:
-    def test_to_oanda(self):
+    def test_to_oanda_forex(self):
         from tradegumi.config import to_oanda_symbol
         assert to_oanda_symbol("EURUSD") == "EUR_USD"
         assert to_oanda_symbol("GBPUSD") == "GBP_USD"
         assert to_oanda_symbol("USDJPY") == "USD_JPY"
+
+    def test_to_oanda_gold(self):
+        from tradegumi.config import to_oanda_symbol
         assert to_oanda_symbol("XAUUSD") == "XAU_USD"
+
+    def test_to_oanda_indices(self):
+        from tradegumi.config import to_oanda_symbol
+        # Corrected Oanda instrument names per v20 API
+        assert to_oanda_symbol("US500") == "SPX500_USD"
+        assert to_oanda_symbol("NAS100") == "NAS100_USD"
+        assert to_oanda_symbol("US30") == "US30_USD"
+        assert to_oanda_symbol("DAX") == "DE30_EUR"
+        assert to_oanda_symbol("FTSE100") == "UK100_GBP"
+        assert to_oanda_symbol("F40") == "FR40_EUR"
+        assert to_oanda_symbol("JP225") == "JP225_USD"
+        assert to_oanda_symbol("EUR50") == "EU50_EUR"
+        assert to_oanda_symbol("AUS200") == "AU200_AUD"
+        assert to_oanda_symbol("CHC50") == "CHF50_CHF"
+        assert to_oanda_symbol("ES35") == "ESP35_EUR"
+        assert to_oanda_symbol("N25") == "NL25_EUR"
+        assert to_oanda_symbol("SWI20") == "CH20_CHF"
+        assert to_oanda_symbol("RUS2000") == "RUS200_USD"
+
+        assert to_oanda_symbol("OIL") == "WTICO_USD"
+
+    def test_to_oanda_crypto(self):
+        from tradegumi.config import to_oanda_symbol
+        assert to_oanda_symbol("BTCUSD") == "BTC_USD"
+        assert to_oanda_symbol("ETHUSD") == "ETH_USD"
+        assert to_oanda_symbol("LTCUSD") == "LTC_USD"
+        assert to_oanda_symbol("XRPUSD") == "XRP_USD"
 
     def test_from_oanda(self):
         from tradegumi.config import from_oanda_symbol
         assert from_oanda_symbol("EUR_USD") == "EURUSD"
         assert from_oanda_symbol("USD_JPY") == "USDJPY"
+        assert from_oanda_symbol("SPX500_USD") == "US500"
 
 
 if __name__ == "__main__":

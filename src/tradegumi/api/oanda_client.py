@@ -33,12 +33,12 @@ class OandaClient(ExecutionClient):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _to_oanda(self, symbol: str) -> str:
-        """EURUSD → EUR_USD"""
-        return symbol[:3] + "_" + symbol[3:]
+        """EURUSD → EUR_USD, US500 → USD_SPX500"""
+        return config.to_oanda_symbol(symbol)
 
     def _from_oanda(self, oanda_sym: str) -> str:
-        """EUR_USD → EURUSD"""
-        return oanda_sym.replace("_", "")
+        """EUR_USD → EURUSD, USD_SPX500 → US500"""
+        return config.from_oanda_symbol(oanda_sym)
 
     def _request(self, method: str, path: str, **kwargs):
         """Make an authenticated request to Oanda v20."""

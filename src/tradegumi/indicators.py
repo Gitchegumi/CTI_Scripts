@@ -12,11 +12,19 @@ from tradegumi.api.base_client import Candle
 # ── DataFrame helpers ─────────────────────────────────────────────────────────
 
 def candles_to_df(candles: list[Candle]) -> pd.DataFrame:
-    """Convert list of Candle to pandas DataFrame with OHLCV columns."""
-    records = [{"t": c.t, "o": c.o, "h": c.h, "l": c.l, "c": c.c, "s": c.s} for c in candles]
+    """Convert list of Candle to pandas DataFrame with OHLCV columns.
+
+    Ensures all OHLC columns are float64 — Oanda API returns prices as strings
+    which can leak through if Candle objects aren't fully converted.
+    """
+    records = [{"t": c.t, "o": float(c.o), "h": float(c.h), "l": float(c.l), "c": float(c.c), "s": c.s} for c in candles]
     df = pd.DataFrame(records)
     if "s" in df.columns and df["s"].isna().all():
         df.drop(columns=["s"], inplace=True)
+    # Force numeric dtypes for OHLC
+    for col in ("o", "h", "l", "c"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
 
