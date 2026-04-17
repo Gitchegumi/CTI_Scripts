@@ -174,24 +174,20 @@ def macd_histogram_score(current: float, prev5_min: float, prev5_max: float,
                           direction: str) -> float:
     """Score MACD histogram momentum.
 
-    Args:
-        current: Current MACD histogram value
-        prev5_min: Min of histogram over prior 5 bars
-        prev5_max: Max of histogram over prior 5 bars
-        direction: "BUY" or "SELL"
-
-    Returns:
-        0.0–1.0 strength score
+    Returns 0.0–1.0 strength score. Clamped to [0, 1].
     """
     if direction == "BUY":
-        # How far above prev-5 min is current? Bigger delta = stronger
         delta = current - prev5_min
-        # Normalise: 0 delta = 0.0, 5 pip delta ≈ 1.0 (arbitrary scale)
-        score = min(1.0, delta / (abs(prev5_min) * 0.05 + 1e-9))
+        if delta <= 0:
+            return 0.0  # current below prev min = no momentum
+        # Normalise: typical MACD histogram swing is 0.001–0.01 for forex
+        score = min(1.0, delta / (abs(prev5_min) + abs(prev5_max) + 1e-9) * 2)
     else:
         delta = prev5_max - current
-        score = min(1.0, delta / (abs(prev5_max) * 0.05 + 1e-9))
-    return round(score, 3)
+        if delta <= 0:
+            return 0.0  # current above prev max = no momentum
+        score = min(1.0, delta / (abs(prev5_min) + abs(prev5_max) + 1e-9) * 2)
+    return round(max(0.0, min(1.0, score)), 3)
 
 
 def keltner_score(last5_low: float, last5_high: float,
@@ -199,24 +195,19 @@ def keltner_score(last5_low: float, last5_high: float,
                   direction: str) -> float:
     """Score Keltner Channel position.
 
-    Args:
-        last5_low: Lowest low over last 5 bars
-        last5_high: Highest high over last 5 bars
-        last5_middle_min: Minimum KC middle band over last 5 bars
-        last5_middle_max: Maximum KC middle band over last 5 bars
-        direction: "BUY" or "SELL"
-
-    Returns:
-        0.0–1.0 strength score
+    Returns 0.0–1.0 strength score. Clamped to [0, 1].
     """
     if direction == "BUY":
-        # Tightness: how close is last5_low to the lower middle band?
         band_range = last5_middle_min - last5_low
+        if band_range <= 0:
+            return 0.0  # price below channel = bearish, not bullish
         score = min(1.0, band_range / (abs(last5_middle_min) * 0.02 + 1e-9))
     else:
         band_range = last5_high - last5_middle_max
+        if band_range <= 0:
+            return 0.0
         score = min(1.0, band_range / (abs(last5_middle_max) * 0.02 + 1e-9))
-    return round(score, 3)
+    return round(max(0.0, min(1.0, score)), 3)
 
 
 def candlestick_score(patterns: pd.DataFrame, direction: str) -> float:

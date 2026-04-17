@@ -211,6 +211,14 @@ class SignalEngine:
             breakdown["trend"] * 0.15 +
             breakdown["candlestick"] * 0.10
         )
+        # ── Confidence gate ──────────────────────────────────────────────────
+        # Signals below 55% confidence are too weak to act on
+        MIN_CONFIDENCE = 0.55
+        if raw_confidence < MIN_CONFIDENCE:
+            log.debug("%s signal rejected: confidence %.1f%% < %.0f%% threshold",
+                      symbol, raw_confidence * 100, MIN_CONFIDENCE * 100)
+            return None
+
         confidence = round(raw_confidence, 3)
 
         # ── Risk / Pricing ───────────────────────────────────────────────────
