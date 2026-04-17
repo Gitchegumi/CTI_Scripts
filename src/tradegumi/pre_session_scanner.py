@@ -387,12 +387,13 @@ def format_watchlist_text(scan_result: dict) -> str:
     Includes account balance, PnL, and CTI risk metrics.
     """
     now = datetime.now(CT_TZ)
+    now_et = datetime.now(NY_TZ)
     ranked = scan_result.get("ranked", [])
     acct = scan_result.get("account")
 
     # ── Account header ──────────────────────────────────────────────────────
     lines = [f"**🌅 Morning Watchlist**"]
-    lines.append(f"Generated: {now.strftime('%A %b %d, %Y %I:%M %p CDT')}")
+    lines.append(f"Generated: {now_et.strftime('%A %b %d, %Y %I:%M %p ET')} ({now.strftime('%I:%M %p CT')})")
 
     if acct:
         lines.append("")

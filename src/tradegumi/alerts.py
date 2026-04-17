@@ -10,6 +10,11 @@ import requests
 from typing import Optional
 
 from tradegumi import config
+from datetime import datetime
+from pytz import timezone
+
+NY_TZ = timezone('America/New_York')
+CT_TZ = timezone('America/Chicago')
 from tradegumi.signal_engine import Signal
 
 log = log.getLogger(__name__)
@@ -78,7 +83,7 @@ def format_signal_message(signal: Signal) -> dict:
             "description": desc,
             "color": color,
             "fields": fields,
-            "footer": {"text": f"TradeGumi {MODE}"},
+            "footer": {"text": f"TradeGumi {MODE} | {datetime.now(NY_TZ):%I:%M %p ET} ({datetime.now(CT_TZ):%I:%M %p CT})"},
             "timestamp": __import__("datetime").datetime.utcnow().isoformat(),
         }]
     }
@@ -105,7 +110,7 @@ def post_watchlist(watchlist_text: str, scan_result: dict | None = None) -> bool
     embeds = [{
         "title": "🌅 Morning Watchlist — TradeGumi",
         "color": 0x1E90FF,
-        "footer": {"text": f"TradeGumi {MODE}"},
+        "footer": {"text": f"TradeGumi {MODE} | {datetime.now(NY_TZ):%I:%M %p ET} ({datetime.now(CT_TZ):%I:%M %p CT})"},
     }]
 
     # Add account info embed if available

@@ -234,7 +234,7 @@ def run(mode: str):
     last_scan_date = None
 
     log.info("Entering main loop — checking %d available symbols every 60s", len(available))
-    log.info("Scheduled daily re-scan at %02d:%02d CT", SCAN_HOUR_CT, SCAN_MINUTE_CT)
+    log.info("Scheduled daily re-scan at 02:00 ET (03:00 CT)")
     while True:
         now_ct = datetime.now(CT_TZ)
         now_ny = datetime.now(NY_TZ)
@@ -243,7 +243,7 @@ def run(mode: str):
         # ── Scheduled daily re-scan ──────────────────────────────────────────
         today_str = now_ct.strftime("%Y-%m-%d")
         if now_ct.hour == SCAN_HOUR_CT and now_ct.minute == SCAN_MINUTE_CT and today_str != last_scan_date:
-            log.info("Scheduled re-scan triggered at %s CT", now_ct.strftime("%H:%M"))
+            log.info("Scheduled re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
             try:
                 # Re-check availability in case account instruments changed
                 available = check_available_instruments(client)
