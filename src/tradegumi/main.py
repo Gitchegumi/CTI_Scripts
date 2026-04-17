@@ -273,7 +273,10 @@ def run(mode: str):
         # Per-loop summary at INFO level
         log.info("Loop: %s", " | ".join(loop_summary))
 
-        time.sleep(60)
+        # Sleep until the next minute boundary (00 seconds)
+        now_ct = datetime.now(CT_TZ)
+        seconds_to_next_minute = 60 - now_ct.second - (now_ct.microsecond / 1_000_000)
+        time.sleep(max(0, seconds_to_next_minute))
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
