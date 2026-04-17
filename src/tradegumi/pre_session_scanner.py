@@ -39,24 +39,27 @@ def calc_adr(client: ExecutionClient, symbol: str, lookback: int = 20) -> float:
 
 
 def calc_adr_consumed(client: ExecutionClient, symbol: str, lookback: int = 20) -> float:
-    """How much of today's ADR range has already been used (0–100%)."""
+    """How much of today's ADR range has already been used (0–100%).
+
+    Uses the *completed* prior day's candle as today's range proxy,
+    since the current daily candle is still forming and understates range.
+    """
+    # Get last 2 daily candles — [0] = yesterday (complete), [-1] = today (incomplete)
     candles = client.get_candles(symbol, "D", count=2)
     if len(candles) < 2:
         return 0.0
     df = candles_to_df(candles)
-    high_today = df["h"].iloc[-1]
-    low_today  = df["l"].iloc[-1]
-    open_today = df["o"].iloc[-1]
-    range_used = high_today - low_today
+    # Use yesterday's completed candle for range used
+    yesterday = df.iloc[-2]
+    range_used = float(yesterday["h"] - yesterday["l"])
 
-    # ADR baseline from prior sessions
+    # ADR baseline from prior sessions (excluding today's incomplete candle)
     prior_candles = client.get_candles(symbol, "D", count=lookback + 1)
     prior_df = candles_to_df(prior_candles[:-1])
     adr = float(calculate_atr(prior_df).mean())
 
-    if adr == 0 or adr != adr:  # catch NaN
+    if adr == 0 or adr != adr:
         return 0.0
-    range_used = float(range_used)
     return min(100.0, (range_used / adr) * 100)
 
 
@@ -80,27 +83,33 @@ def calc_volatility_regime(client: ExecutionClient, symbol: str) -> float:
 
 
 def calc_breakout_probability(client: ExecutionClient, symbol: str, sessions: int = 20) -> float:
-    """% of last N sessions that had a >1x ATR directional move during London/NY overlap."""
-    candles = client.get_candles(symbol, "H1", count=sessions * 24)
-    if len(candles) < sessions * 24:
+    """Fraction of last N daily sessions that had a >1.5x ATR range.
+
+    Uses daily candles — a 'breakout' day has a range exceeding 1.5x the
+    20-day ATR, indicating above-average volatility and directional commitment.
+    """
+    candles = client.get_candles(symbol, "D", count=sessions + 1)
+    if len(candles) < sessions + 1:
         return 0.5  # insufficient data
 
     df = candles_to_df(candles)
-    atr_val = calculate_atr(df.tail(20)).mean()
+    # Exclude today's incomplete candle
+    df_completed = df.iloc[:-1].tail(sessions)
+    if len(df_completed) < sessions:
+        return 0.5
+
+    # Calculate ATR for baseline
+    atr_df = df_completed.copy()
+    atr_series = calculate_atr(atr_df)
+    atr_mean = float(atr_series.mean())
+
+    if atr_mean == 0 or atr_mean != atr_mean:
+        return 0.5
 
     breakout_sessions = 0
-    session_bars = 9  # 9 hour session (0–8 inclusive = London/NY overlap)
-
-    for i in range(sessions):
-        start = i * 24
-        end   = start + session_bars
-        session = df.iloc[start:end]
-        if session.empty:
-            continue
-        session_high = session["h"].max()
-        session_low  = session["l"].min()
-        directional  = abs(session_high - session_low)
-        if directional > atr_val:
+    for idx in df_completed.index:
+        daily_range = float(df_completed.loc[idx, "h"] - df_completed.loc[idx, "l"])
+        if daily_range > 1.5 * atr_mean:
             breakout_sessions += 1
 
     return breakout_sessions / sessions
