@@ -123,15 +123,23 @@ def score_symbol(
     }
 
     # ADR: lower consumed = better (compressed range = better EV)
-    adr_score = max(0.0, (80.0 - adr_consumed) / 80.0) if adr_consumed < 80 else 0.0
+    # Scale: 0-40% consumed = full score, drops linearly to 0 at 100%
+    if adr_consumed < 40:
+        adr_score = 1.0 - (adr_consumed / 100.0)  # 1.0 → 0.6
+    elif adr_consumed < 80:
+        adr_score = 0.6 - ((adr_consumed - 40) / 100.0)  # 0.6 → 0.2
+    else:
+        adr_score = max(0.0, 0.2 - ((adr_consumed - 80) / 100.0))
 
     # Vol regime: near 1.0 = normal; >1.5 = noisy (penalise); <0.7 = too quiet
-    if 0.7 <= vol_regime <= 1.5:
+    if 0.85 <= vol_regime <= 1.2:
         vol_score = 1.0
+    elif 0.7 <= vol_regime <= 1.5:
+        vol_score = 0.6  # acceptable but not ideal
     elif vol_regime > 1.5:
-        vol_score = max(0.0, 1.5 - vol_regime)
+        vol_score = max(0.0, 0.6 - (vol_regime - 1.5))
     else:
-        vol_score = vol_regime / 0.7
+        vol_score = max(0.0, vol_regime / 0.7)  # too quiet
 
     # Breakout: higher = better (more opportunity)
     breakout_score = breakout_prob  # 0–1
@@ -152,10 +160,16 @@ def score_symbol(
 
 
 def tier_from_score(score: float) -> str:
-    """Assign tier from total score."""
-    if score >= 0.65:
+    """Assign tier from total score.
+
+    Calibrated for realistic score distribution (floor ~0.35 on weekdays).
+    Tier 1: high-confidence setups (compressed range + breakouts)
+    Tier 2: reasonable opportunities
+    Below: skip
+    """
+    if score >= 0.55:
         return "Tier 1"
-    if score >= 0.40:
+    if score >= 0.35:
         return "Tier 2"
     return "Below Threshold"
 
