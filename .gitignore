@@ -173,4 +173,4 @@ cython_debug/
 py_scripts/backtesting/back_test_strat.py
 
 # Generated files
-*/data/
+data/
