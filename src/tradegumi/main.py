@@ -281,7 +281,7 @@ def run(mode: str):
             loop_state.append({
                 "symbol": symbol,
                 "state": tag,
-                "trend": trend or "flat",
+                "trend": (trend or "flat") if tag != "closed" else "closed",
                 "lr_15": round(lr_15, 6) if lr_15 else 0.0,
                 "lr_5": round(lr_5, 6) if lr_5 else 0.0,
                 "score": round(score, 3),

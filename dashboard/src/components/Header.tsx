@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { WatchlistData, LoopState } from "@/types";
 
 interface HeaderProps {
@@ -9,32 +10,38 @@ interface HeaderProps {
   loopState: LoopState | null;
 }
 
-function formatET(date: Date): { et: string; ct: string } {
-  const et = date.toLocaleString("en-US", {
-    timeZone: "America/New_York",
+function formatTime(date: Date, tz: string): string {
+  return date.toLocaleString("en-US", {
+    timeZone: tz,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
   });
-  const ct = date.toLocaleString("en-US", {
-    timeZone: "America/Chicago",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return { et, ct };
 }
 
 export default function Header({ data, lastUpdated, isRefreshing, loopState }: HeaderProps) {
   const mode = loopState?.mode ?? data?.account?.cti_program ?? "—";
   const provider = loopState?.provider ?? "—";
 
+  // Live clock that ticks every second
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const modeColors: Record<string, string> = {
+    alert_only: "bg-blue-600 text-blue-100",
+    demo: "bg-yellow-600 text-yellow-100",
+    live: "bg-green-600 text-green-100",
+  };
+
   return (
     <header className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-900">
       <div className="flex items-center gap-3">
         <span className="text-lg font-bold text-white tracking-wide">TradeGumi</span>
-        <span className="px-2 py-0.5 text-xs font-medium rounded bg-blue-600 text-blue-100">
+        <span className={`px-2 py-0.5 text-xs font-medium rounded ${modeColors[mode] ?? "bg-slate-600 text-slate-200"}`}>
           {mode}
         </span>
         <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-700 text-slate-300">
@@ -42,11 +49,9 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState }: H
         </span>
       </div>
       <div className="flex items-center gap-3 text-xs text-slate-400">
-        {lastUpdated && (
-          <span>
-            {formatET(lastUpdated).et} ET ({formatET(lastUpdated).ct} CT)
-          </span>
-        )}
+        <span className="font-mono">
+          {formatTime(now, "America/New_York")} ET ({formatTime(now, "America/Chicago")} CT)
+        </span>
         <span
           className={`flex items-center gap-1 ${
             isRefreshing ? "text-yellow-400" : "text-green-400"
