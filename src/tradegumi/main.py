@@ -9,12 +9,14 @@ Main loop checks each symbol on the watchlist every 60s during trading hours.
 Trailing SL runs as a co-routine in the same loop.
 """
 import argparse
+import json
 import logging as log
 import signal
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import requests
 
@@ -139,24 +141,27 @@ def check_and_execute(
     symbol: str,
     mode: str,
     trailing_manager: TrailingSLManager,
-) -> str:
+) -> tuple[str, Optional[str], float, float]:
     """Run signal engine for one symbol; execute if allowed.
 
-    Returns a summary tag like 'flat', 'U(no_sig)', 'U(conf=0.7)', 'blocked', 'err'.
+    Returns (tag, trend, lr_15, lr_5) where tag is a summary like
+    'flat', 'U(no_sig)', 'U(conf=0.7)', 'blocked', 'err', 'closed'.
     """
     if not is_market_open(symbol):
         log.debug("%s: outside trading hours", symbol)
-        return "closed"
+        return "closed", None, 0.0, 0.0
 
     try:
-        signal_obj = engine.check_symbol(symbol)
+        signal_obj, trend, lr_15, lr_5 = engine.check_symbol(symbol)
     except Exception as e:
         log.error("%s: signal engine error: %s", symbol, e)
-        return "err"
+        return "err", None, 0.0, 0.0
 
     if signal_obj is None:
-        log.debug("%s: no signal", symbol)
-        return "flat"
+        # No signal — trend might be flat or no clear direction
+        if trend is None:
+            return "flat", trend, lr_15, lr_5
+        return f"{trend[0]}(no_sig)", trend, lr_15, lr_5
 
     # ── Lot sizing (always calculate for alerts, even if blocked) ──────
     try:
@@ -181,7 +186,7 @@ def check_and_execute(
     if not can_open:
         signal_obj.blocked_reason = reason
         post_signal(signal_obj)
-        return f"{signal_obj.direction[0]}(blocked)"
+        return f"{signal_obj.direction[0]}(blocked)", trend, lr_15, lr_5
 
     # Post signal to Discord (alert_only and demo both alert)
     post_signal(signal_obj)
@@ -206,7 +211,7 @@ def check_and_execute(
         except Exception as e:
             log.error("%s: order failed: %s", symbol, e)
 
-    return tag
+    return tag, trend, lr_15, lr_5
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -267,17 +272,42 @@ def run(mode: str):
         # Only scan symbols that are both on the watchlist AND available
         scan_symbols = [s for s in watchlist_data if s in available and s not in config.UNAVAILABLE_INSTRUMENTS]
         loop_summary = []
+        loop_state = []  # Per-symbol state for dashboard
         for symbol in scan_symbols:
-            tag = check_and_execute(engine, client, symbol, mode, trailing_manager)
+            tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
             score = watchlist_data[symbol]["score"]
             tier = watchlist_data[symbol]["tier"]
             loop_summary.append((symbol, tag, tier, score))
+            loop_state.append({
+                "symbol": symbol,
+                "state": tag,
+                "trend": trend or "flat",
+                "lr_15": round(lr_15, 4) if lr_15 else 0.0,
+                "lr_5": round(lr_5, 4) if lr_5 else 0.0,
+                "score": round(score, 3),
+                "tier": tier,
+            })
 
         # Sort by score descending — most relevant first
         loop_summary.sort(key=lambda x: x[3], reverse=True)
         log.info("Loop: %s", " | ".join(
             f"{s}={tag}" for s, tag, _, _ in loop_summary
         ))
+
+        # Write loop state for dashboard
+        try:
+            state_file = Path(__file__).parent / "data" / "loop_state.json"
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "timestamp": datetime.now(NY_TZ).isoformat(),
+                "mode": mode,
+                "provider": "Oanda" if mode != "live" else "MatchTrader",
+                "symbols": loop_state,
+            }
+            with open(state_file, "w") as f:
+                json.dump(payload, f, indent=2, default=str)
+        except Exception as e:
+            log.warning("Failed to write loop_state.json: %s", e)
 
         # Sleep until the next minute boundary (00 seconds)
         now_ct = datetime.now(CT_TZ)

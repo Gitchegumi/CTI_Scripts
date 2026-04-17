@@ -44,6 +44,23 @@ export interface SignalEntry {
   timestamp: string;
 }
 
+export interface SymbolState {
+  symbol: string;
+  state: string;
+  trend: string;
+  lr_15: number;
+  lr_5: number;
+  score: number;
+  tier: string;
+}
+
+export interface LoopState {
+  timestamp: string;
+  mode: string;
+  provider: string;
+  symbols: SymbolState[];
+}
+
 export interface WatchlistData {
   timestamp: string;
   tier1: string[];

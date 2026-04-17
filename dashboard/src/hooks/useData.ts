@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { WatchlistData, SignalEntry } from "@/types";
+import { WatchlistData, SignalEntry, LoopState } from "@/types";
 
 interface UseWatchlistReturn {
   data: WatchlistData | null;
@@ -80,4 +80,42 @@ export function useSignals(): UseSignalsReturn {
   }, []);
 
   return { signals, error };
+}
+
+interface UseLoopStateReturn {
+  loopState: LoopState | null;
+  error: string | null;
+}
+
+export function useLoopState(): UseLoopStateReturn {
+  const [loopState, setLoopState] = useState<LoopState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchState = async () => {
+      try {
+        const res = await fetch(`/data/loop_state.json?_=${Date.now()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          if (res.status === 404) {
+            setLoopState(null);
+            return;
+          }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+        setLoopState(json);
+        setError(null);
+      } catch {
+        setLoopState(null);
+      }
+    };
+
+    fetchState();
+    const id = setInterval(fetchState, 10000); // Poll every 10s for live updates
+    return () => clearInterval(id);
+  }, []);
+
+  return { loopState, error };
 }

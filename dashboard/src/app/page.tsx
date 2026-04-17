@@ -5,15 +5,16 @@ import AccountCard from "@/components/AccountCard";
 import WatchlistSection from "@/components/WatchlistSection";
 import SignalsSection from "@/components/SignalsSection";
 import Footer from "@/components/Footer";
-import { useWatchlist, useSignals } from "@/hooks/useData";
+import { useWatchlist, useSignals, useLoopState } from "@/hooks/useData";
 
 export default function Home() {
   const { data, lastUpdated, error, isRefreshing } = useWatchlist(60000);
   const { signals } = useSignals();
+  const { loopState } = useLoopState();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} />
+      <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} loopState={loopState} />
 
       <main className="flex-1 px-4 py-4 max-w-7xl mx-auto w-full">
         {error ? (
@@ -29,7 +30,7 @@ export default function Home() {
             </div>
             {/* Right column: Watchlist */}
             <div className="lg:col-span-2">
-              <WatchlistSection data={data} />
+              <WatchlistSection data={data} loopState={loopState?.symbols ?? []} />
             </div>
           </div>
         ) : (

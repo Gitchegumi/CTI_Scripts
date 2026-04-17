@@ -1,11 +1,12 @@
 "use client";
 
-import { WatchlistData } from "@/types";
+import { WatchlistData, LoopState } from "@/types";
 
 interface HeaderProps {
   data: WatchlistData | null;
   lastUpdated: Date | null;
   isRefreshing: boolean;
+  loopState: LoopState | null;
 }
 
 function formatET(date: Date): { et: string; ct: string } {
@@ -25,9 +26,9 @@ function formatET(date: Date): { et: string; ct: string } {
   return { et, ct };
 }
 
-export default function Header({ data, lastUpdated, isRefreshing }: HeaderProps) {
-  const mode = data?.account?.cti_program ?? "—";
-  const provider = "Oanda"; // placeholder, will come from bot later
+export default function Header({ data, lastUpdated, isRefreshing, loopState }: HeaderProps) {
+  const mode = loopState?.mode ?? data?.account?.cti_program ?? "—";
+  const provider = loopState?.provider ?? "—";
 
   return (
     <header className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-900">

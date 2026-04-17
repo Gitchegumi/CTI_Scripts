@@ -72,11 +72,12 @@ class SignalEngine:
 
     # ── Trend Filter ─────────────────────────────────────────────────────────
 
-    def _get_trend(self, symbol: str) -> Optional[str]:
+    def _get_trend(self, symbol: str) -> tuple[Optional[str], float, float]:
         """Linear Regression trend filter.
 
         Both 15m (length=50) AND 5m (length=14) must agree.
-        Returns "Uptrend", "Downtrend", or None.
+        Returns (trend, lr_15, lr_5) where trend is "Uptrend",
+        "Downtrend", or None.
         """
         candles_15m = self.client.get_candles(symbol, "M15", count=60)
         candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
@@ -90,10 +91,10 @@ class SignalEngine:
         log.debug("%s LR_15m=%.4f%% LR_5m=%.4f%%", symbol, lr_15, lr_5)
 
         if lr_15 > self.LR_15M_THRESHOLD and lr_5 > self.LR_5M_THRESHOLD:
-            return "Uptrend"
+            return "Uptrend", lr_15, lr_5
         if lr_15 < -self.LR_15M_THRESHOLD and lr_5 < -self.LR_5M_THRESHOLD:
-            return "Downtrend"
-        return None
+            return "Downtrend", lr_15, lr_5
+        return None, lr_15, lr_5
 
     # ── 4-Layer Signal Stack ─────────────────────────────────────────────────
 
@@ -253,22 +254,24 @@ class SignalEngine:
 
     # ── Public API ───────────────────────────────────────────────────────────
 
-    def check_symbol(self, symbol: str) -> Optional[Signal]:
+    def check_symbol(self, symbol: str) -> tuple[Optional[Signal], Optional[str], float, float]:
         """Full pipeline: Layer 1 watchlist → trend filter → signal stack.
 
-        Returns None if symbol fails any filter.
+        Returns (signal, trend, lr_15, lr_5).
+        signal is None if symbol fails any filter.
+        trend is None if no clear trend (flat).
         """
         if symbol not in self.watchlist:
             log.debug("%s not on watchlist, skipping", symbol)
-            return None
+            return None, None, 0.0, 0.0
 
-        trend = self._get_trend(symbol)
+        trend, lr_15, lr_5 = self._get_trend(symbol)
         if trend is None:
             log.debug("%s no trend, skipping", symbol)
-            return None
+            return None, trend, lr_15, lr_5
 
         signal = self._get_signal(symbol, trend)
-        return signal
+        return signal, trend, lr_15, lr_5
 
 
 def _price_decimals(price: float) -> int:
