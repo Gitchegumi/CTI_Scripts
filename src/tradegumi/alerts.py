@@ -16,11 +16,15 @@ from pytz import timezone
 NY_TZ = timezone('America/New_York')
 CT_TZ = timezone('America/Chicago')
 from tradegumi.signal_engine import Signal
+from pathlib import Path
 
 log = log.getLogger(__name__)
 
 WEBHOOK_URL = config.DISCORD_WEBHOOK_URL
 MODE = config.TRADEGUMI_MODE
+
+SIGNALS_FILE = Path(__file__).parent / "data" / "signals.json"
+MAX_SIGNALS = 50  # Keep last N signals for dashboard
 
 
 def _post(payload: dict) -> bool:
@@ -89,6 +93,38 @@ def format_signal_message(signal: Signal) -> dict:
     }
 
 
+def save_signal(signal: Signal) -> None:
+    """Append signal to signals.json for the dashboard."""
+    try:
+        SIGNALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        existing = []
+        if SIGNALS_FILE.exists():
+            with open(SIGNALS_FILE) as f:
+                existing = json.load(f)
+
+        entry = {
+            "symbol": signal.symbol,
+            "direction": signal.direction,
+            "confidence": round(signal.confidence, 3),
+            "entry_price": signal.entry_price,
+            "stop_loss": signal.stop_loss,
+            "take_profit": signal.take_profit,
+            "lot_size": signal.lot_size,
+            "atr": signal.atr,
+            "rr": round(abs(signal.take_profit - signal.entry_price) / abs(signal.entry_price - signal.stop_loss), 1),
+            "timestamp": datetime.now(NY_TZ).isoformat(),
+        }
+
+        existing.append(entry)
+        # Keep only the most recent signals
+        existing = existing[-MAX_SIGNALS:]
+
+        with open(SIGNALS_FILE, "w") as f:
+            json.dump(existing, f, indent=2, default=str)
+    except Exception as e:
+        log.warning("Failed to save signal to signals.json: %s", e)
+
+
 def post_signal(signal: Signal) -> bool:
     """Post a signal to Discord. Returns True on success."""
     if config.TRADEGUMI_MODE == "alert_only":
@@ -102,6 +138,7 @@ def post_signal(signal: Signal) -> bool:
     ok = _post(payload)
     if ok:
         log.info("Discord: signal posted for %s %s", signal.symbol, signal.direction)
+        save_signal(signal)
     return ok
 
 
