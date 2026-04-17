@@ -34,12 +34,12 @@ function TrendBadge({ trend, lr15, lr5 }: { trend: string; lr15: number; lr5: nu
       <span className="text-sm">{arrow}</span>
       <span className="text-xs font-mono">
         15m: <span className={lr15 > 0 ? "text-green-400" : lr15 < 0 ? "text-red-400" : "text-slate-400"}>
-          {lr15 > 0 ? "+" : ""}{lr15.toFixed(2)}%
+          {lr15 > 0 ? "+" : ""}{lr15.toFixed(4)}%
         </span>
       </span>
       <span className="text-xs font-mono">
         5m: <span className={lr5 > 0 ? "text-green-400" : lr5 < 0 ? "text-red-400" : "text-slate-400"}>
-          {lr5 > 0 ? "+" : ""}{lr5.toFixed(2)}%
+          {lr5 > 0 ? "+" : ""}{lr5.toFixed(4)}%
         </span>
       </span>
     </div>
@@ -96,10 +96,10 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
                         </span>
                       </td>
                       <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
-                        {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(2) + "%" : "—"}
+                        {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(4) + "%" : "—"}
                       </td>
                       <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_5 ?? 0) > 0 ? "text-green-400" : (state?.lr_5 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
-                        {state ? (state.lr_5 > 0 ? "+" : "") + state.lr_5.toFixed(2) + "%" : "—"}
+                        {state ? (state.lr_5 > 0 ? "+" : "") + state.lr_5.toFixed(4) + "%" : "—"}
                       </td>
                     </tr>
                   );
@@ -138,10 +138,10 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
                         </span>
                       </td>
                       <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
-                        {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(2) + "%" : "—"}
+                        {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(4) + "%" : "—"}
                       </td>
                       <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_5 ?? 0) > 0 ? "text-green-400" : (state?.lr_5 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
-                        {state ? (state.lr_5 > 0 ? "+" : "") + state.lr_5.toFixed(2) + "%" : "—"}
+                        {state ? (state.lr_5 > 0 ? "+" : "") + state.lr_5.toFixed(4) + "%" : "—"}
                       </td>
                     </tr>
                   );
