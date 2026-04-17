@@ -170,7 +170,7 @@ def get_cti_tier(balance: float) -> dict:
         active_target_pct = 0.05  # 5%
     else:  # Phase 3 = Funded
         phase_label = "Funded"
-        active_target_pct = 0.05  # 5% first payout target
+        active_target_pct = 0.10  # 10% first payout target
 
     return {
         "program": CTI_PROGRAM,
