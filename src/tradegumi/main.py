@@ -271,16 +271,12 @@ def run(mode: str):
         watchlist_data = load_watchlist_with_scores()
         scan_symbols = [s for s in watchlist_data if s in available and s not in config.UNAVAILABLE_INSTRUMENTS]
 
-        # Check if any market is open before hitting the API
-        any_open = any(is_market_open(s) for s in scan_symbols)
-
         prices = {}
-        if any_open:
-            try:
-                ticks = client.get_pricing(scan_symbols)
-                prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
-            except Exception as e:
-                log.debug("Price fetch failed: %s", e)
+        try:
+            ticks = client.get_pricing(scan_symbols)
+            prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
+        except Exception as e:
+            log.debug("Price fetch failed: %s", e)
 
         # ── Signal engine (every 5s) ─────────────────────────────────────────
         if now_epoch - last_signal_run >= 5.0:
