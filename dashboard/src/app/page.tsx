@@ -6,13 +6,17 @@ import WatchlistSection from "@/components/WatchlistSection";
 import SignalsSection from "@/components/SignalsSection";
 import Footer from "@/components/Footer";
 import SettingsPanel from "@/components/SettingsPanel";
-import { useWatchlist, useSignals, useLoopState, useApiStatus } from "@/hooks/useData";
+import OpenTrades from "@/components/OpenTrades";
+import TradeHistory from "@/components/TradeHistory";
+import { useWatchlist, useSignals, useLoopState, useApiStatus, usePositions, useTradeHistory } from "@/hooks/useData";
 
 export default function Home() {
   const { data, lastUpdated, error, isRefreshing } = useWatchlist(60000);
   const { signals } = useSignals();
   const { loopState } = useLoopState();
   const { status: apiStatus } = useApiStatus(5000);
+  const { positions } = usePositions(5000);
+  const { trades } = useTradeHistory(50, 30000);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -30,6 +34,8 @@ export default function Home() {
               <AccountCard account={data.account} />
               <SettingsPanel status={apiStatus} />
               <SignalsSection signals={signals} />
+              <OpenTrades positions={positions} />
+              <TradeHistory trades={trades} />
             </div>
             {/* Right column: Watchlist */}
             <div className="lg:col-span-2">

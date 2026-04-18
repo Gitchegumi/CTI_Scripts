@@ -72,3 +72,30 @@ export interface WatchlistData {
   ranked: [string, number, string][];
   account: AccountData;
 }
+
+export interface OpenPosition {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  volume: number;
+  open_price: number;
+  current_price: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  unrealized_pl: number;
+  net_profit: number;
+}
+
+export interface ClosedTrade {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  volume: number;
+  open_price: number;
+  close_price: number;
+  open_time: string;
+  close_time: string;
+  realized_pl: number;
+  financing: number;
+  pnl: number;
+}
