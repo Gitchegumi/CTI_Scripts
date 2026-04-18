@@ -113,7 +113,7 @@ export function useLoopState(): UseLoopStateReturn {
     };
 
     fetchState();
-    const id = setInterval(fetchState, 10000); // Poll every 10s for live updates
+    const id = setInterval(fetchState, 2000); // Poll every 2s for live price updates
     return () => clearInterval(id);
   }, []);
 

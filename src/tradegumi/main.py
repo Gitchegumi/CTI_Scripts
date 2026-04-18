@@ -238,11 +238,18 @@ def run(mode: str):
     SCAN_MINUTE_CT = 0
     last_scan_date = None
 
-    log.info("Entering main loop — checking %d available symbols every 60s", len(available))
+    log.info("Entering main loop — signal engine every 5s, price ticker every 1s")
     log.info("Scheduled daily re-scan at 02:00 ET (03:00 CT)")
+
+    # Track last signal engine run for 5s cadence
+    last_signal_run = 0.0
+    # Cache for price data and loop state (written every 1s by price ticker)
+    cached_loop_state: list[dict] = []
+
     while True:
         now_ct = datetime.now(CT_TZ)
         now_ny = datetime.now(NY_TZ)
+        now_epoch = time.time()
         log.debug("Loop iteration at %s", now_ct.isoformat())
 
         # ── Scheduled daily re-scan ──────────────────────────────────────────
@@ -260,41 +267,75 @@ def run(mode: str):
             except Exception as e:
                 log.error("Scheduled re-scan failed: %s", e)
 
-        # Run trailing SL on each iteration
-        try:
-            trailing_manager.run_once()
-        except Exception as e:
-            log.error("TrailingSL error: %s", e)
-
-        # Check each available symbol in the watchlist (Tier 1 + Tier 2 only)
+        # ── Price ticker (every 1s) ──────────────────────────────────────────
         watchlist_data = load_watchlist_with_scores()
-        watchlist_set = set(watchlist_data.keys())
-        # Only scan symbols that are both on the watchlist AND available
         scan_symbols = [s for s in watchlist_data if s in available and s not in config.UNAVAILABLE_INSTRUMENTS]
-        loop_summary = []
-        loop_state = []  # Per-symbol state for dashboard
-        for symbol in scan_symbols:
-            tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
-            score = watchlist_data[symbol]["score"]
-            tier = watchlist_data[symbol]["tier"]
-            loop_summary.append((symbol, tag, tier, score))
-            loop_state.append({
-                "symbol": symbol,
-                "state": tag,
-                "trend": (trend or "flat") if tag != "closed" else "closed",
-                "lr_15": round(lr_15, 6) if lr_15 else 0.0,
-                "lr_5": round(lr_5, 6) if lr_5 else 0.0,
-                "score": round(score, 3),
-                "tier": tier,
-            })
 
-        # Sort by score descending — most relevant first
-        loop_summary.sort(key=lambda x: x[3], reverse=True)
-        log.info("Loop: %s", " | ".join(
-            f"{s}={tag}" for s, tag, _, _ in loop_summary
-        ))
+        # Check if any market is open before hitting the API
+        any_open = any(is_market_open(s) for s in scan_symbols)
 
-        # Write loop state for dashboard
+        prices = {}
+        if any_open:
+            try:
+                ticks = client.get_pricing(scan_symbols)
+                prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
+            except Exception as e:
+                log.debug("Price fetch failed: %s", e)
+
+        # ── Signal engine (every 5s) ─────────────────────────────────────────
+        if now_epoch - last_signal_run >= 5.0:
+            last_signal_run = now_epoch
+
+            # Run trailing SL
+            try:
+                trailing_manager.run_once()
+            except Exception as e:
+                log.error("TrailingSL error: %s", e)
+
+            # Check each symbol
+            loop_summary = []
+            loop_state = []
+            for symbol in scan_symbols:
+                tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
+                score = watchlist_data[symbol]["score"]
+                tier = watchlist_data[symbol]["tier"]
+                loop_summary.append((symbol, tag, tier, score))
+                state_entry = {
+                    "symbol": symbol,
+                    "state": tag,
+                    "trend": (trend or "flat") if tag != "closed" else "closed",
+                    "lr_15": round(lr_15, 6) if lr_15 else 0.0,
+                    "lr_5": round(lr_5, 6) if lr_5 else 0.0,
+                    "score": round(score, 3),
+                    "tier": tier,
+                }
+                # Merge live price into state
+                if symbol in prices:
+                    state_entry["bid"] = prices[symbol]["bid"]
+                    state_entry["ask"] = prices[symbol]["ask"]
+                    state_entry["spread"] = prices[symbol]["spread"]
+                loop_state.append(state_entry)
+
+            # Sort by score descending — most relevant first
+            loop_summary.sort(key=lambda x: x[3], reverse=True)
+            log.info("Loop: %s", " | ".join(
+                f"{s}={tag}" for s, tag, _, _ in loop_summary
+            ))
+
+            cached_loop_state = loop_state
+        else:
+            # Between signal runs, just update prices in cached state
+            loop_state = []
+            for entry in cached_loop_state:
+                updated = dict(entry)
+                sym = updated["symbol"]
+                if sym in prices:
+                    updated["bid"] = prices[sym]["bid"]
+                    updated["ask"] = prices[sym]["ask"]
+                    updated["spread"] = prices[sym]["spread"]
+                loop_state.append(updated)
+
+        # ── Write loop state (every 1s) ──────────────────────────────────────
         try:
             state_file = Path(__file__).parent / "data" / "loop_state.json"
             state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -309,10 +350,10 @@ def run(mode: str):
         except Exception as e:
             log.warning("Failed to write loop_state.json: %s", e)
 
-        # Sleep until the next minute boundary (00 seconds)
+        # Sleep until next second boundary
         now_ct = datetime.now(CT_TZ)
-        seconds_to_next_minute = 60 - now_ct.second - (now_ct.microsecond / 1_000_000)
-        time.sleep(max(0, seconds_to_next_minute))
+        sleep_sec = 1.0 - (now_ct.microsecond / 1_000_000)
+        time.sleep(max(0.1, sleep_sec))
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

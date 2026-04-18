@@ -19,6 +19,16 @@ class Candle:
 
 
 @dataclass
+class PriceTick:
+    """Current bid/ask price for an instrument."""
+    symbol: str
+    bid: float
+    ask: float
+    spread: float      # ask - bid
+    timestamp: str      # ISO timestamp
+
+
+@dataclass
 class Position:
     """Open position representation."""
     id: str
@@ -59,6 +69,18 @@ class ExecutionClient(ABC):
 
         Returns:
             list[Candle]
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_pricing(self, instruments: list[str]) -> list[PriceTick]:
+        """Get current bid/ask for multiple instruments in one call.
+
+        Args:
+            instruments: List of generic symbols e.g. ["EURUSD", "GBPJPY"]
+
+        Returns:
+            list[PriceTick]
         """
         raise NotImplementedError
 

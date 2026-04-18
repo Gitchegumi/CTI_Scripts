@@ -4,7 +4,7 @@ from typing import Optional
 from decimal import Decimal
 
 from tradegumi.api.base_client import (
-    ExecutionClient, Candle, Position, OrderRequest
+    ExecutionClient, Candle, Position, OrderRequest, PriceTick
 )
 from tradegumi import config
 
@@ -80,6 +80,28 @@ class OandaClient(ExecutionClient):
                 s=c.get("volume"),
             ))
         return candles
+
+    def get_pricing(self, instruments: list[str]) -> list[PriceTick]:
+        """Fetch current bid/ask for multiple instruments in one API call.
+
+        Uses Oanda's batch pricing endpoint.
+        """
+        oanda_syms = [self._to_oanda(s) for s in instruments]
+        params = {"instruments": ",".join(oanda_syms)}
+        data = self._request("GET", f"/v3/accounts/{self.account_id}/pricing", params=params)
+        ticks = []
+        for p in data.get("prices", []):
+            sym = self._from_oanda(p["instrument"])
+            bid = float(p["bids"][0]["price"]) if p.get("bids") else 0.0
+            ask = float(p["asks"][0]["price"]) if p.get("asks") else 0.0
+            ticks.append(PriceTick(
+                symbol=sym,
+                bid=bid,
+                ask=ask,
+                spread=round(ask - bid, 6),
+                timestamp=p["time"],
+            ))
+        return ticks
 
     def get_account_balance(self) -> float:
         """Return account balance."""

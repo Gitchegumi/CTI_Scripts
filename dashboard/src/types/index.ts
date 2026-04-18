@@ -52,6 +52,9 @@ export interface SymbolState {
   lr_5: number;
   score: number;
   tier: string;
+  bid?: number;
+  ask?: number;
+  spread?: number;
 }
 
 export interface LoopState {
