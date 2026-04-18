@@ -31,24 +31,22 @@ function fmtTs(ts: string): string {
 
 export default function SignalsSection({ signals }: SignalsSectionProps) {
   return (
-    <div className="space-y-2">
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-        Active Signals
-      </h2>
+    <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+      <div className="px-4 py-2 border-b border-slate-800">
+        <span className="text-sm font-medium text-slate-300">⚡ Active Signals</span>
+      </div>
 
       {signals.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-lg py-8 text-center text-sm text-slate-500">
-          No active signals
-        </div>
+        <div className="px-4 py-4 text-sm text-slate-500 text-center">No active signals</div>
       ) : (
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="p-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {signals.map((sig, i) => {
             const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";
             const dirBg = sig.direction === "BUY" ? "bg-green-900/30 border-green-700" : "bg-red-900/30 border-red-700";
             return (
               <div
                 key={i}
-                className={`bg-slate-900 border rounded-lg p-3 space-y-2 ${dirBg}`}
+                className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-white">{sig.symbol}</span>

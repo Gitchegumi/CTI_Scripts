@@ -43,7 +43,7 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
   const tier2Items = data.ranked.filter((r) => r[2] === "Tier 2");
   const belowItems = data.ranked.filter((r) => r[2] === "Below Threshold");
 
-  function tableHeaders(showPrice = true) {
+  function tableHeaders() {
     return (
       <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase">
         <th className="text-left py-2 px-3 font-medium">Symbol</th>
@@ -85,19 +85,17 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
   }
 
   return (
-    <div className="space-y-2 h-full">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-          Watchlist
-        </h2>
+    <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+      <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+        <span className="text-sm font-medium text-slate-300">📊 Watchlist</span>
         <span className="text-xs text-slate-500">{data.ranked.length} symbols</span>
       </div>
 
-      {/* Tier 1 */}
-      {tier1Items.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-xs text-green-400 font-medium px-1">Tier 1</div>
-          <div className="bg-slate-900 border border-green-900 rounded-lg overflow-hidden">
+      <div className="space-y-0">
+        {/* Tier 1 */}
+        {tier1Items.length > 0 && (
+          <div>
+            <div className="text-xs text-green-400 font-medium px-3 pt-2 pb-1">Tier 1</div>
             <table className="w-full text-sm">
               <thead>{tableHeaders()}</thead>
               <tbody>
@@ -105,14 +103,12 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tier 2 */}
-      {tier2Items.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-xs text-yellow-400 font-medium px-1">Tier 2</div>
-          <div className="bg-slate-900 border border-yellow-900 rounded-lg overflow-hidden">
+        {/* Tier 2 */}
+        {tier2Items.length > 0 && (
+          <div>
+            <div className="text-xs text-yellow-400 font-medium px-3 pt-2 pb-1">Tier 2</div>
             <table className="w-full text-sm">
               <thead>{tableHeaders()}</thead>
               <tbody>
@@ -120,28 +116,26 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Below Threshold — collapsible */}
-      <div className="space-y-1">
-        <button
-          onClick={() => setShowBelow(!showBelow)}
-          className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors w-full px-1"
-        >
-          <span className={`transition-transform ${showBelow ? "rotate-90" : ""}`}>▶</span>
-          <span>Below Threshold ({belowItems.length})</span>
-        </button>
-        {showBelow && (
-          <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+        {/* Below Threshold — collapsible */}
+        <div>
+          <button
+            onClick={() => setShowBelow(!showBelow)}
+            className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors w-full px-3 pt-1 pb-1"
+          >
+            <span className={`transition-transform ${showBelow ? "rotate-90" : ""}`}>▶</span>
+            <span>Below Threshold ({belowItems.length})</span>
+          </button>
+          {showBelow && (
             <table className="w-full text-sm">
               <thead>{tableHeaders()}</thead>
               <tbody>
                 {belowItems.map((r) => renderRow(r))}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

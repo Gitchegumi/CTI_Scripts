@@ -37,7 +37,7 @@ export default function Home() {
               <OpenTrades positions={positions} />
             </div>
             {/* Right column: Watchlist + Trade History */}
-            <div className="lg:col-span-2 space-y-4">
+            <div className="lg:col-span-2 space-y-2">
               <WatchlistSection data={data} loopState={loopState?.symbols ?? []} />
               <TradeHistory trades={trades} />
             </div>

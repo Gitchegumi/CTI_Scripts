@@ -49,17 +49,25 @@ function fmt(n: number, decimals = 2): string {
 export default function AccountCard({ account }: AccountCardProps) {
   const pnlColor = account.session_pnl >= 0 ? "text-green-400" : "text-red-400";
   const pnlSign = account.session_pnl >= 0 ? "+" : "";
-  const profitTargetPct = Math.round(account.profit_target_remaining_pct);
-  const dailyLossPct = Math.round(account.daily_loss_remaining_pct);
-  const ddPct = Math.round(account.dd_remaining_pct);
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-        Account Metrics
-      </h2>
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
-        {/* Top row: balances */}
+    <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+      <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+        <span className="text-sm font-medium text-slate-300">💳 Account Metrics</span>
+        <div className="flex items-center gap-2">
+          <span className="px-2.5 py-1 text-xs font-bold rounded bg-purple-600 text-purple-100">
+            {account.cti_phase_label}
+          </span>
+          {account.open_trades > 0 && (
+            <span className="px-2 py-0.5 text-xs rounded bg-orange-600 text-orange-100">
+              {account.open_trades} open
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Balances */}
         <div className="flex flex-wrap gap-6">
           <div>
             <div className="text-xs text-slate-500 uppercase tracking-wide">Balance</div>
@@ -75,18 +83,7 @@ export default function AccountCard({ account }: AccountCardProps) {
               {pnlSign}${fmt(Math.abs(account.session_pnl))}
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="px-2.5 py-1 text-xs font-bold rounded bg-purple-600 text-purple-100">
-              {account.cti_phase_label}
-            </span>
-            {account.open_trades > 0 && (
-              <span className="px-2 py-0.5 text-xs rounded bg-orange-600 text-orange-100">
-                {account.open_trades} open
-              </span>
-            )}
-          </div>
         </div>
-
 
         {/* Progress bars */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -94,19 +91,19 @@ export default function AccountCard({ account }: AccountCardProps) {
             label="Profit Target"
             remaining={account.profit_target_remaining}
             total={account.profit_target_dollars}
-            colorClass={getBarColor(profitTargetPct)}
+            colorClass={getBarColor(Math.round(account.profit_target_remaining_pct))}
           />
           <ProgressBar
             label="Daily Loss Buffer"
             remaining={account.daily_loss_remaining}
             total={account.daily_loss_limit}
-            colorClass={getBarColor(dailyLossPct)}
+            colorClass={getBarColor(Math.round(account.daily_loss_remaining_pct))}
           />
           <ProgressBar
             label="Max Drawdown Buffer"
             remaining={account.dd_remaining}
             total={account.max_dd_dollars}
-            colorClass={getBarColor(ddPct)}
+            colorClass={getBarColor(Math.round(account.dd_remaining_pct))}
           />
         </div>
       </div>
