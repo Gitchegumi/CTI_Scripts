@@ -29,17 +29,17 @@ export default function Home() {
           </div>
         ) : data ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Left column: Account + Signals */}
+            {/* Left column: Account + Settings + Signals + Open Trades */}
             <div className="lg:col-span-1 space-y-4">
               <AccountCard account={data.account} />
               <SettingsPanel status={apiStatus} />
               <SignalsSection signals={signals} />
               <OpenTrades positions={positions} />
-              <TradeHistory trades={trades} />
             </div>
-            {/* Right column: Watchlist */}
-            <div className="lg:col-span-2">
+            {/* Right column: Watchlist + Trade History */}
+            <div className="lg:col-span-2 space-y-4">
               <WatchlistSection data={data} loopState={loopState?.symbols ?? []} />
+              <TradeHistory trades={trades} />
             </div>
           </div>
         ) : (
