@@ -237,6 +237,7 @@ def run(mode: str):
     SCAN_HOUR_CT = 2
     SCAN_MINUTE_CT = 0
     last_scan_date = None
+    last_closed_msg_date = None  # Track when we last sent the closed-market message
 
     log.info("Entering main loop — signal engine every 5s, price ticker every 1s")
     log.info("Scheduled daily re-scan at 02:00 ET (03:00 CT)")
@@ -330,6 +331,31 @@ def run(mode: str):
                     updated["ask"] = prices[sym]["ask"]
                     updated["spread"] = prices[sym]["spread"]
                 loop_state.append(updated)
+
+        # ── Closed-market message (once per close period) ───────────────────────
+        if loop_state and all(s.get("state") == "closed" for s in loop_state):
+            close_key = now_ny.strftime("%Y-%m-%d")  # Once per calendar day
+            if close_key != last_closed_msg_date:
+                from tradegumi.session_rules import is_trading_day
+                if not is_trading_day("EURUSD", when=now_ny):
+                    # Weekend
+                    day_name = now_ny.strftime("%A")
+                    log.info("Market closed (weekend — %s) — sending closed message", day_name)
+                    post_watchlist(
+                        f"🌅 **Morning Watchlist**\n"
+                        f"It's {day_name} — markets are closed.\n"
+                        f"All quiet here. Enjoy the time off! 🌴",
+                    )
+                else:
+                    # Weekday but after hours (Fri evening, etc.)
+                    day_name = now_ny.strftime("%A")
+                    log.info("Market closed (after hours — %s) — sending closed message", day_name)
+                    post_watchlist(
+                        f"🌅 **Morning Watchlist**\n"
+                        f"It's {day_name} evening — markets are closed for the night.\n"
+                        f"See you at the next session open! 🌙",
+                    )
+                last_closed_msg_date = close_key
 
         # ── Write loop state (every 1s) ──────────────────────────────────────
         try:
