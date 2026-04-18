@@ -44,6 +44,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -70,7 +71,6 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
     # ── GET endpoints ──────────────────────────────────────────────────────
 
     def do_GET(self):
-        self._send_cors()
 
         if self.path == "/api/status":
             # Current config + runtime state
@@ -116,7 +116,6 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
     # ── POST endpoints ────────────────────────────────────────────────────
 
     def do_POST(self):
-        self._send_cors()
         body = self._read_body()
 
         if self.path == "/api/config/mode":
