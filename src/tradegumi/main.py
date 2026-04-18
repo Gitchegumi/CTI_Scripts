@@ -38,6 +38,7 @@ from tradegumi.session_rules import is_market_open
 from tradegumi.alerts import post_signal, post_watchlist
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text
+from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -231,6 +232,10 @@ def run(mode: str):
 
     log.info("Connected to Oanda — account=%s", config.OANDA_ACCOUNT_ID)
 
+    # Start API server for dashboard
+    api_server = start_api_server()
+    set_runtime_state({"running": True, "loop_count": 0})
+
     scan_and_alert(client, available=available)
 
     # Pre-session scan schedule: 06:30 CT (America/Chicago) every trading day
@@ -262,10 +267,15 @@ def run(mode: str):
         is_full_rescan = (now_ct.hour == SCAN_HOUR_CT and now_ct.minute == SCAN_MINUTE_CT and today_str != last_scan_date)
         is_periodic_rescan = (now_epoch - last_rescan_epoch >= RESCAN_INTERVAL)
         any_market_open = any(is_market_open(s) for s in available - config.UNAVAILABLE_INSTRUMENTS)
+        # Check for API-triggered rescan
+        rt_state = get_runtime_state()
+        is_api_rescan = rt_state.get("force_rescan", False)
+        if is_api_rescan:
+            set_runtime_state({**rt_state, "force_rescan": False})
 
-        if (is_full_rescan or (is_periodic_rescan and any_market_open)):
+        if (is_full_rescan or is_api_rescan or (is_periodic_rescan and any_market_open)):
             try:
-                if is_full_rescan:
+                if is_full_rescan or is_api_rescan:
                     log.info("Full re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
                     available = check_available_instruments(client)
                 else:
