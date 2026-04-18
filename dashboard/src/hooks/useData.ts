@@ -1,8 +1,24 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { WatchlistData, SignalEntry, LoopState } from "@/types";
 import { ApiStatus, OpenPosition, ClosedTrade } from "@/lib/api";
+
+// ── Weekend / Market-Closed Detection ────────────────────────────────────────
+// Derive market state from loop_state. When all symbols are "closed",
+// throttle all polling to 60s. When any market is open, use fast intervals.
+
+function useMarketOpen(loopState: LoopState | null): boolean {
+  return useMemo(() => {
+    if (!loopState?.symbols?.length) return true; // default to open until we know
+    return loopState.symbols.some((s) => s.state !== "closed");
+  }, [loopState]);
+}
+
+const FAST_MS = 2000;   // loop_state & positions when market open
+const SLOW_MS = 60000;  // everything when market closed (weekend)
+
+// ── Watchlist ────────────────────────────────────────────────────────────────
 
 interface UseWatchlistReturn {
   data: WatchlistData | null;
@@ -12,7 +28,8 @@ interface UseWatchlistReturn {
   refresh: () => void;
 }
 
-export function useWatchlist(pollIntervalMs = 60000): UseWatchlistReturn {
+export function useWatchlist(marketOpen: boolean): UseWatchlistReturn {
+  const pollIntervalMs = marketOpen ? 30000 : SLOW_MS;
   const [data, setData] = useState<WatchlistData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,12 +62,15 @@ export function useWatchlist(pollIntervalMs = 60000): UseWatchlistReturn {
   return { data, lastUpdated, error, isRefreshing, refresh: fetchData };
 }
 
+// ── Signals ──────────────────────────────────────────────────────────────────
+
 interface UseSignalsReturn {
   signals: SignalEntry[];
   error: string | null;
 }
 
-export function useSignals(): UseSignalsReturn {
+export function useSignals(marketOpen: boolean): UseSignalsReturn {
+  const pollIntervalMs = marketOpen ? 30000 : SLOW_MS;
   const [signals, setSignals] = useState<SignalEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,34 +81,32 @@ export function useSignals(): UseSignalsReturn {
           cache: "no-store",
         });
         if (!res.ok) {
-          if (res.status === 404) {
-            setSignals([]);
-            return;
-          }
+          if (res.status === 404) { setSignals([]); return; }
           throw new Error(`HTTP ${res.status}`);
         }
         const json = await res.json();
         setSignals(Array.isArray(json) ? json : []);
         setError(null);
-      } catch {
-        setSignals([]);
-      }
+      } catch { setSignals([]); }
     };
 
     fetchSignals();
-    const id = setInterval(fetchSignals, 60000);
+    const id = setInterval(fetchSignals, pollIntervalMs);
     return () => clearInterval(id);
-  }, []);
+  }, [pollIntervalMs]);
 
   return { signals, error };
 }
+
+// ── Loop State ───────────────────────────────────────────────────────────────
 
 interface UseLoopStateReturn {
   loopState: LoopState | null;
   error: string | null;
 }
 
-export function useLoopState(): UseLoopStateReturn {
+export function useLoopState(marketOpen: boolean): UseLoopStateReturn {
+  const pollIntervalMs = marketOpen ? FAST_MS : SLOW_MS;
   const [loopState, setLoopState] = useState<LoopState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,27 +117,24 @@ export function useLoopState(): UseLoopStateReturn {
           cache: "no-store",
         });
         if (!res.ok) {
-          if (res.status === 404) {
-            setLoopState(null);
-            return;
-          }
+          if (res.status === 404) { setLoopState(null); return; }
           throw new Error(`HTTP ${res.status}`);
         }
         const json = await res.json();
         setLoopState(json);
         setError(null);
-      } catch {
-        setLoopState(null);
-      }
+      } catch { setLoopState(null); }
     };
 
     fetchState();
-    const id = setInterval(fetchState, 2000); // Poll every 2s for live price updates
+    const id = setInterval(fetchState, pollIntervalMs);
     return () => clearInterval(id);
-  }, []);
+  }, [pollIntervalMs]);
 
   return { loopState, error };
 }
+
+// ── API Status ───────────────────────────────────────────────────────────────
 
 interface UseApiStatusReturn {
   status: ApiStatus | null;
@@ -144,21 +159,21 @@ export function useApiStatus(pollIntervalMs = 5000): UseApiStatusReturn {
 
     fetchStatus();
     const id = setInterval(fetchStatus, pollIntervalMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    return () => { cancelled = true; clearInterval(id); };
   }, [pollIntervalMs]);
 
   return { status, error };
 }
+
+// ── Open Positions ───────────────────────────────────────────────────────────
 
 interface UsePositionsReturn {
   positions: OpenPosition[];
   error: string | null;
 }
 
-export function usePositions(pollIntervalMs = 5000): UsePositionsReturn {
+export function usePositions(marketOpen: boolean): UsePositionsReturn {
+  const pollIntervalMs = marketOpen ? FAST_MS : SLOW_MS;
   const [positions, setPositions] = useState<OpenPosition[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,24 +191,23 @@ export function usePositions(pollIntervalMs = 5000): UsePositionsReturn {
 
     fetchPositions();
     const id = setInterval(fetchPositions, pollIntervalMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    return () => { cancelled = true; clearInterval(id); };
   }, [pollIntervalMs]);
 
   return { positions, error };
 }
+
+// ── Trade History ────────────────────────────────────────────────────────────
 
 interface UseTradeHistoryReturn {
   trades: ClosedTrade[];
   error: string | null;
 }
 
-export function useTradeHistory(count = 50, pollIntervalMs = 30000): UseTradeHistoryReturn {
+export function useTradeHistory(count = 50, marketOpen: boolean = true): UseTradeHistoryReturn {
+  const pollIntervalMs = marketOpen ? 30000 : SLOW_MS;
   const [trades, setTrades] = useState<ClosedTrade[]>([]);
   const [error, setError] = useState<string | null>(null);
-
 
   useEffect(() => {
     let cancelled = false;
@@ -209,11 +223,12 @@ export function useTradeHistory(count = 50, pollIntervalMs = 30000): UseTradeHis
 
     fetchTrades();
     const id = setInterval(fetchTrades, pollIntervalMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    return () => { cancelled = true; clearInterval(id); };
   }, [count, pollIntervalMs]);
 
   return { trades, error };
 }
+
+// ── Export market hook ──────────────────────────────────────────────────────
+
+export { useMarketOpen };

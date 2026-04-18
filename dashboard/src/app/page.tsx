@@ -8,21 +8,30 @@ import Footer from "@/components/Footer";
 import SettingsPanel from "@/components/SettingsPanel";
 import OpenTrades from "@/components/OpenTrades";
 import TradeHistory from "@/components/TradeHistory";
-import { useWatchlist, useSignals, useLoopState, useApiStatus, usePositions, useTradeHistory } from "@/hooks/useData";
+import { useWatchlist, useSignals, useLoopState, useApiStatus, usePositions, useTradeHistory, useMarketOpen } from "@/hooks/useData";
 
 export default function Home() {
-  const { data, lastUpdated, error, isRefreshing } = useWatchlist(60000);
-  const { signals } = useSignals();
-  const { loopState } = useLoopState();
+  // Initial load with fast polling — once loopState arrives, useMarketOpen
+  // will throttle everything to 60s on weekends/closed
+  const { loopState } = useLoopState(true);
+  const marketOpen = useMarketOpen(loopState);
+
+  const { data, lastUpdated, error, isRefreshing } = useWatchlist(marketOpen);
+  const { signals } = useSignals(marketOpen);
   const { status: apiStatus } = useApiStatus(5000);
-  const { positions } = usePositions(5000);
-  const { trades } = useTradeHistory(50, 30000);
+  const { positions } = usePositions(marketOpen);
+  const { trades } = useTradeHistory(50, marketOpen);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} loopState={loopState} apiStatus={apiStatus} />
 
       <main className="flex-1 px-4 py-4 max-w-7xl mx-auto w-full">
+        {!marketOpen && (
+          <div className="mb-4 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-yellow-400 text-center">
+            🌙 Markets closed — polling throttled to 60s. Dashboard updates will resume when markets open.
+          </div>
+        )}
         {error ? (
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
             Failed to load watchlist: {error}
