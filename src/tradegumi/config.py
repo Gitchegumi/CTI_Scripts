@@ -32,6 +32,11 @@ OANDA_STREAM_URL = os.getenv("OANDA_STREAM_URL", "https://stream-fxpractice.oand
 # ── Discord ─────────────────────────────────────────────────────────────────
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
+# ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
+# TradeGumi POSTs structured signal data here on every signal event.
+# Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)
+CALLBACK_URL = os.getenv("TRADEGUMI_CALLBACK_URL", "") 
+
 # ── Mode ─────────────────────────────────────────────────────────────────────
 # alert_only | demo | live
 TRADEGUMI_MODE = os.getenv("TRADEGUMI_MODE", "alert_only").lower()

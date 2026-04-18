@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { WatchlistData, LoopState } from "@/types";
+import { ApiStatus } from "@/lib/api";
 
 interface HeaderProps {
   data: WatchlistData | null;
   lastUpdated: Date | null;
   isRefreshing: boolean;
   loopState: LoopState | null;
+  apiStatus: ApiStatus | null;
 }
 
 function formatTime(date: Date, tz: string): string {
@@ -20,8 +22,9 @@ function formatTime(date: Date, tz: string): string {
   });
 }
 
-export default function Header({ data, lastUpdated, isRefreshing, loopState }: HeaderProps) {
-  const mode = loopState?.mode ?? data?.account?.cti_program ?? "—";
+export default function Header({ data, lastUpdated, isRefreshing, loopState, apiStatus }: HeaderProps) {
+  // Prefer live config from API, fall back to loopState, then watchlist
+  const mode: string = apiStatus?.mode ?? loopState?.mode ?? data?.account?.cti_program ?? "—";
   const provider = loopState?.provider ?? "—";
 
   // Live clock that ticks every second
@@ -34,7 +37,7 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState }: H
   const modeColors: Record<string, string> = {
     alert_only: "bg-blue-600 text-blue-100",
     demo: "bg-yellow-600 text-yellow-100",
-    live: "bg-green-600 text-green-100",
+    live: "bg-red-600 text-red-100",
   };
 
   return (

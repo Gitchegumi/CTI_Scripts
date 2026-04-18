@@ -39,6 +39,10 @@ from tradegumi.alerts import post_signal, post_watchlist
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
+from tradegumi.callback import (
+    send_signal_callback, send_rescan_callback, send_mode_change_callback,
+    send_trade_callback, send_status_callback, send_closed_market_callback,
+)
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -187,10 +191,29 @@ def check_and_execute(
     if not can_open:
         signal_obj.blocked_reason = reason
         post_signal(signal_obj)
+        send_signal_callback({
+            "symbol": signal_obj.symbol,
+            "direction": signal_obj.direction,
+            "confidence": signal_obj.confidence,
+            "strategy": signal_obj.strategy,
+            "mode": config.TRADEGUMI_MODE,
+            "blocked": reason,
+        })
         return f"{signal_obj.direction[0]}(blocked)", trend, lr_15, lr_5
 
     # Post signal to Discord (alert_only and demo both alert)
     post_signal(signal_obj)
+    send_signal_callback({
+        "symbol": signal_obj.symbol,
+        "direction": signal_obj.direction,
+        "confidence": signal_obj.confidence,
+        "strategy": signal_obj.strategy,
+        "lr_15": lr_15,
+        "lr_5": lr_5,
+        "trend": trend,
+        "mode": config.TRADEGUMI_MODE,
+        "blocked": getattr(signal_obj, 'blocked_reason', None),
+    })
     tag = f"{signal_obj.direction[0]}(conf={signal_obj.confidence:.2f})"
 
     # Execute only in demo/live
@@ -289,6 +312,7 @@ def run(mode: str):
                 if is_full_rescan:
                     last_scan_date = today_str
                 log.info("Re-scan complete — watchlist refreshed")
+                send_rescan_callback({"trigger": "full" if is_full_rescan or is_api_rescan else "periodic"})
             except Exception as e:
                 log.error("Re-scan failed: %s", e)
 
@@ -365,20 +389,24 @@ def run(mode: str):
                     # Weekend
                     day_name = now_ny.strftime("%A")
                     log.info("Market closed (weekend — %s) — sending closed message", day_name)
-                    post_watchlist(
+                    msg = (
                         f"🌅 **Morning Watchlist**\n"
                         f"It's {day_name} — markets are closed.\n"
-                        f"All quiet here. Enjoy the time off! 🌴",
+                        f"All quiet here. Enjoy the time off! 🌴"
                     )
+                    post_watchlist(msg)
+                    send_closed_market_callback(day_name, msg)
                 else:
                     # Weekday but after hours (Fri evening, etc.)
                     day_name = now_ny.strftime("%A")
                     log.info("Market closed (after hours — %s) — sending closed message", day_name)
-                    post_watchlist(
+                    msg = (
                         f"🌅 **Morning Watchlist**\n"
                         f"It's {day_name} evening — markets are closed for the night.\n"
-                        f"See you at the next session open! 🌙",
+                        f"See you at the next session open! 🌙"
                     )
+                    post_watchlist(msg)
+                    send_closed_market_callback(day_name, msg)
                 last_closed_msg_date = close_key
 
         # ── Write loop state (every 1s) ──────────────────────────────────────

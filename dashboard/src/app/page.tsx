@@ -5,16 +5,18 @@ import AccountCard from "@/components/AccountCard";
 import WatchlistSection from "@/components/WatchlistSection";
 import SignalsSection from "@/components/SignalsSection";
 import Footer from "@/components/Footer";
-import { useWatchlist, useSignals, useLoopState } from "@/hooks/useData";
+import SettingsPanel from "@/components/SettingsPanel";
+import { useWatchlist, useSignals, useLoopState, useApiStatus } from "@/hooks/useData";
 
 export default function Home() {
   const { data, lastUpdated, error, isRefreshing } = useWatchlist(60000);
   const { signals } = useSignals();
   const { loopState } = useLoopState();
+  const { status: apiStatus } = useApiStatus(5000);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} loopState={loopState} />
+      <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} loopState={loopState} apiStatus={apiStatus} />
 
       <main className="flex-1 px-4 py-4 max-w-7xl mx-auto w-full">
         {error ? (
@@ -26,6 +28,7 @@ export default function Home() {
             {/* Left column: Account + Signals */}
             <div className="lg:col-span-1 space-y-4">
               <AccountCard account={data.account} />
+              <SettingsPanel status={apiStatus} />
               <SignalsSection signals={signals} />
             </div>
             {/* Right column: Watchlist */}
@@ -40,7 +43,7 @@ export default function Home() {
         )}
       </main>
 
-      {data && <Footer data={data} />}
+      {data && <Footer data={data} apiStatus={apiStatus} />}
     </div>
   );
 }

@@ -123,10 +123,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             if mode not in ("alert_only", "demo", "live"):
                 self._send_json({"error": "invalid mode. Use: alert_only, demo, live"}, 400)
                 return
+            previous = config.TRADEGUMI_MODE
             config.TRADEGUMI_MODE = mode
-            # Also update .env file
             _update_env("TRADEGUMI_MODE", mode)
-            log.info("API: Mode changed to %s", mode)
+            log.info("API: Mode changed from %s to %s", previous, mode)
+            # Notify DockeGumi
+            from tradegumi.callback import send_mode_change_callback
+            send_mode_change_callback(mode, previous)
             self._send_json({"mode": config.TRADEGUMI_MODE})
 
         elif self.path == "/api/config/program":

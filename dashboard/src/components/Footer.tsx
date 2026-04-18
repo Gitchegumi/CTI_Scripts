@@ -1,16 +1,31 @@
 "use client";
 
 import { WatchlistData } from "@/types";
+import { ApiStatus } from "@/lib/api";
 
 interface FooterProps {
   data: WatchlistData;
+  apiStatus?: ApiStatus | null;
 }
 
-export default function Footer({ data }: FooterProps) {
+const PHASE_LABELS: Record<number, string> = {
+  1: "Phase 1",
+  2: "Phase 2",
+  3: "Funded",
+};
+
+export default function Footer({ data, apiStatus }: FooterProps) {
   const { account } = data;
-  const program = account.cti_program
-    ? account.cti_program.charAt(0).toUpperCase() + account.cti_program.slice(1)
-    : "—";
+
+  const program = apiStatus?.program
+    ? apiStatus.program.charAt(0).toUpperCase() + apiStatus.program.slice(1)
+    : account.cti_program
+      ? account.cti_program.charAt(0).toUpperCase() + account.cti_program.slice(1)
+      : "—";
+
+  const phase = apiStatus
+    ? PHASE_LABELS[apiStatus.phase] ?? `Phase ${apiStatus.phase}`
+    : account.cti_phase_label ?? "—";
 
   return (
     <footer className="border-t border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
@@ -21,7 +36,7 @@ export default function Footer({ data }: FooterProps) {
         </span>
         <span>
           <span className="text-slate-400">Phase:</span>{" "}
-          <span className="text-slate-300">{account.cti_phase_label}</span>
+          <span className="text-slate-300">{phase}</span>
         </span>
       </div>
       <div className="flex flex-wrap gap-4">

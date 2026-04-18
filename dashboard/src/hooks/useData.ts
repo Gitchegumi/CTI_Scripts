@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { WatchlistData, SignalEntry, LoopState } from "@/types";
+import { ApiStatus } from "@/lib/api";
 
 interface UseWatchlistReturn {
   data: WatchlistData | null;
@@ -118,4 +119,36 @@ export function useLoopState(): UseLoopStateReturn {
   }, []);
 
   return { loopState, error };
+}
+
+interface UseApiStatusReturn {
+  status: ApiStatus | null;
+  error: string | null;
+}
+
+export function useApiStatus(pollIntervalMs = 5000): UseApiStatusReturn {
+  const [status, setStatus] = useState<ApiStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const { getConfig } = await import("@/lib/api");
+        const data = await getConfig();
+        if (!cancelled) setStatus(data);
+      } catch {
+        if (!cancelled) setError(null);
+      }
+    };
+
+    fetchStatus();
+    const id = setInterval(fetchStatus, pollIntervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [pollIntervalMs]);
+
+  return { status, error };
 }
