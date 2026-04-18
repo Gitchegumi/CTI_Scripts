@@ -1,0 +1,261 @@
+"""Technical indicator stack for TradeGumi.
+
+Adapted from CTI_Scripts/py_scripts/trading_scripts/api/indicators.py
+Pure pandas_ta — no API dependencies. Client-agnostic.
+"""
+import pandas as pd
+import pandas_ta as ta  # noqa: F401 — used by getattr on ta.*
+
+from tradegumi.api.base_client import Candle
+
+
+# ── DataFrame helpers ─────────────────────────────────────────────────────────
+
+def candles_to_df(candles: list[Candle]) -> pd.DataFrame:
+    """Convert list of Candle to pandas DataFrame with OHLCV columns.
+
+    Ensures all OHLC columns are float64 — Oanda API returns prices as strings
+    which can leak through if Candle objects aren't fully converted.
+    """
+    records = [{"t": c.t, "o": float(c.o), "h": float(c.h), "l": float(c.l), "c": float(c.c), "s": c.s} for c in candles]
+    df = pd.DataFrame(records)
+    if "s" in df.columns and df["s"].isna().all():
+        df.drop(columns=["s"], inplace=True)
+    # Force numeric dtypes for OHLC
+    for col in ("o", "h", "l", "c"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def validate_data(data: pd.DataFrame) -> None:
+    """Validate required OHLC columns."""
+    for col in ("o", "h", "l", "c"):
+        if col not in data.columns:
+            raise ValueError(f"Missing required column: {col}")
+
+
+def prepare_data(data: pd.DataFrame) -> pd.DataFrame:
+    """Rename o/h/l/c/s → open/high/low/close/volume for pandas_ta compat.
+
+    Drops the 't' (timestamp) column before passing to pandas_ta — it's a
+    string and causes TypeError when pandas_ta tries to compute .mean()
+    across all columns (e.g. in ATR).
+    """
+    validate_data(data)
+    df = data.rename(columns={
+        "o": "open", "h": "high", "l": "low", "c": "close", "s": "volume"
+    })
+    # Drop non-numeric columns that pandas_ta can't reduce
+    for col in ("t",):
+        if col in df.columns:
+            df = df.drop(columns=[col])
+    return df
+
+
+# ── Individual Indicators ────────────────────────────────────────────────────
+
+def calculate_rsi(data: pd.DataFrame, length: int = 14) -> pd.Series:
+    """RSI."""
+    return prepare_data(data).ta.rsi(length=length)
+
+
+def calculate_stoch_rsi(data: pd.DataFrame, length: int = 14, k: int = 3, d: int = 3) -> pd.DataFrame:
+    """Stochastic RSI. Returns DataFrame with STOCHRSIk and STOCHRSId columns."""
+    df = prepare_data(data)
+    result = df.ta.stochrsi(length=length, k=k, d=d)
+    if isinstance(result, pd.Series):
+        return pd.DataFrame({result.name: result})
+    return result
+
+
+def calculate_macd(data: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
+    """MACD. Returns DataFrame with MACD, MACD Signal, MACDh columns."""
+    df = prepare_data(data)
+    result = df.ta.macd(fast=fast, slow=slow, signal=signal)
+    if isinstance(result, pd.Series):
+        return pd.DataFrame({result.name: result})
+    return result
+
+
+def calculate_atr(data: pd.DataFrame, length: int = 14) -> pd.Series:
+    """Average True Range.
+
+    Returns a pandas Series. If insufficient data for warmup, returns
+    a Series of NaN with the same index as the input.
+    """
+    result = prepare_data(data).ta.atr(length=length)
+    if isinstance(result, pd.DataFrame):
+        # pandas_ta returns a DataFrame when ATR can't be computed
+        # (insufficient warmup rows). Return NaN series.
+        return pd.Series(float('nan'), index=data.index, name=f'ATRr_{length}')
+    return result
+
+
+def calculate_keltner_channels(data: pd.DataFrame, length: int = 20, multiplier: float = 1.5, mamode: str = "ema") -> pd.DataFrame:
+    """Keltner Channels. Returns DataFrame with KCLe, KCBe, KCUe columns."""
+    df = prepare_data(data)
+    result = df.ta.kc(length=length, scalar=multiplier, mamode=mamode)
+    if isinstance(result, pd.Series):
+        return pd.DataFrame({result.name: result})
+    return result
+
+
+def calculate_ema(data: pd.DataFrame, length: int = 20) -> pd.Series:
+    """Exponential Moving Average."""
+    return prepare_data(data).ta.ema(length=length)
+
+
+def calculate_super_trend(data: pd.DataFrame, length: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
+    """Super Trend."""
+    df = prepare_data(data)
+    result = df.ta.supertrend(length=length, multiplier=multiplier)
+    if isinstance(result, pd.Series):
+        return pd.DataFrame({result.name: result})
+    return result
+
+
+def calculate_candlestick_patterns(data: pd.DataFrame, name: str = "all") -> pd.DataFrame:
+    """Candlestick pattern detection.
+
+    Returns DataFrame with binary columns per pattern (1=bearish, -1=bullish, 0=none).
+    Set name="all" or a specific pattern string e.g. "CDL_ENGULFING".
+    """
+    return prepare_data(data).ta.cdl_pattern(name=name)
+
+
+def calculate_linear_regression(data: pd.DataFrame, close: str = "c", length: int = 14) -> pd.Series:
+    """Linear Regression slope as percentage of price."""
+    df = prepare_data(data).copy()
+    close_col = df["close"]
+    lr_result = close_col.to_frame()
+    lr_result.ta.linreg(length=length, append=True)
+    col = f"LINREG_{length}"
+    if col not in lr_result.columns:
+        raise ValueError(f"Linear regression column {col} not found")
+    diff = lr_result[col].diff()
+    pct = (diff / lr_result["close"]) * 100
+    return pct
+
+
+# ── Layer 2: Signal Strength Scoring ─────────────────────────────────────────
+# Each function returns a float in [0.0, 1.0] representing indicator strength.
+
+def stoch_rsi_score(k: float, d: float, k_prev3_min: float, k_prev3_max: float,
+                    direction: str) -> float:
+    """Score StochRSI condition strength.
+
+    Args:
+        k: Current K value
+        d: Current D value
+        k_prev3_min: Minimum of K over prior 3 bars
+        k_prev3_max: Maximum of K over prior 3 bars
+        direction: "BUY" or "SELL"
+
+    Returns:
+        0.0–1.0 strength score
+    """
+    if direction == "BUY":
+        # How far below 30 was the prev-3 min? Deeper = stronger
+        oversold_depth = max(0.0, 30.0 - k_prev3_min)
+        score = min(1.0, oversold_depth / 30.0)
+        # Bonus if K just crossed above D
+        if k > d:
+            score = min(1.0, score + 0.2)
+    else:  # SELL
+        overbought_height = max(0.0, k_prev3_max - 70.0)
+        score = min(1.0, overbought_height / 30.0)
+        if k < d:
+            score = min(1.0, score + 0.2)
+    return round(score, 3)
+
+
+def macd_histogram_score(current: float, prev5_min: float, prev5_max: float,
+                          direction: str) -> float:
+    """Score MACD histogram momentum.
+
+    Returns 0.0–1.0 strength score. Clamped to [0, 1].
+    """
+    if direction == "BUY":
+        delta = current - prev5_min
+        if delta <= 0:
+            return 0.0  # current below prev min = no momentum
+        # Normalise: typical MACD histogram swing is 0.001–0.01 for forex
+        score = min(1.0, delta / (abs(prev5_min) + abs(prev5_max) + 1e-9) * 2)
+    else:
+        delta = prev5_max - current
+        if delta <= 0:
+            return 0.0  # current above prev max = no momentum
+        score = min(1.0, delta / (abs(prev5_min) + abs(prev5_max) + 1e-9) * 2)
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+def keltner_score(last5_low: float, last5_high: float,
+                  last5_middle_min: float, last5_middle_max: float,
+                  direction: str) -> float:
+    """Score Keltner Channel position.
+
+    Returns 0.0–1.0 strength score. Clamped to [0, 1].
+    """
+    if direction == "BUY":
+        band_range = last5_middle_min - last5_low
+        if band_range <= 0:
+            return 0.0  # price below channel = bearish, not bullish
+        score = min(1.0, band_range / (abs(last5_middle_min) * 0.02 + 1e-9))
+    else:
+        band_range = last5_high - last5_middle_max
+        if band_range <= 0:
+            return 0.0
+        score = min(1.0, band_range / (abs(last5_middle_max) * 0.02 + 1e-9))
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+def candlestick_score(patterns: pd.DataFrame, direction: str) -> float:
+    """Score candlestick confirmation.
+
+    Args:
+        patterns: DataFrame from calculate_candlestick_patterns
+        direction: "BUY" or "SELL"
+
+    Returns:
+        0.0 if no pattern, 0.5 for weak pattern, 1.0 for strong pattern
+    """
+    if patterns.empty or patterns.iloc[-1].sum() == 0:
+        return 0.0
+
+    last = patterns.iloc[-1]
+    bullish = {"CDL_HAMMER", "CDL_ENGULFING", "CDL_PIERCING", "CDL_DRAGONFLY"}
+    bearish = {"CDL_SHOOTINGSTAR", "CDL_ENGULFING", "CDL_SPINNINGTOP", "CDL_HANGINGMAN"}
+
+    strong_bull = {"CDL_ENGULFING", "CDL_HAMMER"}
+    strong_bear = {"CDL_ENGULFING", "CDL_SHOOTINGSTAR"}
+
+    if direction == "BUY":
+        for col in patterns.columns:
+            if col in strong_bull and last[col] == -1:
+                return 1.0
+            if col in bullish and last[col] == -1:
+                return 0.5
+    else:
+        for col in patterns.columns:
+            if col in strong_bear and last[col] == 1:
+                return 1.0
+            if col in bearish and last[col] == 1:
+                return 0.5
+
+    return 0.0
+
+
+def trend_score(lr_15m_pct: float, lr_5m_pct: float, direction: str,
+                threshold_15m: float = 0.01, threshold_5m: float = 0.002) -> float:
+    """Score linear regression trend strength.
+
+    Returns 0.0–1.0 based on how decisively both timeframes agree.
+    """
+    if direction == "BUY":
+        score_15 = min(1.0, lr_15m_pct / (threshold_15m * 3))
+        score_5 = min(1.0, lr_5m_pct / (threshold_5m * 3))
+    else:
+        score_15 = min(1.0, abs(lr_15m_pct) / (threshold_15m * 3))
+        score_5 = min(1.0, abs(lr_5m_pct) / (threshold_5m * 3))
+    return round((score_15 + score_5) / 2, 3)
