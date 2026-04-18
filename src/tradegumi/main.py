@@ -239,8 +239,12 @@ def run(mode: str):
     last_scan_date = None
     last_closed_msg_date = None  # Track when we last sent the closed-market message
 
+    RESCAN_INTERVAL = 30 * 60  # 30 minutes in seconds
+    last_rescan_epoch = 0.0
+
     log.info("Entering main loop — signal engine every 5s, price ticker every 1s")
-    log.info("Scheduled daily re-scan at 02:00 ET (03:00 CT)")
+    log.info("Watchlist re-scan every 30 minutes during market hours")
+    log.info("Scheduled full re-scan at 02:00 ET (03:00 CT)")
 
     # Track last signal engine run for 5s cadence
     last_signal_run = 0.0
@@ -253,20 +257,30 @@ def run(mode: str):
         now_epoch = time.time()
         log.debug("Loop iteration at %s", now_ct.isoformat())
 
-        # ── Scheduled daily re-scan ──────────────────────────────────────────
+        # ── Scheduled watchlist re-scan (every 30 min during market hours) ──
         today_str = now_ct.strftime("%Y-%m-%d")
-        if now_ct.hour == SCAN_HOUR_CT and now_ct.minute == SCAN_MINUTE_CT and today_str != last_scan_date:
-            log.info("Scheduled re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
+        is_full_rescan = (now_ct.hour == SCAN_HOUR_CT and now_ct.minute == SCAN_MINUTE_CT and today_str != last_scan_date)
+        is_periodic_rescan = (now_epoch - last_rescan_epoch >= RESCAN_INTERVAL)
+        any_market_open = any(is_market_open(s) for s in available - config.UNAVAILABLE_INSTRUMENTS)
+
+        if (is_full_rescan or (is_periodic_rescan and any_market_open)):
             try:
-                # Re-check availability in case account instruments changed
-                available = check_available_instruments(client)
-                scan_and_alert(client, available=available)
-                # Refresh engine watchlist from newly saved JSON
+                if is_full_rescan:
+                    log.info("Full re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
+                    available = check_available_instruments(client)
+                else:
+                    log.info("Periodic re-scan (30 min) at %s", now_ny.strftime("%H:%M ET"))
+
+                from tradegumi.pre_session_scanner import run_scan
+                run_scan(client, available=available)  # saves watchlist.json
                 engine = SignalEngine(client, watchlist=load_watchlist())
-                last_scan_date = today_str
+                last_rescan_epoch = now_epoch
+
+                if is_full_rescan:
+                    last_scan_date = today_str
                 log.info("Re-scan complete — watchlist refreshed")
             except Exception as e:
-                log.error("Scheduled re-scan failed: %s", e)
+                log.error("Re-scan failed: %s", e)
 
         # ── Price ticker (every 1s) ──────────────────────────────────────────
         watchlist_data = load_watchlist_with_scores()
