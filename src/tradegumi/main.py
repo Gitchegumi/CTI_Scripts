@@ -257,7 +257,7 @@ def run(mode: str):
 
     # Start API server for dashboard
     api_server = start_api_server()
-    set_runtime_state({"running": True, "loop_count": 0})
+    set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
     scan_and_alert(client, available=available)
 

@@ -4,7 +4,7 @@ from typing import Optional
 from decimal import Decimal
 
 from tradegumi.api.base_client import (
-    ExecutionClient, Candle, Position, OrderRequest, PriceTick
+    ExecutionClient, Candle, Position, OrderRequest, PriceTick, TradeHistory
 )
 from tradegumi import config
 
@@ -109,27 +109,52 @@ class OandaClient(ExecutionClient):
         return float(data["account"]["balance"])
 
     def get_open_positions(self) -> list[Position]:
-        """Return list of open positions."""
+        """Return list of open positions from Oanda."""
         data = self._request("GET", f"/v3/accounts/{self.account_id}/openPositions")
         positions = []
         for p in data.get("positions", []):
-            long_trade = p.get("longValueUnits", "0")
-            short_trade = p.get("shortValueUnits", "0")
-            side = "BUY" if long_trade not in ("0", None, "") else "SELL"
+            long_units = float(p.get("long", {}).get("units", "0") or "0")
+            short_units = float(p.get("short", {}).get("units", "0") or "0")
+            side = "BUY" if long_units > 0 else "SELL"
+            volume = abs(long_units) if long_units > 0 else abs(short_units)
+            avg_price = float(p.get("long", {}).get("averagePrice", "0") or "0") if long_units > 0 else float(p.get("short", {}).get("averagePrice", "0") or "0")
+            unrealized = float(p.get("unrealizedPL", "0") or "0")
             pos = Position(
-                id=p["id"],
+                id=p["instrument"].replace("_", ""),
                 symbol=self._from_oanda(p["instrument"]),
                 side=side,
-                volume=float(p.get("longValueUnits", p["shortValueUnits"]) or 0),
-                open_price=float(p.get("averageLongPrice", p["averageShortPrice"]) or 0),
-                current_price=float(p.get("midMarketQuote", 0) or 0),
+                volume=volume,
+                open_price=avg_price,
+                current_price=0,  # will be filled by pricing
                 stop_loss=None,
                 take_profit=None,
-                unrealized_pl=float(p.get("unrealizedPL", 0) or 0),
-                net_profit=float(p.get("pl", 0) or 0),
+                unrealized_pl=unrealized,
+                net_profit=float(p.get("pl", "0") or "0"),
             )
             positions.append(pos)
         return positions
+
+    def get_trade_history(self, count: int = 50) -> list[TradeHistory]:
+        """Return recent closed trades from Oanda."""
+        params = {"count": count, "state": "CLOSED"}
+        data = self._request("GET", f"/v3/accounts/{self.account_id}/trades", params=params)
+        trades = []
+        for t in data.get("trades", []):
+            trade = TradeHistory(
+                id=str(t.get("id", "")),
+                symbol=self._from_oanda(t.get("instrument", "")),
+                side="BUY" if float(t.get("initialUnits", "0") or "0") > 0 else "SELL",
+                volume=abs(float(t.get("initialUnits", "0") or "0")),
+                open_price=float(t.get("price", "0") or "0"),
+                close_price=float(t.get("averageClosePrice", "0") or "0"),
+                open_time=t.get("openTime", ""),
+                close_time=t.get("closeTime", ""),
+                realized_pl=float(t.get("realizedPL", "0") or "0"),
+                financing=float(t.get("financing", "0") or "0"),
+                pnl=float(t.get("realizedPL", "0") or "0") + float(t.get("financing", "0") or "0"),
+            )
+            trades.append(trade)
+        return trades
 
     def get_position(self, position_id: str) -> Position:
         """Fetch a single position by ID."""

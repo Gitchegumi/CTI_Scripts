@@ -111,6 +111,61 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json([])
             return
 
+        # ── Live API endpoints (require Oanda client) ──
+        if self.path == "/api/positions":
+            client = get_runtime_state().get("client")
+            if not client:
+                self._send_json({"error": "client not available"}, 503)
+                return
+            try:
+                positions = client.get_open_positions()
+                self._send_json([{
+                    "id": p.id,
+                    "symbol": p.symbol,
+                    "side": p.side,
+                    "volume": p.volume,
+                    "open_price": p.open_price,
+                    "current_price": p.current_price,
+                    "stop_loss": p.stop_loss,
+                    "take_profit": p.take_profit,
+                    "unrealized_pl": p.unrealized_pl,
+                    "net_profit": p.net_profit,
+                } for p in positions])
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if self.path.startswith("/api/trades"):
+            client = get_runtime_state().get("client")
+            if not client:
+                self._send_json({"error": "client not available"}, 503)
+                return
+            # Parse count from query string
+            count = 50
+            if "?" in self.path:
+                qs = self.path.split("?", 1)[1]
+                for pair in qs.split("&"):
+                    if pair.startswith("count="):
+                        count = int(pair.split("=")[1])
+            try:
+                trades = client.get_trade_history(count=count)
+                self._send_json([{
+                    "id": t.id,
+                    "symbol": t.symbol,
+                    "side": t.side,
+                    "volume": t.volume,
+                    "open_price": t.open_price,
+                    "close_price": t.close_price,
+                    "open_time": t.open_time,
+                    "close_time": t.close_time,
+                    "realized_pl": t.realized_pl,
+                    "financing": t.financing,
+                    "pnl": t.pnl,
+                } for t in trades])
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         self._send_json({"error": "not found"}, 404)
 
     # ── POST endpoints ────────────────────────────────────────────────────

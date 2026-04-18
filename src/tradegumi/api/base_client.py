@@ -44,6 +44,22 @@ class Position:
 
 
 @dataclass
+class TradeHistory:
+    """Closed trade representation."""
+    id: str
+    symbol: str
+    side: str           # "BUY" or "SELL"
+    volume: float
+    open_price: float
+    close_price: float
+    open_time: str      # ISO timestamp
+    close_time: str     # ISO timestamp
+    realized_pl: float
+    financing: float
+    pnl: float          # realized_pl + financing
+
+
+@dataclass
 class OrderRequest:
     """Order to be placed."""
     symbol: str
@@ -104,6 +120,11 @@ class ExecutionClient(ABC):
     @abstractmethod
     def close_position(self, position_id: str, units: Optional[float] = None):
         """Close a position (full or partial)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_trade_history(self, count: int = 50) -> list[TradeHistory]:
+        """Return recent closed trades."""
         raise NotImplementedError
 
     @abstractmethod
