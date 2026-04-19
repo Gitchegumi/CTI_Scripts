@@ -174,3 +174,6 @@ py_scripts/backtesting/back_test_strat.py
 
 # Generated files
 data/
+
+# Exception: dashboard lib directory contains source code
+!dashboard/src/lib/
