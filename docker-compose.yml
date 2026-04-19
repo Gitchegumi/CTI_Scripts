@@ -1,0 +1,23 @@
+services:
+  tradegumi:
+    image: ghcr.io/gitchegumi/cti-scripts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8199:8199"  # API server
+      - "3000:3000"  # Dashboard
+    env_file:
+      - .env
+    volumes:
+      - tradegumi-data:/app/src/tradegumi/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8199/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  tradegumi-data:
