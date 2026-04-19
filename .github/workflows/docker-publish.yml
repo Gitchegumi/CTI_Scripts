@@ -5,7 +5,7 @@ on:
     branches:
       - master
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches:
       - master
@@ -65,4 +65,5 @@ jobs:
 
       - name: Image digest
         if: github.event_name != 'pull_request'
-        run: echo "Image built: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.meta.outputs.digest }}"
+        run: |
+          echo "Image built: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.meta.outputs.digest }}"
