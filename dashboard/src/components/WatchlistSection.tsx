@@ -47,6 +47,7 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
     return (
       <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase">
         <th className="text-left py-2 px-3 font-medium">Symbol</th>
+        <th className="text-right py-2 px-3 font-medium">Score</th>
         <th className="text-right py-2 px-3 font-medium">Bid</th>
         <th className="text-right py-2 px-3 font-medium">Ask</th>
         <th className="text-center py-2 px-3 font-medium">State</th>
@@ -62,9 +63,18 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
     const color = trendColors[trend] ?? "text-slate-500";
     const arrow = trendArrows[trend] ?? "◆";
 
+    // Color score based on tier
+    let scoreColor = "text-slate-400";
+    if (score >= 70) scoreColor = "text-green-400";
+    else if (score >= 50) scoreColor = "text-yellow-400";
+    else if (score >= 30) scoreColor = "text-orange-400";
+
     return (
       <tr key={sym} className="border-b border-slate-800 last:border-0 hover:bg-slate-800/50">
         <td className="py-2 px-3 font-medium text-white">{sym}</td>
+        <td className={`py-2 px-3 text-right font-mono text-xs ${scoreColor}`}>
+          {score.toFixed(3)}
+        </td>
         <td className="py-2 px-3 text-right font-mono text-xs text-slate-300">
           {formatPrice(state?.bid)}
         </td>
