@@ -175,5 +175,12 @@ py_scripts/backtesting/back_test_strat.py
 # Generated files
 data/
 
+# Private Strategies (not committed to public repo)
+# Add your profitable strategy files here
+strategies/private/
+*.private.py
+*.private.json
+
 # Exception: dashboard lib directory contains source code
 !dashboard/src/lib/
+!dashboard/src/lib/**
