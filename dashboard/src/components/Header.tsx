@@ -53,7 +53,12 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
       </div>
       <div className="flex items-center gap-3 text-xs text-slate-400">
         <span className="font-mono" suppressHydrationWarning>
-          {now ? `${formatTime(now, "America/New_York")} ET (${formatTime(now, "America/Chicago")} CT)` : ""}
+          {now ? (
+            <>
+              <span>{formatTime(now, "America/New_York")} ET</span>
+              <span className="hidden sm:inline"> ({formatTime(now, "America/Chicago")} CT)</span>
+            </>
+          ) : ""}
         </span>
         <span
           className={`flex items-center gap-1 ${

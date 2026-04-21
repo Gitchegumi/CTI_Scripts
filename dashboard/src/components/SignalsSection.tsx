@@ -85,7 +85,7 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
       {active.length === 0 ? (
         <div className="px-4 py-4 text-sm text-slate-500 text-center">No signals in the last 60 minutes</div>
       ) : (
-        <div className="p-3 grid gap-2 grid-cols-2">
+        <div className="p-3 grid gap-2 grid-cols-1 xs:grid-cols-2">
           {active.map(({ latest: sig, count }) => {
             const key = `${sig.symbol}:${sig.direction}`;
             const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";

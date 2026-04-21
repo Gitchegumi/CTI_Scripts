@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { WatchlistData, SignalEntry, LoopState } from "@/types";
+import { WatchlistData, SignalEntry, LoopState, TradeCorrelation } from "@/types";
 import { ApiStatus, OpenPosition, ClosedTrade } from "@/lib/api";
 
 // ── Weekend / Market-Closed Detection ────────────────────────────────────────
@@ -227,6 +227,29 @@ export function useTradeHistory(count = 50, marketOpen: boolean = true): UseTrad
   }, [count, pollIntervalMs]);
 
   return { trades, error };
+}
+
+// ── Trade Correlations ───────────────────────────────────────────────────────
+
+export function useTradeCorrelations(): TradeCorrelation[] {
+  const [correlations, setCorrelations] = useState<TradeCorrelation[]>([]);
+
+  useEffect(() => {
+    const fetch_ = async () => {
+      try {
+        const res = await fetch(`/data/trade_correlations.json?_=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) { setCorrelations([]); return; }
+        const json = await res.json();
+        setCorrelations(Array.isArray(json) ? json : []);
+      } catch { setCorrelations([]); }
+    };
+    fetch_();
+    // Correlations only change when trades are placed — poll every 30s
+    const id = setInterval(fetch_, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  return correlations;
 }
 
 // ── Export market hook ──────────────────────────────────────────────────────

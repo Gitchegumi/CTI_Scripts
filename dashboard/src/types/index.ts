@@ -104,3 +104,13 @@ export interface ClosedTrade {
   financing: number;
   pnl: number;
 }
+
+export interface TradeCorrelation {
+  trade_id: string;
+  symbol: string;
+  direction: string;
+  confidence: number;
+  signal_timestamp: string;
+  trade_timestamp: string;
+  signal_lag_seconds: number;
+}
