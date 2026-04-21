@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-    tags:
-      - "v*"
   pull_request:
     branches:
       - master
@@ -16,21 +14,52 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/cti-scripts
 
 jobs:
-  docker:
+  # Lightweight build-only check on PRs — catches Dockerfile breakage before merge
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+
+  # Calculate version, build, and push image — tag is NOT created yet
+  build:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      previous_tag: ${{ steps.tag_version.outputs.previous_tag }}
+      release_type: ${{ steps.tag_version.outputs.release_type }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required for semver tag calculation
+
+      - name: Calculate next version (dry run — no tag created yet)
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: patch
+          tag_prefix: v
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -43,27 +72,44 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ steps.tag_version.outputs.new_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag_version.outputs.new_tag }}
+            type=semver,pattern={{major}},value=${{ steps.tag_version.outputs.new_tag }}
             type=sha,format=short,prefix=sha-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}.{{patch}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{sha}},enable=true
+            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Image digest
-        if: github.event_name != 'pull_request'
+  # Create the git tag only after the image is successfully published
+  tag:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push git tag
         run: |
-          echo "Image built: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.meta.outputs.digest }}"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag ${{ needs.build.outputs.new_tag }}
+          git push origin ${{ needs.build.outputs.new_tag }}
+
+      - name: Summary
+        run: |
+          echo "### Docker image published :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous version:** ${{ needs.build.outputs.previous_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Change type:** ${{ needs.build.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.new_tag }}\`" >> $GITHUB_STEP_SUMMARY
