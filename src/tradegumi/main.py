@@ -319,8 +319,7 @@ def run(mode: str):
                     if last_scan_result is not None:
                         diff = format_watchlist_diff(last_scan_result, new_result)
                         if diff:
-                            from tradegumi.alerts import post_watchlist
-                            post_watchlist(diff)
+                            post_watchlist(diff, title="📊 Watchlist Update — TradeGumi")
 
                     last_scan_result = new_result
 

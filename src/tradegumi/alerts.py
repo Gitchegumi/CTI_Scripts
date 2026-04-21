@@ -115,11 +115,24 @@ def save_signal(signal: Signal) -> None:
             "timestamp": datetime.now(NY_TZ).isoformat(),
         }
 
-        idx = next((i for i, e in enumerate(existing) if e.get("symbol") == signal.symbol), None)
+        idx = next(
+            (i for i, e in enumerate(existing)
+             if e.get("symbol") == signal.symbol and e.get("direction") == signal.direction),
+            None,
+        )
         if idx is not None:
-            entry["update_count"] = existing[idx].get("update_count", 1) + 1
+            # Same symbol + direction: preserve original setup, only bump the count
+            prev = existing[idx]
+            entry["entry_price"] = prev["entry_price"]
+            entry["stop_loss"]   = prev["stop_loss"]
+            entry["take_profit"] = prev["take_profit"]
+            entry["confidence"]  = prev["confidence"]
+            entry["rr"]          = prev["rr"]
+            entry["update_count"] = prev.get("update_count", 1) + 1
             existing[idx] = entry
         else:
+            # New symbol or direction flip — replace any existing entry for the symbol
+            existing = [e for e in existing if e.get("symbol") != signal.symbol]
             entry["update_count"] = 1
             existing.append(entry)
             existing = existing[-MAX_SIGNALS:]
@@ -147,10 +160,10 @@ def post_signal(signal: Signal) -> bool:
     return ok
 
 
-def post_watchlist(watchlist_text: str, scan_result: dict | None = None) -> bool:
-    """Post the morning pre-session watchlist to Discord."""
+def post_watchlist(watchlist_text: str, scan_result: dict | None = None, title: str = "🌅 Morning Watchlist — TradeGumi") -> bool:
+    """Post a watchlist message to Discord."""
     embeds = [{
-        "title": "🌅 Morning Watchlist — TradeGumi",
+        "title": title,
         "color": 0x1E90FF,
         "footer": {"text": f"TradeGumi {MODE} | {datetime.now(NY_TZ):%I:%M %p ET} ({datetime.now(CT_TZ):%I:%M %p CT})"},
     }]

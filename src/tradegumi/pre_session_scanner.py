@@ -380,6 +380,9 @@ def load_watchlist_with_scores() -> dict[str, dict]:
     return result
 
 
+_TIER_RANK = {"Tier 1": 2, "Tier 2": 1}  # higher = better; unlisted tiers rank 0
+
+
 def format_watchlist_diff(prev_result: dict, new_result: dict) -> str | None:
     """Format only what changed between two scans for periodic Discord updates.
 
@@ -394,7 +397,7 @@ def format_watchlist_diff(prev_result: dict, new_result: dict) -> str | None:
         if p is None:
             changes.append(f"🆕 **{symbol}**: added — {n['tier']} ({n['score']:.3f})")
         elif p["tier"] != n["tier"]:
-            arrow = "⬆️" if n["score"] > p["score"] else "⬇️"
+            arrow = "⬆️" if _TIER_RANK.get(n["tier"], 0) > _TIER_RANK.get(p["tier"], 0) else "⬇️"
             changes.append(f"{arrow} **{symbol}**: {p['tier']} → {n['tier']} ({n['score']:.3f})")
         elif abs(n["score"] - p["score"]) >= 0.05:
             arrow = "↑" if n["score"] > p["score"] else "↓"
