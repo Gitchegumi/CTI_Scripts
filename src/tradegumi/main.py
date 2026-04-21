@@ -35,7 +35,7 @@ from tradegumi.api.base_client import ExecutionClient, OrderRequest
 from tradegumi.signal_engine import SignalEngine
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open
-from tradegumi.alerts import post_signal, post_watchlist
+from tradegumi.alerts import post_signal, post_watchlist, clear_signal
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
@@ -356,6 +356,8 @@ def run(mode: str):
             loop_state = []
             for symbol in scan_symbols:
                 tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
+                if tag == "flat":
+                    clear_signal(symbol)
                 score = watchlist_data[symbol]["score"]
                 tier = watchlist_data[symbol]["tier"]
                 loop_summary.append((symbol, tag, tier, score))
