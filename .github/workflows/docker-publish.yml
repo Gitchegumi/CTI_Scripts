@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 env:
@@ -11,11 +14,32 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/cti-scripts
 
 jobs:
-  docker:
+  # Lightweight build-only check on PRs — catches Dockerfile breakage before merge
+  validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # required to create git tags
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+
+  # Calculate version, build, and push image — tag is NOT created yet
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       packages: write
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      previous_tag: ${{ steps.tag_version.outputs.previous_tag }}
+      release_type: ${{ steps.tag_version.outputs.release_type }}
 
     steps:
       - name: Checkout
@@ -23,11 +47,12 @@ jobs:
         with:
           fetch-depth: 0  # full history required for semver tag calculation
 
-      - name: Bump version and push tag
+      - name: Calculate next version (dry run — no tag created yet)
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
           default_bump: patch
           tag_prefix: v
 
@@ -47,10 +72,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.tag_version.outputs.new_tag }}
             type=semver,pattern={{version}},value=${{ steps.tag_version.outputs.new_tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag_version.outputs.new_tag }}
             type=semver,pattern={{major}},value=${{ steps.tag_version.outputs.new_tag }}
+            type=sha,format=short,prefix=sha-
             type=raw,value=latest
 
       - name: Build and push
@@ -63,10 +88,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Create the git tag only after the image is successfully published
+  tag:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push git tag
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag ${{ needs.build.outputs.new_tag }}
+          git push origin ${{ needs.build.outputs.new_tag }}
+
       - name: Summary
         run: |
           echo "### Docker image published :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.tag_version.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Previous version:** ${{ steps.tag_version.outputs.previous_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Change type:** ${{ steps.tag_version.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous version:** ${{ needs.build.outputs.previous_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Change type:** ${{ needs.build.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.new_tag }}\`" >> $GITHUB_STEP_SUMMARY
