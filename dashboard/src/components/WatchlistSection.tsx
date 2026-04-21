@@ -13,6 +13,7 @@ const trendColors: Record<string, string> = {
   Downtrend: "text-red-400",
   flat: "text-slate-500",
   closed: "text-slate-600",
+  rollover: "text-yellow-500",
 };
 
 const trendArrows: Record<string, string> = {
@@ -20,6 +21,7 @@ const trendArrows: Record<string, string> = {
   Downtrend: "▼",
   flat: "◆",
   closed: "✕",
+  rollover: "⟳",
 };
 
 function formatPrice(price: number | undefined): string {
@@ -82,7 +84,7 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
           {formatPrice(state?.ask)}
         </td>
         <td className={`py-2 px-3 text-center text-sm font-medium ${color}`}>
-          {arrow} {trend === "flat" ? "Flat" : trend === "closed" ? "Closed" : trend}
+          {arrow} {trend === "flat" ? "Flat" : trend === "closed" ? "Closed" : trend === "rollover" ? "Rollover" : trend}
         </td>
         <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
           {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(4) + "%" : "—"}

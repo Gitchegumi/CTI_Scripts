@@ -17,7 +17,7 @@ FOREX_HOURS = {
     1: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Tuesday
     2: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Wednesday
     3: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Thursday
-    4: [(time(0, 0), time(16, 59))],                                # Friday (closes for week)
+    4: [(time(0, 0), time(16, 50))],                                # Friday (closes for week at 16:50)
 }
 
 INDEX_HOURS = {
@@ -27,11 +27,6 @@ INDEX_HOURS = {
     3: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
     4: [(time(0, 0), time(16, 30))],                                # Friday
 }
-
-INDEX_HOURS = [
-    (time(0, 0),  time(16, 30)),
-    (time(18, 30), time(23, 59)),
-]
 
 # ── Swap Blackout Windows ───────────────────────────────────────────────────
 # Oanda swaps at ~17:00 ET; blackout 16:55–17:30 for safety
