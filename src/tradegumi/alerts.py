@@ -143,6 +143,22 @@ def save_signal(signal: Signal) -> None:
         log.warning("Failed to save signal to signals.json: %s", e)
 
 
+def clear_signal(symbol: str) -> None:
+    """Remove a symbol's signal from signals.json when it returns to flat."""
+    try:
+        if not SIGNALS_FILE.exists():
+            return
+        with open(SIGNALS_FILE) as f:
+            existing = json.load(f)
+        updated = [e for e in existing if e.get("symbol") != symbol]
+        if len(updated) != len(existing):
+            with open(SIGNALS_FILE, "w") as f:
+                json.dump(updated, f, indent=2, default=str)
+            log.info("Signal expired for %s (returned to flat)", symbol)
+    except Exception as e:
+        log.warning("Failed to clear signal for %s: %s", symbol, e)
+
+
 def post_signal(signal: Signal) -> bool:
     """Post a signal to Discord. Returns True on success."""
     if config.TRADEGUMI_MODE == "alert_only":
