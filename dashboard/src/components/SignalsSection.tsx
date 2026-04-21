@@ -13,6 +13,17 @@ function fmt(n: number, d = 2): string {
   });
 }
 
+function fmtPrice(price: number): string {
+  // Match Oanda quoting conventions by price magnitude:
+  //   >= 10  → JPY crosses (NZDJPY ~93, USDJPY ~159) → 3 decimal places
+  //   >= 1   → Major pairs (EURUSD ~1.09, GBPUSD ~1.27) → 5 decimal places
+  const d = price >= 10 ? 3 : 5;
+  return price.toLocaleString("en-US", {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  });
+}
+
 function fmtTs(ts: string): string {
   try {
     const d = new Date(ts);
@@ -39,7 +50,7 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
       {signals.length === 0 ? (
         <div className="px-4 py-4 text-sm text-slate-500 text-center">No active signals</div>
       ) : (
-        <div className="p-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="p-3 grid gap-2 grid-cols-2">
           {signals.map((sig, i) => {
             const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";
             const dirBg = sig.direction === "BUY" ? "bg-green-900/30 border-green-700" : "bg-red-900/30 border-red-700";
@@ -65,11 +76,11 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                   <div className="text-slate-400">Confidence</div>
                   <div className="text-white text-right">{Math.round(sig.confidence * 100)}%</div>
                   <div className="text-slate-400">Entry</div>
-                  <div className="text-white text-right">{fmt(sig.entry_price)}</div>
+                  <div className="text-white text-right">{fmtPrice(sig.entry_price)}</div>
                   <div className="text-slate-400">Stop Loss</div>
-                  <div className="text-red-400 text-right">{fmt(sig.stop_loss)}</div>
+                  <div className="text-red-400 text-right">{fmtPrice(sig.stop_loss)}</div>
                   <div className="text-slate-400">Take Profit</div>
-                  <div className="text-green-400 text-right">{fmt(sig.take_profit)}</div>
+                  <div className="text-green-400 text-right">{fmtPrice(sig.take_profit)}</div>
                   <div className="text-slate-400">Lot Size</div>
                   <div className="text-white text-right">{sig.lot_size}</div>
                   <div className="text-slate-400">ATR</div>

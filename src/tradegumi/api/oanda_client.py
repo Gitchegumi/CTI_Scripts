@@ -181,13 +181,15 @@ class OandaClient(ExecutionClient):
         Returns the trade/opened position id.
         """
         oanda_inst = self._to_oanda(order.symbol)
-        units = order.volume if order.side == "BUY" else -order.volume
+        # Oanda expects units (1 standard lot = 100,000 units)
+        raw_units = round(order.volume * 100_000)
+        units = raw_units if order.side == "BUY" else -raw_units
 
         body = {
             "order": {
                 "type": "MARKET",
                 "instrument": oanda_inst,
-                "units": str(int(units)) if abs(units) >= 1 else str(units),
+                "units": str(units),
                 "timeInForce": "FOK",
                 "positionFill": "DEFAULT",
             }
