@@ -56,6 +56,17 @@ jobs:
           default_bump: patch
           tag_prefix: v
 
+      - name: Parse v-prefixed version components
+        id: version
+        run: |
+          TAG="${{ steps.tag_version.outputs.new_tag }}"
+          VER="${TAG#v}"
+          MAJOR="v$(echo $VER | cut -d. -f1)"
+          MINOR="v$(echo $VER | cut -d. -f1-2)"
+          echo "full=${TAG}" >> $GITHUB_OUTPUT
+          echo "minor=${MINOR}" >> $GITHUB_OUTPUT
+          echo "major=${MAJOR}" >> $GITHUB_OUTPUT
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -72,9 +83,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.tag_version.outputs.new_tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag_version.outputs.new_tag }}
-            type=semver,pattern={{major}},value=${{ steps.tag_version.outputs.new_tag }}
+            type=raw,value=${{ steps.version.outputs.full }}
+            type=raw,value=${{ steps.version.outputs.minor }}
+            type=raw,value=${{ steps.version.outputs.major }}
             type=sha,format=short,prefix=sha-
             type=raw,value=latest
 
