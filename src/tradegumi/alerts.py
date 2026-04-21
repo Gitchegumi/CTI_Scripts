@@ -94,7 +94,7 @@ def format_signal_message(signal: Signal) -> dict:
 
 
 def save_signal(signal: Signal) -> None:
-    """Append signal to signals.json for the dashboard."""
+    """Upsert signal in signals.json — update existing entry for same symbol, append if new."""
     try:
         SIGNALS_FILE.parent.mkdir(parents=True, exist_ok=True)
         existing = []
@@ -115,9 +115,14 @@ def save_signal(signal: Signal) -> None:
             "timestamp": datetime.now(NY_TZ).isoformat(),
         }
 
-        existing.append(entry)
-        # Keep only the most recent signals
-        existing = existing[-MAX_SIGNALS:]
+        idx = next((i for i, e in enumerate(existing) if e.get("symbol") == signal.symbol), None)
+        if idx is not None:
+            entry["update_count"] = existing[idx].get("update_count", 1) + 1
+            existing[idx] = entry
+        else:
+            entry["update_count"] = 1
+            existing.append(entry)
+            existing = existing[-MAX_SIGNALS:]
 
         with open(SIGNALS_FILE, "w") as f:
             json.dump(existing, f, indent=2, default=str)

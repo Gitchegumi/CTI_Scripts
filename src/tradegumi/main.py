@@ -37,7 +37,7 @@ from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open
 from tradegumi.alerts import post_signal, post_watchlist
 from tradegumi.trailing_sl import TrailingSLManager
-from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text
+from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
 from tradegumi.callback import (
     send_signal_callback, send_rescan_callback, send_mode_change_callback,
@@ -111,12 +111,11 @@ def check_available_instruments(client: ExecutionClient) -> set[str]:
 
 # ── Symbol scanning ────────────────────────────────────────────────────────────
 
-def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -> None:
-    """Run the pre-session Layer 1 scanner and post watchlist to Discord."""
+def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -> dict | None:
+    """Run the pre-session Layer 1 scanner, post full watchlist to Discord, return result."""
     from tradegumi.session_rules import is_trading_day
     now_ny = datetime.now(NY_TZ)
 
-    # Weekend / holiday check
     if not is_trading_day("EURUSD", when=now_ny):
         day_name = now_ny.strftime("%A")
         log.info("Market closed (%s) — sending weekend message", day_name)
@@ -125,7 +124,7 @@ def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -
             f"It's {day_name} — markets are closed.\n"
             f"All quiet here. Enjoy the time off! 🌴",
         )
-        return
+        return None
 
     log.info("Running pre-session Layer 1 scan...")
     try:
@@ -134,8 +133,10 @@ def scan_and_alert(client: ExecutionClient, available: set[str] | None = None) -
         post_watchlist(text, scan_result=result)
         log.info("Pre-session scan complete: Tier1=%s Tier2=%s",
                  result["tier1"], result["tier2"])
+        return result
     except Exception as e:
         log.error("Pre-session scan failed: %s", e)
+        return None
 
 
 # ── Per-symbol signal check ────────────────────────────────────────────────────
@@ -259,7 +260,7 @@ def run(mode: str):
     api_server = start_api_server()
     set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
-    scan_and_alert(client, available=available)
+    last_scan_result = scan_and_alert(client, available=available)
 
     # Pre-session scan schedule: 06:30 CT (America/Chicago) every trading day
     SCAN_HOUR_CT = 2
@@ -298,19 +299,33 @@ def run(mode: str):
 
         if (is_full_rescan or is_api_rescan or (is_periodic_rescan and any_market_open)):
             try:
-                if is_full_rescan or is_api_rescan:
+                if is_full_rescan:
+                    # 2am scheduled scan — post full morning watchlist to Discord
                     log.info("Full re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
                     available = check_available_instruments(client)
+                    last_scan_result = scan_and_alert(client, available=available)
+                    last_scan_date = today_str
                 else:
-                    log.info("Periodic re-scan (30 min) at %s", now_ny.strftime("%H:%M ET"))
+                    # Periodic (30 min) or API-triggered — update tier list silently,
+                    # post only what changed since the last scan
+                    if is_api_rescan:
+                        log.info("API re-scan triggered at %s", now_ny.strftime("%H:%M ET"))
+                        available = check_available_instruments(client)
+                    else:
+                        log.info("Periodic re-scan (30 min) at %s", now_ny.strftime("%H:%M ET"))
 
-                from tradegumi.pre_session_scanner import run_scan
-                run_scan(client, available=available)  # saves watchlist.json
+                    new_result = run_scan(client, available=available)
+
+                    if last_scan_result is not None:
+                        diff = format_watchlist_diff(last_scan_result, new_result)
+                        if diff:
+                            from tradegumi.alerts import post_watchlist
+                            post_watchlist(diff)
+
+                    last_scan_result = new_result
+
                 engine = SignalEngine(client, watchlist=load_watchlist())
                 last_rescan_epoch = now_epoch
-
-                if is_full_rescan:
-                    last_scan_date = today_str
                 log.info("Re-scan complete — watchlist refreshed")
                 send_rescan_callback({"trigger": "full" if is_full_rescan or is_api_rescan else "periodic"})
             except Exception as e:
