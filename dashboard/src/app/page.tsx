@@ -42,8 +42,8 @@ export default function Home() {
             <div className="lg:col-span-1 space-y-4">
               <AccountCard account={data.account} />
               <SettingsPanel status={apiStatus} />
-              <SignalsSection signals={signals} />
               <OpenTrades positions={positions} />
+              <SignalsSection signals={signals} />
             </div>
             {/* Right column: Watchlist + Trade History */}
             <div className="lg:col-span-2 space-y-2">

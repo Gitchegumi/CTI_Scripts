@@ -380,6 +380,41 @@ def load_watchlist_with_scores() -> dict[str, dict]:
     return result
 
 
+_TIER_RANK = {"Tier 1": 2, "Tier 2": 1}  # higher = better; unlisted tiers rank 0
+
+
+def format_watchlist_diff(prev_result: dict, new_result: dict) -> str | None:
+    """Format only what changed between two scans for periodic Discord updates.
+
+    Returns None if nothing meaningful changed (no tier moves, no score shift ≥0.05).
+    """
+    prev = {s: {"score": sc, "tier": t} for s, sc, t in prev_result.get("ranked", [])}
+    new  = {s: {"score": sc, "tier": t} for s, sc, t in new_result.get("ranked", [])}
+
+    changes = []
+    for symbol, n in new.items():
+        p = prev.get(symbol)
+        if p is None:
+            changes.append(f"🆕 **{symbol}**: added — {n['tier']} ({n['score']:.3f})")
+        elif p["tier"] != n["tier"]:
+            arrow = "⬆️" if _TIER_RANK.get(n["tier"], 0) > _TIER_RANK.get(p["tier"], 0) else "⬇️"
+            changes.append(f"{arrow} **{symbol}**: {p['tier']} → {n['tier']} ({n['score']:.3f})")
+        elif abs(n["score"] - p["score"]) >= 0.05:
+            arrow = "↑" if n["score"] > p["score"] else "↓"
+            changes.append(f"{arrow} **{symbol}**: {p['score']:.3f} → {n['score']:.3f} ({n['tier']})")
+
+    for symbol in prev:
+        if symbol not in new:
+            changes.append(f"❌ **{symbol}**: removed from watchlist")
+
+    if not changes:
+        return None
+
+    now_et = datetime.now(NY_TZ)
+    lines = [f"**📊 Watchlist Update** — {now_et.strftime('%H:%M ET')}"] + changes
+    return "\n".join(lines)
+
+
 def format_watchlist_text(scan_result: dict) -> str:
     """Format scan result as a readable Discord message.
 

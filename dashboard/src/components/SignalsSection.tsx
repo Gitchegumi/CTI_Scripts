@@ -49,7 +49,14 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                 className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-white">{sig.symbol}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-white">{sig.symbol}</span>
+                    {(sig.update_count ?? 1) > 1 && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                        ×{sig.update_count}
+                      </span>
+                    )}
+                  </div>
                   <span className={`text-xs font-bold uppercase ${dirColor}`}>
                     {sig.direction}
                   </span>
