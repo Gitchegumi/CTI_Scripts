@@ -8,7 +8,7 @@ import Footer from "@/components/Footer";
 import SettingsPanel from "@/components/SettingsPanel";
 import OpenTrades from "@/components/OpenTrades";
 import TradeHistory from "@/components/TradeHistory";
-import { useWatchlist, useSignals, useLoopState, useApiStatus, usePositions, useTradeHistory, useMarketOpen } from "@/hooks/useData";
+import { useWatchlist, useSignals, useLoopState, useApiStatus, usePositions, useTradeHistory, useTradeCorrelations, useMarketOpen } from "@/hooks/useData";
 
 export default function Home() {
   // Initial load with fast polling — once loopState arrives, useMarketOpen
@@ -21,6 +21,7 @@ export default function Home() {
   const { status: apiStatus } = useApiStatus(5000);
   const { positions } = usePositions(marketOpen);
   const { trades } = useTradeHistory(50, marketOpen);
+  const correlations = useTradeCorrelations();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -48,7 +49,7 @@ export default function Home() {
             {/* Right column: Watchlist + Trade History */}
             <div className="lg:col-span-2 space-y-2">
               <WatchlistSection data={data} loopState={loopState?.symbols ?? []} />
-              <TradeHistory trades={trades} />
+              <TradeHistory trades={trades} correlations={correlations} />
             </div>
           </div>
         ) : (

@@ -50,11 +50,11 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
       <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase">
         <th className="text-left py-2 px-3 font-medium">Symbol</th>
         <th className="text-right py-2 px-3 font-medium">Score</th>
-        <th className="text-right py-2 px-3 font-medium">Bid</th>
-        <th className="text-right py-2 px-3 font-medium">Ask</th>
+        <th className="text-right py-2 px-3 font-medium hidden sm:table-cell">Bid</th>
+        <th className="text-right py-2 px-3 font-medium hidden sm:table-cell">Ask</th>
         <th className="text-center py-2 px-3 font-medium">State</th>
-        <th className="text-right py-2 px-3 font-medium">LR 15m</th>
-        <th className="text-right py-2 px-3 font-medium">LR 5m</th>
+        <th className="text-right py-2 px-3 font-medium hidden lg:table-cell">LR 15m</th>
+        <th className="text-right py-2 px-3 font-medium hidden lg:table-cell">LR 5m</th>
       </tr>
     );
   }
@@ -71,25 +71,30 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
     else if (score >= 50) scoreColor = "text-yellow-400";
     else if (score >= 30) scoreColor = "text-orange-400";
 
+    const trendLabel = trend === "flat" ? "Flat"
+      : trend === "closed" ? "Closed"
+      : trend === "rollover" ? "Rollover"
+      : trend;
+
     return (
       <tr key={sym} className="border-b border-slate-800 last:border-0 hover:bg-slate-800/50">
         <td className="py-2 px-3 font-medium text-white">{sym}</td>
         <td className={`py-2 px-3 text-right font-mono text-xs ${scoreColor}`}>
           {score.toFixed(3)}
         </td>
-        <td className="py-2 px-3 text-right font-mono text-xs text-slate-300">
+        <td className="py-2 px-3 text-right font-mono text-xs text-slate-300 hidden sm:table-cell">
           {formatPrice(state?.bid)}
         </td>
-        <td className="py-2 px-3 text-right font-mono text-xs text-slate-300">
+        <td className="py-2 px-3 text-right font-mono text-xs text-slate-300 hidden sm:table-cell">
           {formatPrice(state?.ask)}
         </td>
         <td className={`py-2 px-3 text-center text-sm font-medium ${color}`}>
-          {arrow} {trend === "flat" ? "Flat" : trend === "closed" ? "Closed" : trend === "rollover" ? "Rollover" : trend}
+          {arrow} <span className="hidden xs:inline">{trendLabel}</span>
         </td>
-        <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
+        <td className={`py-2 px-3 text-right font-mono text-xs hidden lg:table-cell ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
           {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(4) + "%" : "—"}
         </td>
-        <td className={`py-2 px-3 text-right font-mono text-xs ${(state?.lr_5 ?? 0) > 0 ? "text-green-400" : (state?.lr_5 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
+        <td className={`py-2 px-3 text-right font-mono text-xs hidden lg:table-cell ${(state?.lr_5 ?? 0) > 0 ? "text-green-400" : (state?.lr_5 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
           {state ? (state.lr_5 > 0 ? "+" : "") + state.lr_5.toFixed(4) + "%" : "—"}
         </td>
       </tr>
