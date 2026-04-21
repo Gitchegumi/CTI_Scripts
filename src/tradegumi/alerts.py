@@ -30,13 +30,18 @@ CORRELATION_WINDOW_SECONDS = 300  # 5 minutes
 
 
 def _parse_ts(ts_str: str) -> datetime:
-    """Parse an ISO timestamp string to a timezone-aware datetime."""
+    """Parse an ISO timestamp string to a timezone-aware datetime.
+
+    On parse failure, logs a warning and returns datetime.min (treated as
+    expired by all rolling-window trims, so malformed entries are dropped).
+    """
     try:
         ts = datetime.fromisoformat(ts_str)
         if ts.tzinfo is None:
             ts = NY_TZ.localize(ts)
         return ts
     except Exception:
+        log.warning("Could not parse timestamp %r — treating as expired", ts_str)
         return datetime.min.replace(tzinfo=NY_TZ)
 
 
@@ -121,9 +126,13 @@ def save_signal(signal: Signal) -> None:
 
         now = datetime.now(NY_TZ)
         try:
-            rr = round(abs(signal.take_profit - signal.entry_price) / abs(signal.entry_price - signal.stop_loss), 1)
+            rr: Optional[float] = round(
+                abs(signal.take_profit - signal.entry_price)
+                / abs(signal.entry_price - signal.stop_loss),
+                1,
+            )
         except ZeroDivisionError:
-            rr = 0.0
+            rr = None  # entry == stop_loss; undefined R:R
 
         entry = {
             "symbol": signal.symbol,
@@ -174,7 +183,7 @@ def record_trade_correlation(
             log.debug("No signal within 5 min for %s %s trade %s", symbol, direction, trade_id)
             return
 
-        recent = max(matching, key=lambda s: s["timestamp"])
+        recent = max(matching, key=lambda s: _parse_ts(s["timestamp"]))
         lag = int((trade_time - _parse_ts(recent["timestamp"])).total_seconds())
 
         corr = {

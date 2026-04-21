@@ -40,7 +40,7 @@ export interface SignalEntry {
   take_profit: number;
   lot_size: number;
   atr: number;
-  rr: number;
+  rr: number | null;
   timestamp: string;
 }
 

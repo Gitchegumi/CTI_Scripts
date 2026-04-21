@@ -14,7 +14,7 @@ import logging as log
 import signal
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -74,36 +74,6 @@ def make_client(mode: str) -> ExecutionClient:
     if mode == "live":
         return MatchTraderClient()   # will raise NotImplementedError until Stage 2
     return OandaClient()
-
-
-# ── Startup cleanup ───────────────────────────────────────────────────────────
-
-def _clear_stale_signals(max_age_hours: int = 8) -> None:
-    """Drop signals older than max_age_hours from signals.json on startup."""
-    from tradegumi.alerts import SIGNALS_FILE
-    cutoff = datetime.now(NY_TZ) - timedelta(hours=max_age_hours)
-    try:
-        if not SIGNALS_FILE.exists():
-            return
-        with open(SIGNALS_FILE) as f:
-            signals = json.load(f)
-        fresh = []
-        for s in signals:
-            try:
-                ts = datetime.fromisoformat(s.get("timestamp", ""))
-                if ts.tzinfo is None:
-                    ts = NY_TZ.localize(ts)
-                if ts > cutoff:
-                    fresh.append(s)
-            except Exception:
-                pass
-        removed = len(signals) - len(fresh)
-        if removed > 0:
-            with open(SIGNALS_FILE, "w") as f:
-                json.dump(fresh, f, indent=2, default=str)
-            log.info("Cleared %d stale signal(s) on startup", removed)
-    except Exception as e:
-        log.warning("Failed to clear stale signals on startup: %s", e)
 
 
 # ── Instrument availability ───────────────────────────────────────────────────
@@ -295,8 +265,6 @@ def run(mode: str):
     trailing_manager = TrailingSLManager(client)
 
     log.info("Connected to Oanda — account=%s", config.OANDA_ACCOUNT_ID)
-
-    _clear_stale_signals(max_age_hours=8)
 
     # Start API server for dashboard
     api_server = start_api_server()

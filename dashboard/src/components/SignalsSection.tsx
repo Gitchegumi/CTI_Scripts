@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { SignalEntry, ActiveSignal } from "@/types";
 
 const DISPLAY_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
@@ -39,16 +39,18 @@ function fmtTs(ts: string): string {
   }
 }
 
-function groupSignals(signals: SignalEntry[]): ActiveSignal[] {
-  const cutoff = Date.now() - DISPLAY_WINDOW_MS;
+function groupSignals(signals: SignalEntry[], now: number): ActiveSignal[] {
+  const cutoff = now - DISPLAY_WINDOW_MS;
   const recent = signals.filter(s => new Date(s.timestamp).getTime() >= cutoff);
 
-  // Group by symbol — show the most recent signal per symbol, count all firings
-  const bySymbol = new Map<string, ActiveSignal>();
+  // Group by symbol+direction — each direction gets its own card.
+  // Conflicting signals for the same symbol (BUY and SELL) both show.
+  const byKey = new Map<string, ActiveSignal>();
   for (const s of recent) {
-    const existing = bySymbol.get(s.symbol);
+    const key = `${s.symbol}:${s.direction}`;
+    const existing = byKey.get(key);
     if (!existing) {
-      bySymbol.set(s.symbol, { latest: s, count: 1 });
+      byKey.set(key, { latest: s, count: 1 });
     } else {
       existing.count++;
       if (new Date(s.timestamp) > new Date(existing.latest.timestamp)) {
@@ -57,14 +59,21 @@ function groupSignals(signals: SignalEntry[]): ActiveSignal[] {
     }
   }
 
-  // Sort by most recent first
-  return Array.from(bySymbol.values()).sort(
+  // Sort by most recent firing first
+  return Array.from(byKey.values()).sort(
     (a, b) => new Date(b.latest.timestamp).getTime() - new Date(a.latest.timestamp).getTime()
   );
 }
 
 export default function SignalsSection({ signals }: SignalsSectionProps) {
-  const active = useMemo(() => groupSignals(signals), [signals]);
+  // Re-evaluate the 60-min window every minute so cards expire without a data change
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const active = useMemo(() => groupSignals(signals, tick), [signals, tick]);
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
@@ -78,11 +87,12 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
       ) : (
         <div className="p-3 grid gap-2 grid-cols-2">
           {active.map(({ latest: sig, count }) => {
+            const key = `${sig.symbol}:${sig.direction}`;
             const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";
             const dirBg = sig.direction === "BUY" ? "bg-green-900/30 border-green-700" : "bg-red-900/30 border-red-700";
             return (
               <div
-                key={sig.symbol}
+                key={key}
                 className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}
               >
                 <div className="flex items-center justify-between">
@@ -112,7 +122,9 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                   <div className="text-slate-400">ATR</div>
                   <div className="text-white text-right">{fmt(sig.atr)}</div>
                   <div className="text-slate-400">R:R</div>
-                  <div className="text-white text-right">{sig.rr.toFixed(1)}</div>
+                  <div className="text-white text-right">
+                    {sig.rr !== null ? sig.rr.toFixed(1) : "—"}
+                  </div>
                 </div>
                 <div className="text-xs text-slate-500 border-t border-slate-700 pt-1.5 mt-1">
                   {fmtTs(sig.timestamp)} ET
