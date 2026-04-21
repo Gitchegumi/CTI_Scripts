@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8199";
+const BASE_URL = "";
 
 export interface ApiStatus {
   mode: "alert_only" | "demo" | "live";
