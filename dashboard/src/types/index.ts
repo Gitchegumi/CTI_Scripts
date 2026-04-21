@@ -40,9 +40,13 @@ export interface SignalEntry {
   take_profit: number;
   lot_size: number;
   atr: number;
-  rr: number;
+  rr: number | null;
   timestamp: string;
-  update_count?: number;
+}
+
+export interface ActiveSignal {
+  latest: SignalEntry;
+  count: number;
 }
 
 export interface SymbolState {

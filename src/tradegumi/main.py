@@ -14,7 +14,7 @@ import logging as log
 import signal
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -35,7 +35,7 @@ from tradegumi.api.base_client import ExecutionClient, OrderRequest
 from tradegumi.signal_engine import SignalEngine
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
-from tradegumi.alerts import post_signal, post_watchlist, clear_signal
+from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
@@ -74,36 +74,6 @@ def make_client(mode: str) -> ExecutionClient:
     if mode == "live":
         return MatchTraderClient()   # will raise NotImplementedError until Stage 2
     return OandaClient()
-
-
-# ── Startup cleanup ───────────────────────────────────────────────────────────
-
-def _clear_stale_signals(max_age_hours: int = 8) -> None:
-    """Drop signals older than max_age_hours from signals.json on startup."""
-    from tradegumi.alerts import SIGNALS_FILE
-    cutoff = datetime.now(NY_TZ) - timedelta(hours=max_age_hours)
-    try:
-        if not SIGNALS_FILE.exists():
-            return
-        with open(SIGNALS_FILE) as f:
-            signals = json.load(f)
-        fresh = []
-        for s in signals:
-            try:
-                ts = datetime.fromisoformat(s.get("timestamp", ""))
-                if ts.tzinfo is None:
-                    ts = NY_TZ.localize(ts)
-                if ts > cutoff:
-                    fresh.append(s)
-            except Exception:
-                pass
-        removed = len(signals) - len(fresh)
-        if removed > 0:
-            with open(SIGNALS_FILE, "w") as f:
-                json.dump(fresh, f, indent=2, default=str)
-            log.info("Cleared %d stale signal(s) on startup", removed)
-    except Exception as e:
-        log.warning("Failed to clear stale signals on startup: %s", e)
 
 
 # ── Instrument availability ───────────────────────────────────────────────────
@@ -264,6 +234,12 @@ def check_and_execute(
             pos_id = client.place_order(order)
             log.info("%s: order placed id=%s lots=%.2f",
                      symbol, pos_id, signal_obj.lot_size)
+            record_trade_correlation(
+                trade_id=pos_id,
+                symbol=symbol,
+                direction=signal_obj.direction,
+                trade_time=datetime.now(NY_TZ),
+            )
             # Seed trailing SL manager with the new position
             pos = client.get_position(pos_id)
             trailing_manager.init_position(pos)
@@ -289,8 +265,6 @@ def run(mode: str):
     trailing_manager = TrailingSLManager(client)
 
     log.info("Connected to Oanda — account=%s", config.OANDA_ACCOUNT_ID)
-
-    _clear_stale_signals(max_age_hours=8)
 
     # Start API server for dashboard
     api_server = start_api_server()
@@ -392,9 +366,6 @@ def run(mode: str):
             loop_state = []
             for symbol in scan_symbols:
                 tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
-                if tag == "flat":
-                    clear_signal(symbol)
-                # Note: "rollover" and "closed" preserve existing signals
                 score = watchlist_data[symbol]["score"]
                 tier = watchlist_data[symbol]["tier"]
                 loop_summary.append((symbol, tag, tier, score))

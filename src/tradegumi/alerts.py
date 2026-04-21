@@ -10,7 +10,7 @@ import requests
 from typing import Optional
 
 from tradegumi import config
-from datetime import datetime
+from datetime import datetime, timedelta
 from pytz import timezone
 
 NY_TZ = timezone('America/New_York')
@@ -24,7 +24,25 @@ WEBHOOK_URL = config.DISCORD_WEBHOOK_URL
 MODE = config.TRADEGUMI_MODE
 
 SIGNALS_FILE = Path(__file__).parent / "data" / "signals.json"
-MAX_SIGNALS = 50  # Keep last N signals for dashboard
+TRADE_CORRELATIONS_FILE = Path(__file__).parent / "data" / "trade_correlations.json"
+SIGNAL_RETENTION_DAYS = 7
+CORRELATION_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _parse_ts(ts_str: str) -> datetime:
+    """Parse an ISO timestamp string to a timezone-aware datetime.
+
+    On parse failure, logs a warning and returns datetime.min (treated as
+    expired by all rolling-window trims, so malformed entries are dropped).
+    """
+    try:
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = NY_TZ.localize(ts)
+        return ts
+    except Exception:
+        log.warning("Could not parse timestamp %r — treating as expired", ts_str)
+        return datetime.min.replace(tzinfo=NY_TZ)
 
 
 def _post(payload: dict) -> bool:
@@ -94,13 +112,27 @@ def format_signal_message(signal: Signal) -> dict:
 
 
 def save_signal(signal: Signal) -> None:
-    """Upsert signal in signals.json — update existing entry for same symbol, append if new."""
+    """Append signal to the rolling 7-day signals log.
+
+    Every firing is stored as a distinct entry. The dashboard filters this
+    list client-side to the 60-minute display window.
+    """
     try:
         SIGNALS_FILE.parent.mkdir(parents=True, exist_ok=True)
         existing = []
         if SIGNALS_FILE.exists():
             with open(SIGNALS_FILE) as f:
                 existing = json.load(f)
+
+        now = datetime.now(NY_TZ)
+        try:
+            rr: Optional[float] = round(
+                abs(signal.take_profit - signal.entry_price)
+                / abs(signal.entry_price - signal.stop_loss),
+                1,
+            )
+        except ZeroDivisionError:
+            rr = None  # entry == stop_loss; undefined R:R
 
         entry = {
             "symbol": signal.symbol,
@@ -111,31 +143,15 @@ def save_signal(signal: Signal) -> None:
             "take_profit": signal.take_profit,
             "lot_size": signal.lot_size,
             "atr": signal.atr,
-            "rr": round(abs(signal.take_profit - signal.entry_price) / abs(signal.entry_price - signal.stop_loss), 1),
-            "timestamp": datetime.now(NY_TZ).isoformat(),
+            "rr": rr,
+            "timestamp": now.isoformat(),
         }
 
-        idx = next(
-            (i for i, e in enumerate(existing)
-             if e.get("symbol") == signal.symbol and e.get("direction") == signal.direction),
-            None,
-        )
-        if idx is not None:
-            # Same symbol + direction: preserve original setup, only bump the count
-            prev = existing[idx]
-            entry["entry_price"] = prev["entry_price"]
-            entry["stop_loss"]   = prev["stop_loss"]
-            entry["take_profit"] = prev["take_profit"]
-            entry["confidence"]  = prev["confidence"]
-            entry["rr"]          = prev["rr"]
-            entry["update_count"] = prev.get("update_count", 1) + 1
-            existing[idx] = entry
-        else:
-            # New symbol or direction flip — replace any existing entry for the symbol
-            existing = [e for e in existing if e.get("symbol") != signal.symbol]
-            entry["update_count"] = 1
-            existing.append(entry)
-            existing = existing[-MAX_SIGNALS:]
+        existing.append(entry)
+
+        # Trim to 7-day rolling window
+        cutoff = now - timedelta(days=SIGNAL_RETENTION_DAYS)
+        existing = [e for e in existing if _parse_ts(e.get("timestamp", "")) > cutoff]
 
         with open(SIGNALS_FILE, "w") as f:
             json.dump(existing, f, indent=2, default=str)
@@ -143,20 +159,63 @@ def save_signal(signal: Signal) -> None:
         log.warning("Failed to save signal to signals.json: %s", e)
 
 
-def clear_signal(symbol: str) -> None:
-    """Remove a symbol's signal from signals.json when it returns to flat."""
+def record_trade_correlation(
+    trade_id: str,
+    symbol: str,
+    direction: str,
+    trade_time: datetime,
+) -> None:
+    """If a signal fired within 5 min of this trade, record the confidence for analysis."""
     try:
         if not SIGNALS_FILE.exists():
             return
         with open(SIGNALS_FILE) as f:
-            existing = json.load(f)
-        updated = [e for e in existing if e.get("symbol") != symbol]
-        if len(updated) != len(existing):
-            with open(SIGNALS_FILE, "w") as f:
-                json.dump(updated, f, indent=2, default=str)
-            log.info("Signal expired for %s (returned to flat)", symbol)
+            signals = json.load(f)
+
+        window_start = trade_time - timedelta(seconds=CORRELATION_WINDOW_SECONDS)
+        matching = [
+            s for s in signals
+            if s.get("symbol") == symbol
+            and s.get("direction") == direction
+            and window_start <= _parse_ts(s.get("timestamp", "")) <= trade_time
+        ]
+        if not matching:
+            log.debug("No signal within 5 min for %s %s trade %s", symbol, direction, trade_id)
+            return
+
+        recent = max(matching, key=lambda s: _parse_ts(s["timestamp"]))
+        lag = int((trade_time - _parse_ts(recent["timestamp"])).total_seconds())
+
+        corr = {
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "direction": direction,
+            "confidence": recent["confidence"],
+            "signal_timestamp": recent["timestamp"],
+            "trade_timestamp": trade_time.isoformat(),
+            "signal_lag_seconds": lag,
+        }
+
+        existing = []
+        if TRADE_CORRELATIONS_FILE.exists():
+            with open(TRADE_CORRELATIONS_FILE) as f:
+                existing = json.load(f)
+
+        existing.append(corr)
+
+        cutoff = trade_time - timedelta(days=SIGNAL_RETENTION_DAYS)
+        existing = [e for e in existing if _parse_ts(e.get("trade_timestamp", "")) > cutoff]
+
+        TRADE_CORRELATIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(TRADE_CORRELATIONS_FILE, "w") as f:
+            json.dump(existing, f, indent=2, default=str)
+
+        log.info(
+            "Signal correlation: trade=%s %s %s confidence=%.3f lag=%ds",
+            trade_id, symbol, direction, recent["confidence"], lag,
+        )
     except Exception as e:
-        log.warning("Failed to clear signal for %s: %s", symbol, e)
+        log.warning("Failed to record trade correlation: %s", e)
 
 
 def post_signal(signal: Signal) -> bool:
