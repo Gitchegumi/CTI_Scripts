@@ -27,9 +27,9 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
   const mode: string = apiStatus?.mode ?? loopState?.mode ?? data?.account?.cti_program ?? "—";
   const provider = loopState?.provider ?? "—";
 
-  // Live clock that ticks every second
-  const [now, setNow] = useState(new Date());
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -52,8 +52,8 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
         </span>
       </div>
       <div className="flex items-center gap-3 text-xs text-slate-400">
-        <span className="font-mono">
-          {formatTime(now, "America/New_York")} ET ({formatTime(now, "America/Chicago")} CT)
+        <span className="font-mono" suppressHydrationWarning>
+          {now ? `${formatTime(now, "America/New_York")} ET (${formatTime(now, "America/Chicago")} CT)` : ""}
         </span>
         <span
           className={`flex items-center gap-1 ${
