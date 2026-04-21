@@ -50,7 +50,7 @@ COPY dashboard/package.json dashboard/package-lock.json* ./
 RUN npm install
 
 # Copy dashboard source
-COPY dashboard/next.config.js dashboard/tsconfig.json ./
+COPY dashboard/next.config.js dashboard/tsconfig.json dashboard/postcss.config.mjs ./
 COPY dashboard/src ./src
 COPY dashboard/public ./public
 
