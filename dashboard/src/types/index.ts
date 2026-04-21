@@ -42,7 +42,11 @@ export interface SignalEntry {
   atr: number;
   rr: number;
   timestamp: string;
-  update_count?: number;
+}
+
+export interface ActiveSignal {
+  latest: SignalEntry;
+  count: number;
 }
 
 export interface SymbolState {

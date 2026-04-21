@@ -35,7 +35,7 @@ from tradegumi.api.base_client import ExecutionClient, OrderRequest
 from tradegumi.signal_engine import SignalEngine
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
-from tradegumi.alerts import post_signal, post_watchlist, clear_signal
+from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
@@ -264,6 +264,12 @@ def check_and_execute(
             pos_id = client.place_order(order)
             log.info("%s: order placed id=%s lots=%.2f",
                      symbol, pos_id, signal_obj.lot_size)
+            record_trade_correlation(
+                trade_id=pos_id,
+                symbol=symbol,
+                direction=signal_obj.direction,
+                trade_time=datetime.now(NY_TZ),
+            )
             # Seed trailing SL manager with the new position
             pos = client.get_position(pos_id)
             trailing_manager.init_position(pos)
@@ -392,9 +398,6 @@ def run(mode: str):
             loop_state = []
             for symbol in scan_symbols:
                 tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
-                if tag == "flat":
-                    clear_signal(symbol)
-                # Note: "rollover" and "closed" preserve existing signals
                 score = watchlist_data[symbol]["score"]
                 tier = watchlist_data[symbol]["tier"]
                 loop_summary.append((symbol, tag, tier, score))

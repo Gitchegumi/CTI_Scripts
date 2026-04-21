@@ -1,6 +1,9 @@
 "use client";
 
-import { SignalEntry } from "@/types";
+import { useMemo } from "react";
+import { SignalEntry, ActiveSignal } from "@/types";
+
+const DISPLAY_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
 
 interface SignalsSectionProps {
   signals: SignalEntry[];
@@ -14,9 +17,6 @@ function fmt(n: number, d = 2): string {
 }
 
 function fmtPrice(price: number): string {
-  // Match Oanda quoting conventions by price magnitude:
-  //   >= 10  → JPY crosses (NZDJPY ~93, USDJPY ~159) → 3 decimal places
-  //   >= 1   → Major pairs (EURUSD ~1.09, GBPUSD ~1.27) → 5 decimal places
   const d = price >= 10 ? 3 : 5;
   return price.toLocaleString("en-US", {
     minimumFractionDigits: d,
@@ -26,8 +26,7 @@ function fmtPrice(price: number): string {
 
 function fmtTs(ts: string): string {
   try {
-    const d = new Date(ts);
-    return d.toLocaleString("en-US", {
+    return new Date(ts).toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -40,31 +39,58 @@ function fmtTs(ts: string): string {
   }
 }
 
+function groupSignals(signals: SignalEntry[]): ActiveSignal[] {
+  const cutoff = Date.now() - DISPLAY_WINDOW_MS;
+  const recent = signals.filter(s => new Date(s.timestamp).getTime() >= cutoff);
+
+  // Group by symbol — show the most recent signal per symbol, count all firings
+  const bySymbol = new Map<string, ActiveSignal>();
+  for (const s of recent) {
+    const existing = bySymbol.get(s.symbol);
+    if (!existing) {
+      bySymbol.set(s.symbol, { latest: s, count: 1 });
+    } else {
+      existing.count++;
+      if (new Date(s.timestamp) > new Date(existing.latest.timestamp)) {
+        existing.latest = s;
+      }
+    }
+  }
+
+  // Sort by most recent first
+  return Array.from(bySymbol.values()).sort(
+    (a, b) => new Date(b.latest.timestamp).getTime() - new Date(a.latest.timestamp).getTime()
+  );
+}
+
 export default function SignalsSection({ signals }: SignalsSectionProps) {
+  const active = useMemo(() => groupSignals(signals), [signals]);
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-800">
+      <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
         <span className="text-sm font-medium text-slate-300">⚡ Active Signals</span>
+        <span className="text-xs text-slate-500">last 60 min</span>
       </div>
 
-      {signals.length === 0 ? (
-        <div className="px-4 py-4 text-sm text-slate-500 text-center">No active signals</div>
+      {active.length === 0 ? (
+        <div className="px-4 py-4 text-sm text-slate-500 text-center">No signals in the last 60 minutes</div>
       ) : (
         <div className="p-3 grid gap-2 grid-cols-2">
-          {signals.map((sig, i) => {
+          {active.map(({ latest: sig, count }) => {
             const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";
             const dirBg = sig.direction === "BUY" ? "bg-green-900/30 border-green-700" : "bg-red-900/30 border-red-700";
             return (
               <div
-                key={i}
+                key={sig.symbol}
                 className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-white">{sig.symbol}</span>
-                    {(sig.update_count ?? 1) > 1 && (
+                    {count > 1 && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
-                        ×{sig.update_count}
+                        ×{count}
                       </span>
                     )}
                   </div>
