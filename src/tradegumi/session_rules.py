@@ -1,4 +1,5 @@
 """Session rules: trading hours, swap blackout, day-of-week filtering."""
+
 from datetime import datetime, time
 from typing import Optional
 
@@ -13,11 +14,11 @@ NY_TZ = timezone("America/New_York")
 # Indexed by weekday (0=Mon … 4=Fri), each entry is a list of (start, end) tuples
 
 FOREX_HOURS = {
-    0: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Monday
-    1: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Tuesday
-    2: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Wednesday
-    3: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],   # Thursday
-    4: [(time(0, 0), time(16, 50))],                                # Friday (closes for week at 16:50)
+    0: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Monday
+    1: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Tuesday
+    2: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Wednesday
+    3: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Thursday
+    4: [(time(0, 0), time(16, 59))],  # Friday (closes for week at 16:59)
 }
 
 INDEX_HOURS = {
@@ -25,7 +26,7 @@ INDEX_HOURS = {
     1: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
     2: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
     3: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
-    4: [(time(0, 0), time(16, 30))],                                # Friday
+    4: [(time(0, 0), time(16, 30))],  # Friday
 }
 
 # ── Swap Blackout Windows ───────────────────────────────────────────────────
@@ -146,6 +147,7 @@ def is_trading_day(symbol: str, when: Optional[datetime] = None) -> bool:
 
 
 # ── Day-of-week scoring ───────────────────────────────────────────────────────
+
 
 def day_of_week_bias(symbol: str, when: Optional[datetime] = None) -> float:
     """Return a day-of-week bias multiplier for ADR-based scoring.
