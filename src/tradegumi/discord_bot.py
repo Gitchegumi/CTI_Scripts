@@ -98,6 +98,11 @@ if _DISCORD_AVAILABLE:
             msg = await dm.send(content=content, view=GradeView())
             return str(msg.id)
 
+        async def _dm_plain(self, content: str) -> None:
+            user = await self.fetch_user(int(config.DISCORD_USER_ID))
+            dm = await user.create_dm()
+            await dm.send(content=content)
+
 
 # ── Thread management ─────────────────────────────────────────────────────────
 
@@ -175,3 +180,23 @@ def post_signal_dm(signal, rr: Optional[float] = None) -> Optional[str]:
     except Exception as e:
         log.error("Failed to send signal DM: %s", e)
         return None
+
+
+def send_dm(content: str) -> bool:
+    """Send a plain text DM (no grade buttons). Thread-safe.
+
+    Used for watchlist updates, tier changes, and status messages.
+    Returns True if sent successfully.
+    """
+    if not _DISCORD_AVAILABLE or _bot is None or _loop is None:
+        return False
+    if not _ready.is_set():
+        log.debug("Discord bot not yet ready — DM skipped")
+        return False
+    future = asyncio.run_coroutine_threadsafe(_bot._dm_plain(content), _loop)
+    try:
+        future.result(timeout=10)
+        return True
+    except Exception as e:
+        log.error("Failed to send plain DM: %s", e)
+        return False

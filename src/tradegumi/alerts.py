@@ -259,43 +259,65 @@ def post_signal(signal: Signal) -> bool:
     return ok
 
 
+def _fmt_watchlist_dm(watchlist_text: str, scan_result: dict | None, title: str) -> str:
+    """Format a watchlist/update as plain text for Discord DM."""
+    lines = [f"**{title}**", "", watchlist_text]
+
+    if scan_result and "account" in scan_result:
+        acct = scan_result["account"]
+        pnl_sign = "+" if acct["session_pnl"] >= 0 else ""
+        program = acct.get("cti_program", "challenge").title()
+        phase = acct.get("cti_phase_label", "Phase 1")
+        lines += [
+            "",
+            f"💰 **{phase} — {program}**",
+            f"Balance `${acct['balance']:,.2f}` | NAV `${acct['nav']:,.2f}`",
+            f"Session PnL `{pnl_sign}${acct['session_pnl']:,.2f}` ({pnl_sign}{acct['session_pnl_pct']:.2f}%)",
+            f"🎯 Target ({acct['active_target_pct']*100:.0f}%) — `${acct['profit_target_remaining']:,.2f}` left ({acct['profit_target_remaining_pct']:.1f}%)",
+            f"🛡️ Daily Loss ({acct['daily_loss_pct']*100:.0f}%) — `${acct['daily_loss_remaining']:,.2f}` left ({acct['daily_loss_remaining_pct']:.1f}%)",
+            f"⚠️ Max DD ({acct['max_dd_pct']*100:.0f}%) — `${acct['dd_remaining']:,.2f}` left ({acct['dd_remaining_pct']:.1f}%)",
+        ]
+
+    lines.append(f"\n_TradeGumi {MODE} — {datetime.now(NY_TZ):%I:%M %p ET} ({datetime.now(CT_TZ):%I:%M %p CT})_")
+    return "\n".join(lines)
+
+
 def post_watchlist(watchlist_text: str, scan_result: dict | None = None, title: str = "🌅 Morning Watchlist — TradeGumi") -> bool:
-    """Post a watchlist message to Discord."""
+    """Post a watchlist message. Prefers Discord DM; falls back to webhook."""
+    from tradegumi.discord_bot import send_dm
+
+    dm_text = _fmt_watchlist_dm(watchlist_text, scan_result, title)
+    if send_dm(dm_text):
+        log.info("Discord DM: watchlist/update sent (%d chars)", len(dm_text))
+        return True
+
+    # Fall back to webhook with embed layout
     embeds = [{
         "title": title,
         "color": 0x1E90FF,
         "footer": {"text": f"TradeGumi {MODE} | {datetime.now(NY_TZ):%I:%M %p ET} ({datetime.now(CT_TZ):%I:%M %p CT})"},
     }]
 
-    # Add account info embed if available
     if scan_result and "account" in scan_result:
         acct = scan_result["account"]
         pnl_sign = "+" if acct["session_pnl"] >= 0 else ""
         program = acct.get("cti_program", "challenge").title()
         phase = acct.get("cti_phase_label", "Phase 1")
-
-        fields = [
-            {"name": "Balance", "value": f"${acct['balance']:,.2f}", "inline": True},
-            {"name": "NAV", "value": f"${acct['nav']:,.2f}", "inline": True},
-            {"name": "Session PnL", "value": f"{pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)", "inline": True},
-            {"name": f"🎯 Target ({acct['active_target_pct']*100:.0f}%)", "value": f"${acct['profit_target_remaining']:,.2f} left ({acct['profit_target_remaining_pct']:.1f}%)", "inline": True},
-            {"name": f"🛡️ Daily Loss ({acct['daily_loss_pct']*100:.0f}%)", "value": f"${acct['daily_loss_remaining']:,.2f} left ({acct['daily_loss_remaining_pct']:.1f}%)", "inline": True},
-            {"name": f"⚠️ Max DD ({acct['max_dd_pct']*100:.0f}%)", "value": f"${acct['dd_remaining']:,.2f} left ({acct['dd_remaining_pct']:.1f}%)", "inline": True},
-        ]
-
         embeds.append({
             "title": f"💰 {phase}",
             "color": 0x00FF00 if acct["session_pnl"] >= 0 else 0xFF0000,
-            "fields": fields,
+            "fields": [
+                {"name": "Balance", "value": f"${acct['balance']:,.2f}", "inline": True},
+                {"name": "NAV", "value": f"${acct['nav']:,.2f}", "inline": True},
+                {"name": "Session PnL", "value": f"{pnl_sign}${acct['session_pnl']:,.2f} ({pnl_sign}{acct['session_pnl_pct']:.2f}%)", "inline": True},
+                {"name": f"🎯 Target ({acct['active_target_pct']*100:.0f}%)", "value": f"${acct['profit_target_remaining']:,.2f} left ({acct['profit_target_remaining_pct']:.1f}%)", "inline": True},
+                {"name": f"🛡️ Daily Loss ({acct['daily_loss_pct']*100:.0f}%)", "value": f"${acct['daily_loss_remaining']:,.2f} left ({acct['daily_loss_remaining_pct']:.1f}%)", "inline": True},
+                {"name": f"⚠️ Max DD ({acct['max_dd_pct']*100:.0f}%)", "value": f"${acct['dd_remaining']:,.2f} left ({acct['dd_remaining_pct']:.1f}%)", "inline": True},
+            ],
             "footer": {"text": f"TradeGumi {MODE} — {program}"},
         })
 
-    payload = {
-        "content": watchlist_text,
-        "embeds": embeds,
-    }
-
-    return _post(payload)
+    return _post({"content": watchlist_text, "embeds": embeds})
 
 
 def post_blocked_signal(signal: Signal, reason: str) -> bool:
