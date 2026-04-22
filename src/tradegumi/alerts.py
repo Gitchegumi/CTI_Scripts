@@ -138,6 +138,7 @@ def save_signal(signal: Signal) -> None:
             "symbol": signal.symbol,
             "direction": signal.direction,
             "confidence": round(signal.confidence, 3),
+            "strategy": getattr(signal, "strategy", "CTI-v1"),
             "entry_price": signal.entry_price,
             "stop_loss": signal.stop_loss,
             "take_profit": signal.take_profit,
@@ -219,19 +220,42 @@ def record_trade_correlation(
 
 
 def post_signal(signal: Signal) -> bool:
-    """Post a signal to Discord. Returns True on success."""
-    if config.TRADEGUMI_MODE == "alert_only":
-        mode_label = "alert_only"
-    elif config.TRADEGUMI_MODE == "demo":
-        mode_label = "demo"
-    else:
-        mode_label = "live"
+    """Send a signal alert. Prefers Discord DM (bot); falls back to webhook.
 
-    payload = format_signal_message(signal)
-    ok = _post(payload)
+    Always writes to signals.json (dashboard display) and appends to the
+    permanent journal regardless of which delivery path is used.
+    """
+    from tradegumi.discord_bot import post_signal_dm
+    from tradegumi.journal import append_signal
+
+    try:
+        rr: Optional[float] = round(
+            abs(signal.take_profit - signal.entry_price)
+            / abs(signal.entry_price - signal.stop_loss),
+            1,
+        )
+    except ZeroDivisionError:
+        rr = None
+
+    # Attempt DM first; fall back to webhook if bot not configured / fails
+    msg_id = post_signal_dm(signal, rr=rr)
+    if msg_id:
+        log.info("Discord DM: signal sent for %s %s (msg_id=%s)", signal.symbol, signal.direction, msg_id)
+        ok = True
+    else:
+        payload = format_signal_message(signal)
+        ok = _post(payload)
+        if ok:
+            log.info("Discord webhook: signal posted for %s %s", signal.symbol, signal.direction)
+        msg_id = None
+
     if ok:
-        log.info("Discord: signal posted for %s %s", signal.symbol, signal.direction)
         save_signal(signal)
+        try:
+            append_signal(signal, rr=rr, discord_msg_id=msg_id)
+        except Exception as e:
+            log.warning("Failed to append signal to journal: %s", e)
+
     return ok
 
 

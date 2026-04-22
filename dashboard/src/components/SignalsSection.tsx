@@ -24,18 +24,22 @@ function fmtPrice(price: number): string {
   });
 }
 
-function fmtTs(ts: string): string {
+function fmtTs(ts: string): { et: string; ct: string } {
   try {
-    return new Date(ts).toLocaleString("en-US", {
+    const date = new Date(ts);
+    const opts: Intl.DateTimeFormatOptions = {
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-      timeZone: "America/New_York",
-    });
+    };
+    return {
+      et: date.toLocaleString("en-US", { ...opts, timeZone: "America/New_York" }),
+      ct: date.toLocaleString("en-US", { ...opts, timeZone: "America/Chicago" }),
+    };
   } catch {
-    return ts;
+    return { et: ts, ct: ts };
   }
 }
 
@@ -95,7 +99,8 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                 key={key}
                 className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}
               >
-                <div className="flex items-center justify-between">
+                {/* Header: symbol + count badge on one line, direction on its own line */}
+                <div>
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-white">{sig.symbol}</span>
                     {count > 1 && (
@@ -109,6 +114,8 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <div className="text-slate-400">Strategy</div>
+                  <div className="text-white text-right">{sig.strategy ?? "CTI-v1"}</div>
                   <div className="text-slate-400">Confidence</div>
                   <div className="text-white text-right">{Math.round(sig.confidence * 100)}%</div>
                   <div className="text-slate-400">Entry</div>
@@ -126,8 +133,8 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
                     {sig.rr !== null ? sig.rr.toFixed(1) : "—"}
                   </div>
                 </div>
-                <div className="text-xs text-slate-500 border-t border-slate-700 pt-1.5 mt-1">
-                  {fmtTs(sig.timestamp)} ET
+                <div className="text-xs text-slate-500 border-t border-slate-700 pt-1.5 mt-1 space-y-0.5">
+                  {(() => { const t = fmtTs(sig.timestamp); return (<><div>{t.et} ET</div><div>{t.ct} CT</div></>); })()}
                 </div>
               </div>
             );

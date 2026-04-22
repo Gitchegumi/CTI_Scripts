@@ -46,6 +46,7 @@ class Signal:
     breakdown: dict          # Per-indicator scores
     trend_direction: str     # "Uptrend" or "Downtrend"
     patterns_found: list     # Candlestick patterns detected
+    strategy: str = "CTI-v1"
     blocked_reason: Optional[str] = None
 
     def is_blocked(self) -> bool:

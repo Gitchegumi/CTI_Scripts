@@ -270,6 +270,10 @@ def run(mode: str):
     api_server = start_api_server()
     set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
+    # Start Discord bot (DM alerts + grade buttons); falls back to webhook if unconfigured
+    from tradegumi.discord_bot import start_bot_thread
+    start_bot_thread()
+
     last_scan_result = scan_and_alert(client, available=available)
 
     # Pre-session scan schedule: 06:30 CT (America/Chicago) every trading day

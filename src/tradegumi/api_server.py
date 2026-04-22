@@ -111,6 +111,23 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json([])
             return
 
+        if self.path == "/api/data/journal":
+            f = DATA_DIR / "signal_journal.jsonl"
+            if f.exists():
+                entries = []
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+                # Newest first
+                self._send_json(list(reversed(entries)))
+            else:
+                self._send_json([])
+            return
+
         # ── Live API endpoints (require Oanda client) ──
         if self.path == "/api/positions":
             client = get_runtime_state().get("client")

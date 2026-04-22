@@ -31,6 +31,12 @@ OANDA_STREAM_URL = os.getenv("OANDA_STREAM_URL", "https://stream-fxpractice.oand
 
 # ── Discord ─────────────────────────────────────────────────────────────────
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_BOT_TOKEN   = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_USER_ID     = os.getenv("DISCORD_USER_ID", "")
+
+# ── Signal Journal ───────────────────────────────────────────────────────────
+# Token required to access the /journal page on the dashboard.
+JOURNAL_TOKEN = os.getenv("JOURNAL_TOKEN", "")
 
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
