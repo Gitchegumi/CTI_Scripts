@@ -35,6 +35,7 @@ export interface SignalEntry {
   symbol: string;
   direction: "BUY" | "SELL";
   confidence: number;
+  strategy?: string;
   entry_price: number;
   stop_loss: number;
   take_profit: number;

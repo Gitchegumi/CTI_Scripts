@@ -6,6 +6,16 @@ set -e
 # Manages both the Python bot and Next.js dashboard processes
 # ===========================================
 
+# Load .env into the environment so both the Python bot and Next.js
+# server can read all configured variables at runtime.
+if [ -f /app/.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source /app/.env
+    set +a
+    echo "[entrypoint] Loaded /app/.env"
+fi
+
 shutdown() {
     echo "[entrypoint] SIGTERM received, shutting down gracefully..."
     kill -TERM $BOT_PID $DASHBOARD_PID 2>/dev/null || true
