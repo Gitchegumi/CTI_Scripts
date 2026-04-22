@@ -78,47 +78,61 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
     return signal_id
 
 
-def grade_signal(discord_msg_id: str, grade: str, notes: str = "") -> bool:
-    """Find the entry matching discord_msg_id and apply the grade.
+def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> bool:
+    """Shared rewrite helper — finds the first entry where entry[lookup_field] == lookup_key,
+    updates grade/grade_timestamp/notes, and atomically replaces the file.
+    Must be called with _lock already held.
+    """
+    if not JOURNAL_FILE.exists():
+        return False
 
-    Rewrites the matching line in-place; all other lines are preserved.
-    Returns True if an entry was found and updated.
+    lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    updated = False
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+            if not updated and entry.get(lookup_field) == lookup_key:
+                entry["grade"] = grade
+                entry["grade_timestamp"] = _now_iso()
+                entry["notes"] = notes
+                stripped = json.dumps(entry)
+                updated = True
+        except json.JSONDecodeError:
+            pass
+        new_lines.append(stripped)
+
+    if updated:
+        tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        tmp.replace(JOURNAL_FILE)
+
+    return updated
+
+
+def grade_signal(discord_msg_id: str, grade: str, notes: str = "") -> bool:
+    """Grade by Discord message ID (called from bot button interactions)."""
+    if grade not in VALID_GRADES:
+        log.warning("Invalid grade %r — must be one of %s", grade, VALID_GRADES)
+        return False
+    with _lock:
+        return _apply_grade(discord_msg_id, "discord_msg_id", grade, notes)
+
+
+def grade_by_signal_id(signal_id: str, grade: str, notes: str = "") -> bool:
+    """Grade by signal_id (called from the dashboard UI).
+
+    Works for all signals including migrated ones that have no discord_msg_id.
     """
     if grade not in VALID_GRADES:
         log.warning("Invalid grade %r — must be one of %s", grade, VALID_GRADES)
         return False
-
     with _lock:
-        if not JOURNAL_FILE.exists():
-            return False
-
-        lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
-        updated = False
-        new_lines = []
-
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                entry = json.loads(stripped)
-                if entry.get("discord_msg_id") == discord_msg_id:
-                    entry["grade"] = grade
-                    entry["grade_timestamp"] = _now_iso()
-                    entry["notes"] = notes
-                    stripped = json.dumps(entry)
-                    updated = True
-            except json.JSONDecodeError:
-                pass
-            new_lines.append(stripped)
-
-        if updated:
-            # Write to a temp file then replace atomically to avoid partial writes
-            tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
-            tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-            tmp.replace(JOURNAL_FILE)
-
-    return updated
+        return _apply_grade(signal_id, "signal_id", grade, notes)
 
 
 def read_journal() -> list:

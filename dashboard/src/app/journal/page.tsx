@@ -126,10 +126,33 @@ function StatsBar({ entries }: { entries: JournalEntry[] }) {
 
 // ── Signal card ───────────────────────────────────────────────────────────────
 
-function SignalCard({ entry }: { entry: JournalEntry }) {
+const GRADE_BUTTONS: { grade: JournalEntry["grade"]; label: string; style: string }[] = [
+  { grade: "TP_HIT",       label: "✅ TP",      style: "border-green-700 text-green-400 hover:bg-green-900/30" },
+  { grade: "SL_HIT",       label: "❌ SL",      style: "border-red-700 text-red-400 hover:bg-red-900/30" },
+  { grade: "MANUAL_CLOSE", label: "⚠️ Manual",  style: "border-yellow-700 text-yellow-400 hover:bg-yellow-900/30" },
+  { grade: "EXPIRED",      label: "⏭ Expired",  style: "border-slate-600 text-slate-500 hover:bg-slate-800" },
+];
+
+function SignalCard({
+  entry,
+  onGrade,
+}: {
+  entry: JournalEntry;
+  onGrade: (signalId: string, grade: JournalEntry["grade"]) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
   const dirColor = entry.direction === "BUY" ? "text-green-400" : "text-red-400";
   const dirBg = entry.direction === "BUY" ? "border-green-800" : "border-red-800";
   const t = fmtTime(entry.signal_timestamp);
+
+  async function handleGrade(grade: JournalEntry["grade"]) {
+    setBusy(grade);
+    try {
+      await onGrade(entry.signal_id, grade);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}>
@@ -158,6 +181,22 @@ function SignalCard({ entry }: { entry: JournalEntry }) {
         <div className="text-white text-right">{entry.rr !== null ? entry.rr?.toFixed(1) : "—"}</div>
         <div className="text-slate-400">Lot</div>
         <div className="text-white text-right">{entry.lot_size}</div>
+      </div>
+
+      {/* Grade buttons — always shown so any grade can be changed */}
+      <div className="grid grid-cols-2 gap-1 border-t border-slate-800 pt-2">
+        {GRADE_BUTTONS.map(({ grade, label, style }) => (
+          <button
+            key={grade}
+            onClick={() => handleGrade(grade)}
+            disabled={!!busy}
+            className={`text-xs px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${style} ${
+              entry.grade === grade ? "opacity-100 font-bold ring-1 ring-current" : "opacity-50"
+            }`}
+          >
+            {busy === grade ? "…" : label}
+          </button>
+        ))}
       </div>
 
       <div className="text-xs text-slate-500 border-t border-slate-800 pt-1.5 space-y-0.5">
@@ -226,6 +265,23 @@ export default function JournalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<GradeFilter>("ALL");
+
+  async function handleGrade(signalId: string, grade: JournalEntry["grade"]) {
+    // Optimistic update
+    setEntries(prev =>
+      prev.map(e => e.signal_id === signalId ? { ...e, grade } : e)
+    );
+    const res = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId, grade }),
+    });
+    if (!res.ok) {
+      // Revert on failure by reloading
+      const fresh = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
+      if (fresh.ok) setEntries(await fresh.json());
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -311,7 +367,7 @@ export default function JournalPage() {
                     </h2>
                     <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                       {dayEntries.map(e => (
-                        <SignalCard key={e.signal_id} entry={e} />
+                        <SignalCard key={e.signal_id} entry={e} onGrade={handleGrade} />
                       ))}
                     </div>
                   </section>
