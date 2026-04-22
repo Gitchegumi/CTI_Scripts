@@ -271,8 +271,9 @@ def run(mode: str):
     set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
     # Start Discord bot (DM alerts + grade buttons); falls back to webhook if unconfigured
-    from tradegumi.discord_bot import start_bot_thread
+    from tradegumi.discord_bot import start_bot_thread, wait_until_ready
     start_bot_thread()
+    wait_until_ready(timeout=20.0)  # ensure bot is ready before first scan DM
 
     last_scan_result = scan_and_alert(client, available=available)
 
