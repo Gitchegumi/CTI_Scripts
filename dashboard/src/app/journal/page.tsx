@@ -230,7 +230,7 @@ export default function JournalPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/data/journal?_=${Date.now()}`, { cache: "no-store" });
+        const res = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setEntries(Array.isArray(data) ? data : []);

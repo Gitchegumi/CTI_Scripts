@@ -11,84 +11,92 @@ DISCORD_USER_ID    — your numeric Discord user ID (right-click your name → C
 The bot must be invited to your server with the "bot" scope and the
 "Send Messages" + "Read Message History" permissions. No channel is needed —
 all messages go directly to you via DM.
+
+If discord.py is not installed the module loads cleanly and all calls are
+no-ops — the trading loop will fall back to the webhook alerter.
 """
 import asyncio
 import logging
 import threading
 from typing import Optional
 
-import discord
+try:
+    import discord
+    _DISCORD_AVAILABLE = True
+except ImportError:
+    _DISCORD_AVAILABLE = False
 
 from tradegumi import config
 from tradegumi.journal import grade_signal
 
 log = logging.getLogger(__name__)
 
-_bot: Optional["TradeGumiBot"] = None
+if not _DISCORD_AVAILABLE:
+    log.warning(
+        "discord.py is not installed — Discord DMs disabled. "
+        "Rebuild the container after adding discord.py>=2.4 to requirements.txt."
+    )
+
+_bot = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _ready = threading.Event()
 
 
-# ── Grade buttons ─────────────────────────────────────────────────────────────
+# ── Discord classes (only defined when the library is present) ────────────────
 
-class GradeView(discord.ui.View):
-    """Three-button row attached to each signal DM.
+if _DISCORD_AVAILABLE:
+    class GradeView(discord.ui.View):  # type: ignore[misc]
+        """Three-button row attached to each signal DM.
 
-    Buttons use the Discord message ID to look up the journal entry, so the
-    view doesn't need to carry any state between restarts.
-    """
+        Uses the Discord message ID to find the journal entry — the view
+        carries no per-message state, so it survives bot restarts cleanly.
+        """
 
-    def __init__(self):
-        super().__init__(timeout=None)
+        def __init__(self):
+            super().__init__(timeout=None)
 
-    async def _apply_grade(self, interaction: discord.Interaction, grade: str, label: str):
-        msg_id = str(interaction.message.id)
-        success = grade_signal(msg_id, grade)
-        if success:
-            updated_content = interaction.message.content + f"\n\n**Graded:** {label}"
-            await interaction.response.edit_message(content=updated_content, view=None)
-        else:
-            await interaction.response.send_message(
-                "Could not locate this signal in the journal. "
-                "It may have been sent before journaling was enabled.",
-                ephemeral=True,
-            )
+        async def _apply_grade(self, interaction: discord.Interaction, grade: str, label: str):
+            msg_id = str(interaction.message.id)
+            success = grade_signal(msg_id, grade)
+            if success:
+                updated = interaction.message.content + f"\n\n**Graded:** {label}"
+                await interaction.response.edit_message(content=updated, view=None)
+            else:
+                await interaction.response.send_message(
+                    "Could not locate this signal in the journal. "
+                    "It may have been sent before journaling was enabled.",
+                    ephemeral=True,
+                )
 
-    @discord.ui.button(label="✅ TP Hit", style=discord.ButtonStyle.success, custom_id="tg_grade_tp")
-    async def tp_hit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._apply_grade(interaction, "TP_HIT", "TP Hit ✅")
+        @discord.ui.button(label="✅ TP Hit", style=discord.ButtonStyle.success, custom_id="tg_grade_tp")
+        async def tp_hit(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self._apply_grade(interaction, "TP_HIT", "TP Hit ✅")
 
-    @discord.ui.button(label="❌ SL Hit", style=discord.ButtonStyle.danger, custom_id="tg_grade_sl")
-    async def sl_hit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._apply_grade(interaction, "SL_HIT", "SL Hit ❌")
+        @discord.ui.button(label="❌ SL Hit", style=discord.ButtonStyle.danger, custom_id="tg_grade_sl")
+        async def sl_hit(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self._apply_grade(interaction, "SL_HIT", "SL Hit ❌")
 
-    @discord.ui.button(label="⚠️ Manual Close", style=discord.ButtonStyle.secondary, custom_id="tg_grade_manual")
-    async def manual_close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._apply_grade(interaction, "MANUAL_CLOSE", "Manual Close ⚠️")
+        @discord.ui.button(label="⚠️ Manual Close", style=discord.ButtonStyle.secondary, custom_id="tg_grade_manual")
+        async def manual_close(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self._apply_grade(interaction, "MANUAL_CLOSE", "Manual Close ⚠️")
 
+    class TradeGumiBot(discord.Client):  # type: ignore[misc]
+        def __init__(self):
+            intents = discord.Intents.default()
+            super().__init__(intents=intents)
 
-# ── Bot client ────────────────────────────────────────────────────────────────
+        async def setup_hook(self):
+            self.add_view(GradeView())
 
-class TradeGumiBot(discord.Client):
-    def __init__(self):
-        intents = discord.Intents.default()
-        super().__init__(intents=intents)
+        async def on_ready(self):
+            log.info("Discord bot ready: %s (id=%s)", self.user, self.user.id)
+            _ready.set()
 
-    async def setup_hook(self):
-        # Re-register the persistent view so buttons work after a restart.
-        # Discord.py requires this for views with timeout=None.
-        self.add_view(GradeView())
-
-    async def on_ready(self):
-        log.info("Discord bot ready: %s (id=%s)", self.user, self.user.id)
-        _ready.set()
-
-    async def _dm_user(self, content: str) -> Optional[str]:
-        """Open a DM channel with the configured user and send content. Returns message ID."""
-        user = await self.fetch_user(int(config.DISCORD_USER_ID))
-        dm = await user.create_dm()
-        msg = await dm.send(content=content, view=GradeView())
-        return str(msg.id)
+        async def _dm_user(self, content: str) -> Optional[str]:
+            user = await self.fetch_user(int(config.DISCORD_USER_ID))
+            dm = await user.create_dm()
+            msg = await dm.send(content=content, view=GradeView())
+            return str(msg.id)
 
 
 # ── Thread management ─────────────────────────────────────────────────────────
@@ -109,9 +117,11 @@ def _run_bot(token: str):
 def start_bot_thread() -> bool:
     """Start the Discord bot in a background daemon thread.
 
-    Returns True if the bot was started (i.e. both env vars are configured).
-    Safe to call multiple times — will not start a second thread.
+    Returns True if started. Safe to call multiple times. Falls back
+    gracefully if discord.py is not installed or env vars are missing.
     """
+    if not _DISCORD_AVAILABLE:
+        return False
     if _bot is not None:
         return True
 
@@ -134,13 +144,12 @@ def start_bot_thread() -> bool:
 # ── Public API (thread-safe) ──────────────────────────────────────────────────
 
 def post_signal_dm(signal, rr: Optional[float] = None) -> Optional[str]:
-    """Send a signal DM and return the Discord message ID.
+    """Send a signal DM and return the Discord message ID (for journal linking).
 
-    Thread-safe: designed to be called from the synchronous trading loop.
+    Thread-safe — designed to be called from the synchronous trading loop.
     Returns None if the bot is not running or the send fails.
     """
-    if _bot is None or _loop is None:
-        log.debug("Discord bot not initialised — DM skipped")
+    if not _DISCORD_AVAILABLE or _bot is None or _loop is None:
         return None
     if not _ready.is_set():
         log.debug("Discord bot not yet ready — DM skipped")
