@@ -182,6 +182,18 @@ def post_signal_dm(signal, rr: Optional[float] = None) -> Optional[str]:
         return None
 
 
+def wait_until_ready(timeout: float = 20.0) -> bool:
+    """Block until the Discord bot signals on_ready, or timeout expires.
+
+    Call this after start_bot_thread() before sending the first DM so the
+    initial startup message doesn't fall back to the webhook.
+    Returns True if the bot became ready within the timeout.
+    """
+    if not _DISCORD_AVAILABLE or _bot is None:
+        return False
+    return _ready.wait(timeout=timeout)
+
+
 def send_dm(content: str) -> bool:
     """Send a plain text DM (no grade buttons). Thread-safe.
 

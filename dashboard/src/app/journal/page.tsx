@@ -248,20 +248,25 @@ function TradeGroupCard({
       </button>
 
       {/* ── Summary data ── */}
-      <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-        <div className="text-slate-400">Avg Confidence</div>
-        <div className="text-white text-right">{Math.round(group.avgConfidence * 100)}%</div>
-        <div className="text-slate-400">Entry</div>
-        <div className="text-white text-right">{fmtPrice(first.entry_price)}</div>
-        <div className="text-slate-400">SL / TP</div>
-        <div className="text-white text-right">
-          <span className="text-red-400">{fmtPrice(first.stop_loss)}</span>
-          {" / "}
-          <span className="text-green-400">{fmtPrice(first.take_profit)}</span>
-        </div>
-        <div className="text-slate-400">R:R</div>
-        <div className="text-white text-right">{group.rr != null ? group.rr.toFixed(1) : "—"}</div>
-      </div>
+      {(() => {
+        const master = group.entries.find(e => e.signal_id === masterSignalId) ?? first;
+        return (
+          <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <div className="text-slate-400">Avg Confidence</div>
+            <div className="text-white text-right">{Math.round(group.avgConfidence * 100)}%</div>
+            <div className="text-slate-400">Entry</div>
+            <div className="text-white text-right">{fmtPrice(master.entry_price)}</div>
+            <div className="text-slate-400">SL / TP</div>
+            <div className="text-white text-right">
+              <span className="text-red-400">{fmtPrice(master.stop_loss)}</span>
+              {" / "}
+              <span className="text-green-400">{fmtPrice(master.take_profit)}</span>
+            </div>
+            <div className="text-slate-400">R:R</div>
+            <div className="text-white text-right">{master.rr != null ? master.rr.toFixed(1) : "—"}</div>
+          </div>
+        );
+      })()}
 
       {/* ── Grade buttons ── */}
       <div className="px-3 pb-3 grid grid-cols-2 gap-1 border-t border-slate-800 pt-2">
