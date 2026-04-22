@@ -225,6 +225,20 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             log.info("API: Phase changed to %d", config.CTI_PHASE)
             self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
 
+        elif self.path == "/api/journal/grade":
+            signal_id = body.get("signal_id", "").strip()
+            grade = body.get("grade", "").strip().upper()
+            notes = body.get("notes", "").strip()
+            if not signal_id or not grade:
+                self._send_json({"error": "signal_id and grade are required"}, 400)
+                return
+            from tradegumi.journal import grade_by_signal_id
+            ok = grade_by_signal_id(signal_id, grade, notes)
+            if ok:
+                self._send_json({"ok": True})
+            else:
+                self._send_json({"error": "Signal not found or invalid grade"}, 404)
+
         elif self.path == "/api/action/rescan":
             # Trigger an immediate re-scan
             state = get_runtime_state()
