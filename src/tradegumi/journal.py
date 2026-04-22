@@ -22,6 +22,17 @@ grade:            "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED"
 grade_timestamp:  ISO str | null
 notes:            str
 discord_msg_id:   str | null   (links button interaction back to this entry)
+stochrsi_k:       float | null
+stochrsi_d:       float | null
+macd_line:        float | null
+macd_signal:      float | null
+macd_histogram:   float | null
+kc_upper:         float | null
+kc_mid:           float | null
+kc_lower:         float | null
+lr_1h:            float | null
+lr_15m:           float | null
+lr_5m:            float | null
 """
 import json
 import logging
@@ -45,7 +56,7 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None) -> str:
+def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> str:
     """Append a new PENDING entry to the journal. Returns the signal_id."""
     JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -67,8 +78,20 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
         "signal_timestamp": ts,
         "grade": "PENDING",
         "grade_timestamp": None,
-        "notes": "",
+        "notes": notes,
         "discord_msg_id": discord_msg_id,
+        # Indicator snapshot
+        "stochrsi_k": getattr(signal, "stochrsi_k", 0.0),
+        "stochrsi_d": getattr(signal, "stochrsi_d", 0.0),
+        "macd_line": getattr(signal, "macd_line", 0.0),
+        "macd_signal": getattr(signal, "macd_signal", 0.0),
+        "macd_histogram": getattr(signal, "macd_histogram", 0.0),
+        "kc_upper": getattr(signal, "kc_upper", 0.0),
+        "kc_mid": getattr(signal, "kc_mid", 0.0),
+        "kc_lower": getattr(signal, "kc_lower", 0.0),
+        "lr_1h": getattr(signal, "lr_1h", 0.0),
+        "lr_15m": getattr(signal, "lr_15m", 0.0),
+        "lr_5m": getattr(signal, "lr_5m", 0.0),
     }
 
     with _lock:

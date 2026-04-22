@@ -146,6 +146,18 @@ def save_signal(signal: Signal) -> None:
             "atr": signal.atr,
             "rr": rr,
             "timestamp": now.isoformat(),
+            # Indicator snapshot
+            "stochrsi_k": getattr(signal, "stochrsi_k", 0.0),
+            "stochrsi_d": getattr(signal, "stochrsi_d", 0.0),
+            "macd_line": getattr(signal, "macd_line", 0.0),
+            "macd_signal": getattr(signal, "macd_signal", 0.0),
+            "macd_histogram": getattr(signal, "macd_histogram", 0.0),
+            "kc_upper": getattr(signal, "kc_upper", 0.0),
+            "kc_mid": getattr(signal, "kc_mid", 0.0),
+            "kc_lower": getattr(signal, "kc_lower", 0.0),
+            "lr_1h": getattr(signal, "lr_1h", 0.0),
+            "lr_15m": getattr(signal, "lr_15m", 0.0),
+            "lr_5m": getattr(signal, "lr_5m", 0.0),
         }
 
         existing.append(entry)
