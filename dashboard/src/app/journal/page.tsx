@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface JournalEntry {
   signal_id: string;
   symbol: string;
@@ -22,6 +24,76 @@ interface JournalEntry {
   discord_msg_id: string | null;
 }
 
+interface TradeGroup {
+  groupId: string;           // signal_id of first entry — stable key
+  symbol: string;
+  direction: "BUY" | "SELL";
+  strategy: string;
+  entries: JournalEntry[];   // oldest → newest
+  avgConfidence: number;
+  grade: JournalEntry["grade"];
+  firstTs: string;
+  lastTs: string;
+  rr: number | null;         // from the first entry
+}
+
+// ── Grouping logic ────────────────────────────────────────────────────────────
+
+function isSameTrade(prev: JournalEntry, curr: JournalEntry): boolean {
+  const e = curr.entry_price;
+  if (prev.direction === "BUY") {
+    // Still between the SL and TP of the previous signal → same trade
+    return e > prev.stop_loss && e < prev.take_profit;
+  } else {
+    // SELL: SL is above entry, TP is below entry
+    return e < prev.stop_loss && e > prev.take_profit;
+  }
+}
+
+function groupIntoTrades(entries: JournalEntry[]): TradeGroup[] {
+  // Process oldest → newest so each new entry can be compared to its predecessor
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.signal_timestamp).getTime() - new Date(b.signal_timestamp).getTime()
+  );
+
+  const groups: TradeGroup[] = [];
+
+  for (const entry of sorted) {
+    // Find the most recent open group for this symbol+direction
+    const lastGroup = [...groups].reverse().find(
+      g => g.symbol === entry.symbol && g.direction === entry.direction
+    );
+
+    if (lastGroup) {
+      const lastEntry = lastGroup.entries[lastGroup.entries.length - 1];
+      if (isSameTrade(lastEntry, entry)) {
+        lastGroup.entries.push(entry);
+        lastGroup.lastTs = entry.signal_timestamp;
+        lastGroup.avgConfidence =
+          lastGroup.entries.reduce((s, e) => s + e.confidence, 0) / lastGroup.entries.length;
+        // Grade: most recent non-PENDING wins; otherwise keep what we have
+        if (entry.grade !== "PENDING") lastGroup.grade = entry.grade;
+        continue;
+      }
+    }
+
+    groups.push({
+      groupId: entry.signal_id,
+      symbol: entry.symbol,
+      direction: entry.direction,
+      strategy: entry.strategy ?? "CTI-v1",
+      entries: [entry],
+      avgConfidence: entry.confidence,
+      grade: entry.grade,
+      firstTs: entry.signal_timestamp,
+      lastTs: entry.signal_timestamp,
+      rr: entry.rr,
+    });
+  }
+
+  return groups.reverse(); // newest first for display
+}
+
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 function fmtPrice(p: number): string {
@@ -32,28 +104,19 @@ function fmtPrice(p: number): string {
 function fmtDateGroup(ts: string): string {
   try {
     return new Date(ts).toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
+      weekday: "long", month: "long", day: "numeric", year: "numeric",
       timeZone: "America/Chicago",
     });
-  } catch {
-    return ts.slice(0, 10);
-  }
+  } catch { return ts.slice(0, 10); }
 }
 
-function fmtTime(ts: string): { et: string; ct: string } {
+function fmtTime(ts: string): string {
   try {
     const d = new Date(ts);
-    const opts: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hour12: false };
-    return {
-      et: d.toLocaleString("en-US", { ...opts, timeZone: "America/New_York" }) + " ET",
-      ct: d.toLocaleString("en-US", { ...opts, timeZone: "America/Chicago" }) + " CT",
-    };
-  } catch {
-    return { et: ts, ct: ts };
-  }
+    const et = d.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" });
+    const ct = d.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/Chicago" });
+    return `${et} ET / ${ct} CT`;
+  } catch { return ts; }
 }
 
 function dateGroupKey(ts: string): string {
@@ -62,19 +125,17 @@ function dateGroupKey(ts: string): string {
       year: "numeric", month: "2-digit", day: "2-digit",
       timeZone: "America/Chicago",
     });
-  } catch {
-    return ts.slice(0, 10);
-  }
+  } catch { return ts.slice(0, 10); }
 }
 
 // ── Grade badge ───────────────────────────────────────────────────────────────
 
 const GRADE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  TP_HIT:       { bg: "bg-green-900/40 border-green-700",  text: "text-green-400",  label: "✅ TP Hit" },
-  SL_HIT:       { bg: "bg-red-900/40 border-red-700",      text: "text-red-400",    label: "❌ SL Hit" },
-  MANUAL_CLOSE: { bg: "bg-yellow-900/40 border-yellow-700",text: "text-yellow-400", label: "⚠️ Manual" },
-  EXPIRED:      { bg: "bg-slate-800 border-slate-700",     text: "text-slate-500",  label: "⏭ Expired" },
-  PENDING:      { bg: "bg-slate-800 border-slate-700",     text: "text-slate-400",  label: "⏳ Pending" },
+  TP_HIT:       { bg: "bg-green-900/40 border-green-700",   text: "text-green-400",  label: "✅ TP Hit" },
+  SL_HIT:       { bg: "bg-red-900/40 border-red-700",       text: "text-red-400",    label: "❌ SL Hit" },
+  MANUAL_CLOSE: { bg: "bg-yellow-900/40 border-yellow-700", text: "text-yellow-400", label: "⚠️ Manual" },
+  EXPIRED:      { bg: "bg-slate-800 border-slate-700",      text: "text-slate-500",  label: "⏭ Expired" },
+  PENDING:      { bg: "bg-slate-800 border-slate-700",      text: "text-slate-400",  label: "⏳ Pending" },
 };
 
 function GradeBadge({ grade }: { grade: string }) {
@@ -86,33 +147,32 @@ function GradeBadge({ grade }: { grade: string }) {
   );
 }
 
-// ── Stats bar ─────────────────────────────────────────────────────────────────
+// ── Stats bar — counts per trade group, not per raw entry ────────────────────
 
-function StatsBar({ entries }: { entries: JournalEntry[] }) {
-  const graded = entries.filter(e => e.grade !== "PENDING" && e.grade !== "EXPIRED");
-  const tp = graded.filter(e => e.grade === "TP_HIT").length;
-  const sl = graded.filter(e => e.grade === "SL_HIT").length;
-  const manual = graded.filter(e => e.grade === "MANUAL_CLOSE").length;
+function StatsBar({ groups }: { groups: TradeGroup[] }) {
+  const graded = groups.filter(g => g.grade !== "PENDING" && g.grade !== "EXPIRED");
+  const tp = graded.filter(g => g.grade === "TP_HIT").length;
+  const sl = graded.filter(g => g.grade === "SL_HIT").length;
+  const manual = graded.filter(g => g.grade === "MANUAL_CLOSE").length;
   const winRate = graded.length > 0 ? Math.round((tp / graded.length) * 100) : null;
 
   const avgRR = (() => {
-    const valid = graded.filter(e => e.rr !== null && e.rr !== undefined);
+    const valid = graded.filter(g => g.rr != null);
     if (!valid.length) return null;
-    return (valid.reduce((s, e) => s + (e.rr ?? 0), 0) / valid.length).toFixed(1);
+    return (valid.reduce((s, g) => s + (g.rr ?? 0), 0) / valid.length).toFixed(1);
   })();
 
-  const avgConf = (() => {
-    if (!graded.length) return null;
-    return Math.round(graded.reduce((s, e) => s + e.confidence, 0) / graded.length * 100);
-  })();
+  const avgConf = graded.length > 0
+    ? Math.round(graded.reduce((s, g) => s + g.avgConfidence, 0) / graded.length * 100)
+    : null;
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       {[
-        { label: "Win Rate", value: winRate !== null ? `${winRate}%` : "—", sub: `${tp}W / ${sl}L / ${manual}M` },
-        { label: "Graded Signals", value: graded.length, sub: `${entries.length} total` },
-        { label: "Avg R:R", value: avgRR ?? "—", sub: "graded only" },
-        { label: "Avg Confidence", value: avgConf !== null ? `${avgConf}%` : "—", sub: "graded only" },
+        { label: "Win Rate",        value: winRate !== null ? `${winRate}%` : "—", sub: `${tp}W / ${sl}L / ${manual}M` },
+        { label: "Graded Trades",   value: graded.length,                          sub: `${groups.length} total` },
+        { label: "Avg R:R",         value: avgRR ?? "—",                           sub: "graded only" },
+        { label: "Avg Confidence",  value: avgConf !== null ? `${avgConf}%` : "—", sub: "graded only" },
       ].map(({ label, value, sub }) => (
         <div key={label} className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-3">
           <div className="text-slate-500 text-xs">{label}</div>
@@ -124,74 +184,94 @@ function StatsBar({ entries }: { entries: JournalEntry[] }) {
   );
 }
 
-// ── Signal card ───────────────────────────────────────────────────────────────
+// ── Grade buttons ─────────────────────────────────────────────────────────────
 
 const GRADE_BUTTONS: { grade: JournalEntry["grade"]; label: string; style: string }[] = [
-  { grade: "TP_HIT",       label: "✅ TP",      style: "border-green-700 text-green-400 hover:bg-green-900/30" },
-  { grade: "SL_HIT",       label: "❌ SL",      style: "border-red-700 text-red-400 hover:bg-red-900/30" },
-  { grade: "MANUAL_CLOSE", label: "⚠️ Manual",  style: "border-yellow-700 text-yellow-400 hover:bg-yellow-900/30" },
-  { grade: "EXPIRED",      label: "⏭ Expired",  style: "border-slate-600 text-slate-500 hover:bg-slate-800" },
+  { grade: "TP_HIT",       label: "✅ TP",     style: "border-green-700 text-green-400 hover:bg-green-900/30" },
+  { grade: "SL_HIT",       label: "❌ SL",     style: "border-red-700 text-red-400 hover:bg-red-900/30" },
+  { grade: "MANUAL_CLOSE", label: "⚠️ Manual", style: "border-yellow-700 text-yellow-400 hover:bg-yellow-900/30" },
+  { grade: "EXPIRED",      label: "⏭ Expired", style: "border-slate-600 text-slate-500 hover:bg-slate-800" },
 ];
 
-function SignalCard({
-  entry,
+// ── Trade group card ──────────────────────────────────────────────────────────
+
+function TradeGroupCard({
+  group,
+  expanded,
+  onToggle,
   onGrade,
 }: {
-  entry: JournalEntry;
-  onGrade: (signalId: string, grade: JournalEntry["grade"]) => Promise<void>;
+  group: TradeGroup;
+  expanded: boolean;
+  onToggle: () => void;
+  onGrade: (group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const dirColor = entry.direction === "BUY" ? "text-green-400" : "text-red-400";
-  const dirBg = entry.direction === "BUY" ? "border-green-800" : "border-red-800";
-  const t = fmtTime(entry.signal_timestamp);
+  // Default master = most recent trigger
+  const [masterSignalId, setMasterSignalId] = useState<string>(
+    group.entries[group.entries.length - 1].signal_id
+  );
+  const dirColor = group.direction === "BUY" ? "text-green-400" : "text-red-400";
+  const dirBg   = group.direction === "BUY" ? "border-green-800" : "border-red-800";
+  const first   = group.entries[0];
+  const multi   = group.entries.length > 1;
 
   async function handleGrade(grade: JournalEntry["grade"]) {
     setBusy(grade);
-    try {
-      await onGrade(entry.signal_id, grade);
-    } finally {
-      setBusy(null);
-    }
+    try { await onGrade(group, grade, masterSignalId); }
+    finally { setBusy(null); }
   }
 
   return (
-    <div className={`bg-slate-950 border rounded-lg p-3 space-y-2 ${dirBg}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <span className="font-bold text-white">{entry.symbol}</span>
-          <span className={`ml-2 text-xs font-bold uppercase ${dirColor}`}>{entry.direction}</span>
+    <div className={`bg-slate-950 border rounded-lg overflow-hidden ${dirBg}`}>
+      {/* ── Header row — click to expand ── */}
+      <button
+        onClick={onToggle}
+        className="w-full text-left px-3 pt-3 pb-2 flex items-start justify-between gap-2 hover:bg-slate-900/50 transition-colors"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-white">{group.symbol}</span>
+            <span className={`text-xs font-bold uppercase ${dirColor}`}>{group.direction}</span>
+            {multi && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                ×{group.entries.length} triggers
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">{group.strategy ?? "CTI-v1"}</div>
         </div>
-        <GradeBadge grade={entry.grade} />
-      </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <GradeBadge grade={group.grade} />
+          <span className="text-slate-500 text-xs">{expanded ? "▲" : "▼"}</span>
+        </div>
+      </button>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-        <div className="text-slate-400">Strategy</div>
-        <div className="text-white text-right">{entry.strategy ?? "CTI-v1"}</div>
-        <div className="text-slate-400">Confidence</div>
-        <div className="text-white text-right">{Math.round(entry.confidence * 100)}%</div>
+      {/* ── Summary data ── */}
+      <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+        <div className="text-slate-400">Avg Confidence</div>
+        <div className="text-white text-right">{Math.round(group.avgConfidence * 100)}%</div>
         <div className="text-slate-400">Entry</div>
-        <div className="text-white text-right">{fmtPrice(entry.entry_price)}</div>
+        <div className="text-white text-right">{fmtPrice(first.entry_price)}</div>
         <div className="text-slate-400">SL / TP</div>
         <div className="text-white text-right">
-          <span className="text-red-400">{fmtPrice(entry.stop_loss)}</span>
+          <span className="text-red-400">{fmtPrice(first.stop_loss)}</span>
           {" / "}
-          <span className="text-green-400">{fmtPrice(entry.take_profit)}</span>
+          <span className="text-green-400">{fmtPrice(first.take_profit)}</span>
         </div>
         <div className="text-slate-400">R:R</div>
-        <div className="text-white text-right">{entry.rr !== null ? entry.rr?.toFixed(1) : "—"}</div>
-        <div className="text-slate-400">Lot</div>
-        <div className="text-white text-right">{entry.lot_size}</div>
+        <div className="text-white text-right">{group.rr != null ? group.rr.toFixed(1) : "—"}</div>
       </div>
 
-      {/* Grade buttons — always shown so any grade can be changed */}
-      <div className="grid grid-cols-2 gap-1 border-t border-slate-800 pt-2">
+      {/* ── Grade buttons ── */}
+      <div className="px-3 pb-3 grid grid-cols-2 gap-1 border-t border-slate-800 pt-2">
         {GRADE_BUTTONS.map(({ grade, label, style }) => (
           <button
             key={grade}
             onClick={() => handleGrade(grade)}
             disabled={!!busy}
             className={`text-xs px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${style} ${
-              entry.grade === grade ? "opacity-100 font-bold ring-1 ring-current" : "opacity-50"
+              group.grade === grade ? "opacity-100 font-bold ring-1 ring-current" : "opacity-50"
             }`}
           >
             {busy === grade ? "…" : label}
@@ -199,14 +279,59 @@ function SignalCard({
         ))}
       </div>
 
-      <div className="text-xs text-slate-500 border-t border-slate-800 pt-1.5 space-y-0.5">
-        <div>{t.et}</div>
-        <div>{t.ct}</div>
+      {/* ── Timestamp ── */}
+      <div className="px-3 pb-2 text-xs text-slate-500 border-t border-slate-800 pt-1.5">
+        {multi
+          ? <>{fmtTime(group.firstTs)} <span className="text-slate-600">→ {fmtTime(group.lastTs)}</span></>
+          : fmtTime(group.firstTs)
+        }
       </div>
 
-      {entry.notes && (
-        <div className="text-xs text-slate-400 italic border-t border-slate-800 pt-1.5">
-          {entry.notes}
+      {/* ── Drill-down: individual triggers ── */}
+      {expanded && (
+        <div className="border-t border-slate-800 bg-slate-900/50">
+          <div className="px-3 py-2 text-xs text-slate-500 font-semibold uppercase tracking-wider">
+            Individual Triggers
+            {multi && <span className="ml-1 font-normal normal-case text-slate-600">— select master to grade</span>}
+          </div>
+          {group.entries.map((e, i) => {
+            const isMaster = e.signal_id === masterSignalId;
+            return (
+              <div
+                key={e.signal_id}
+                className={`px-3 py-2 border-t border-slate-800/60 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs transition-colors ${
+                  isMaster ? "bg-slate-800/40" : ""
+                }`}
+              >
+                <div className="col-span-2 flex items-center justify-between mb-0.5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`master-${group.groupId}`}
+                      checked={isMaster}
+                      onChange={() => setMasterSignalId(e.signal_id)}
+                      className="accent-blue-500"
+                    />
+                    <span className={isMaster ? "text-slate-200" : "text-slate-400"}>
+                      #{i + 1} — {fmtTime(e.signal_timestamp)}
+                    </span>
+                    {isMaster && <span className="text-blue-400 text-[10px] font-semibold uppercase">master</span>}
+                  </label>
+                  <GradeBadge grade={e.grade} />
+                </div>
+                <div className="text-slate-500">Confidence</div>
+                <div className="text-white text-right">{Math.round(e.confidence * 100)}%</div>
+                <div className="text-slate-500">Entry</div>
+                <div className="text-white text-right">{fmtPrice(e.entry_price)}</div>
+                <div className="text-slate-500">SL / TP</div>
+                <div className="text-white text-right">
+                  <span className="text-red-400">{fmtPrice(e.stop_loss)}</span>
+                  {" / "}
+                  <span className="text-green-400">{fmtPrice(e.take_profit)}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -238,7 +363,9 @@ function FilterBar({
   return (
     <div className="flex flex-wrap gap-2 mb-4">
       {filters.map(({ value, label }) => {
-        const count = value === "ALL" ? Object.values(counts).reduce((s, n) => s + n, 0) : (counts[value] ?? 0);
+        const count = value === "ALL"
+          ? Object.values(counts).reduce((s, n) => s + n, 0)
+          : (counts[value] ?? 0);
         const isActive = active === value;
         return (
           <button
@@ -261,28 +388,37 @@ function FilterBar({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function JournalPage() {
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<GradeFilter>("ALL");
+  const [entries, setEntries]   = useState<JournalEntry[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+  const [filter, setFilter]     = useState<GradeFilter>("ALL");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  async function handleGrade(signalId: string, grade: JournalEntry["grade"]) {
-    // Optimistic update
-    setEntries(prev =>
-      prev.map(e => e.signal_id === signalId ? { ...e, grade } : e)
-    );
+    // ── Grade only the master signal in a group ──────────────────────────────
+  async function handleGradeGroup(group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) {
+    // Optimistic: update only the master entry
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade } : e));
     const res = await fetch("/api/journal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signal_id: signalId, grade }),
+      body: JSON.stringify({ signal_id: masterSignalId, grade }),
     });
     if (!res.ok) {
-      // Revert on failure by reloading
+      // Revert on failure
       const fresh = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
       if (fresh.ok) setEntries(await fresh.json());
     }
   }
 
+  function toggleExpand(groupId: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(groupId) ? next.delete(groupId) : next.add(groupId);
+      return next;
+    });
+  }
+
+  // ── Data loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
@@ -302,33 +438,36 @@ export default function JournalPage() {
     return () => clearInterval(id);
   }, []);
 
-  const filtered = useMemo(
-    () => (filter === "ALL" ? entries : entries.filter(e => e.grade === filter)),
-    [entries, filter]
+  // ── Compute trade groups from raw entries ────────────────────────────────
+  const allGroups = useMemo(() => groupIntoTrades(entries), [entries]);
+
+  const filteredGroups = useMemo(
+    () => filter === "ALL" ? allGroups : allGroups.filter(g => g.grade === filter),
+    [allGroups, filter]
   );
 
-  const counts = useMemo(() => {
+  const gradeCounts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const e of entries) c[e.grade] = (c[e.grade] ?? 0) + 1;
+    for (const g of allGroups) c[g.grade] = (c[g.grade] ?? 0) + 1;
     return c;
-  }, [entries]);
+  }, [allGroups]);
 
-  // Group by CT day
-  const groups = useMemo(() => {
-    const map = new Map<string, { label: string; entries: JournalEntry[] }>();
-    for (const e of filtered) {
-      const key = dateGroupKey(e.signal_timestamp);
-      if (!map.has(key)) {
-        map.set(key, { label: fmtDateGroup(e.signal_timestamp), entries: [] });
-      }
-      map.get(key)!.entries.push(e);
+  // ── Group by CT day using the first signal's timestamp ───────────────────
+  const dayGroups = useMemo(() => {
+    const map = new Map<string, { label: string; groups: TradeGroup[] }>();
+    for (const g of filteredGroups) {
+      const key = dateGroupKey(g.firstTs);
+      if (!map.has(key)) map.set(key, { label: fmtDateGroup(g.firstTs), groups: [] });
+      map.get(key)!.groups.push(g);
     }
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filtered]);
+  }, [filteredGroups]);
+
+  const totalSignals = entries.length;
+  const totalTrades  = allGroups.length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      {/* Header */}
       <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
@@ -337,7 +476,9 @@ export default function JournalPage() {
           <span className="text-slate-700">|</span>
           <span className="text-white font-semibold text-sm">Signal Journal</span>
         </div>
-        <span className="text-xs text-slate-600">{entries.length} signals total (never purged)</span>
+        <span className="text-xs text-slate-600">
+          {totalTrades} trades · {totalSignals} triggers (never purged)
+        </span>
       </div>
 
       <main className="px-4 py-6 max-w-5xl mx-auto">
@@ -351,23 +492,29 @@ export default function JournalPage() {
         )}
         {!loading && !error && (
           <>
-            <StatsBar entries={entries} />
-            <FilterBar active={filter} onChange={setFilter} counts={counts} />
+            <StatsBar groups={allGroups} />
+            <FilterBar active={filter} onChange={setFilter} counts={gradeCounts} />
 
-            {groups.length === 0 ? (
+            {dayGroups.length === 0 ? (
               <div className="text-slate-500 text-sm text-center py-20">
-                {entries.length === 0 ? "No signals recorded yet." : "No signals match this filter."}
+                {entries.length === 0 ? "No signals recorded yet." : "No trades match this filter."}
               </div>
             ) : (
               <div className="space-y-6">
-                {groups.map(([key, { label, entries: dayEntries }]) => (
+                {dayGroups.map(([key, { label, groups }]) => (
                   <section key={key}>
                     <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
                       {label}
                     </h2>
                     <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                      {dayEntries.map(e => (
-                        <SignalCard key={e.signal_id} entry={e} onGrade={handleGrade} />
+                      {groups.map(g => (
+                        <TradeGroupCard
+                          key={g.groupId}
+                          group={g}
+                          expanded={expanded.has(g.groupId)}
+                          onToggle={() => toggleExpand(g.groupId)}
+                          onGrade={handleGradeGroup}
+                        />
                       ))}
                     </div>
                   </section>
