@@ -77,6 +77,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             state = get_runtime_state()
             self._send_json({
                 "mode": config.TRADEGUMI_MODE,
+                "challenge_type": config.CTI_CHALLENGE_TYPE,
                 "program": config.CTI_PROGRAM,
                 "phase": config.CTI_PHASE,
                 "daily_loss_pct": config.CTI_DAILY_LOSS_PCT,
@@ -84,6 +85,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 "running": state.get("running", False),
                 "loop_count": state.get("loop_count", 0),
                 "last_signal_time": state.get("last_signal_time"),
+                "tiers": config.CTI_CHALLENGE_TIERS if config.CTI_CHALLENGE_TYPE != "instant" else config.CTI_INSTANT_TIERS,
             })
             return
 
@@ -203,6 +205,19 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             from tradegumi.callback import send_mode_change_callback
             send_mode_change_callback(mode, previous)
             self._send_json({"mode": config.TRADEGUMI_MODE})
+
+        elif self.path == "/api/config/challenge_type":
+            challenge_type = body.get("challenge_type", "").lower()
+            if challenge_type not in ("1-step", "2-step", "instant"):
+                self._send_json({"error": "invalid challenge_type. Use: 1-step, 2-step, or instant"}, 400)
+                return
+            config.CTI_CHALLENGE_TYPE = challenge_type
+            _update_env("CTI_CHALLENGE_TYPE", challenge_type)
+            log.info("API: Challenge type changed to %s", challenge_type)
+            self._send_json({
+                "challenge_type": config.CTI_CHALLENGE_TYPE,
+                "phase": config.CTI_PHASE,
+            })
 
         elif self.path == "/api/config/program":
             program = body.get("program", "").lower()

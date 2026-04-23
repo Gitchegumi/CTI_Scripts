@@ -319,9 +319,12 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
                 "session_pnl": session_pnl,
                 "session_pnl_pct": session_pnl_pct,
                 # CTI info
+                "cti_challenge_type": cti_tier["challenge_type"],
                 "cti_program": program,
                 "cti_phase": phase,
                 "cti_phase_label": phase_label,
+                "cti_tier_dollars": cti_tier["tier_dollars"],
+                "cti_tier_name": cti_tier["tier_name"],
                 "active_target_pct": active_target_pct,
                 "has_profit_target": True,
                 "profit_target_dollars": profit_target_dollars,
