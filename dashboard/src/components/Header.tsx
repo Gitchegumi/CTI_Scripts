@@ -46,7 +46,7 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
         <img
           src="/tradegumi-logo.svg"
           alt="TradeGumi"
-          className="h-8 w-8 rounded"
+          className="h-10 w-10 rounded"
         />
         <span className="text-lg font-bold text-white tracking-wide">TradeGumi</span>
         <span className={`px-2 py-0.5 text-xs font-medium rounded ${modeColors[mode] ?? "bg-slate-600 text-slate-200"}`}>

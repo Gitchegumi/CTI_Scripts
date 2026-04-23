@@ -14,18 +14,18 @@ NY_TZ = timezone("America/New_York")
 # Indexed by weekday (0=Mon … 4=Fri), each entry is a list of (start, end) tuples
 
 FOREX_HOURS = {
-    0: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Monday
-    1: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Tuesday
-    2: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Wednesday
-    3: [(time(0, 0), time(16, 59)), (time(17, 5), time(23, 59))],  # Thursday
+    0: [(time(0, 0), time(23, 59, 59))],  # Monday
+    1: [(time(0, 0), time(23, 59, 59))],  # Tuesday
+    2: [(time(0, 0), time(23, 59, 59))],  # Wednesday
+    3: [(time(0, 0), time(23, 59, 59))],  # Thursday
     4: [(time(0, 0), time(16, 59))],  # Friday (closes for week at 16:59)
 }
 
 INDEX_HOURS = {
-    0: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
-    1: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
-    2: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
-    3: [(time(0, 0), time(16, 30)), (time(18, 30), time(23, 59))],
+    0: [(time(0, 0), time(23, 59, 59))],
+    1: [(time(0, 0), time(23, 59, 59))],
+    2: [(time(0, 0), time(23, 59, 59))],
+    3: [(time(0, 0), time(23, 59, 59))],
     4: [(time(0, 0), time(16, 30))],  # Friday
 }
 
@@ -127,8 +127,12 @@ def is_swap_blackout(symbol: str, when: Optional[datetime] = None) -> bool:
 
 
 def is_market_open(symbol: str, when: Optional[datetime] = None) -> bool:
-    """Combined check: within session AND not in swap blackout."""
-    return is_trading_open(symbol, when) and not is_swap_blackout(symbol, when)
+    """Combined check: within session AND not in swap blackout.
+
+    Swap blackout is ignored for early development — markets stay open
+    during rollover. Will add swap-aware scheduling later.
+    """
+    return is_trading_open(symbol, when)
 
 
 def is_trading_day(symbol: str, when: Optional[datetime] = None) -> bool:
