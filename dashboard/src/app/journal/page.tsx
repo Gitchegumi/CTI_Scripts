@@ -284,6 +284,22 @@ function TradeGroupCard({
         ))}
       </div>
 
+      {/* ── Notes ── */}
+      <div className="px-3 pb-2 border-t border-slate-800 pt-1.5">
+        {group.entries.some(e => e.notes) ? (
+          <div className="text-xs text-slate-400 space-y-1">
+            {group.entries.filter(e => e.notes).map((e, i) => (
+              <div key={i} className="bg-slate-800/40 px-2 py-1 rounded">
+                <span className="text-slate-500 text-[10px]">#{i + 1}:</span>{" "}
+                <span className="text-slate-300">{e.notes}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-slate-600 italic">No notes</div>
+        )}
+      </div>
+
       {/* ── Timestamp ── */}
       <div className="px-3 pb-2 text-xs text-slate-500 border-t border-slate-800 pt-1.5">
         {multi
