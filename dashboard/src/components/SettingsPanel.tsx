@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ApiStatus, setMode, setProgram, setPhase, triggerRescan } from "@/lib/api";
+import { ApiStatus, setMode, setChallengeType, setPhase, triggerRescan } from "@/lib/api";
 
 interface SettingsPanelProps {
   status: ApiStatus | null;
@@ -13,8 +13,9 @@ const MODES: { value: ApiStatus["mode"]; label: string }[] = [
   { value: "live", label: "Live ⚠️" },
 ];
 
-const PROGRAMS: { value: ApiStatus["program"]; label: string }[] = [
-  { value: "challenge", label: "Challenge" },
+const CHALLENGE_TYPES: { value: ApiStatus["challenge_type"]; label: string }[] = [
+  { value: "1-step", label: "1-Step" },
+  { value: "2-step", label: "2-Step" },
   { value: "instant", label: "Instant" },
 ];
 
@@ -32,8 +33,8 @@ function modeColor(mode: ApiStatus["mode"]): string {
   }
 }
 
-function programColor(program: ApiStatus["program"]): string {
-  return program === "instant"
+function challengeTypeColor(challenge_type: ApiStatus["challenge_type"]): string {
+  return challenge_type === "instant"
     ? "bg-emerald-600 text-emerald-100 ring-emerald-500"
     : "bg-slate-600 text-slate-100 ring-slate-500";
 }
@@ -51,17 +52,17 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
   const [rescanning, setRescanning] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [pendingMode, setPendingMode] = useState<ApiStatus["mode"] | null>(null);
-  const [pendingProgram, setPendingProgram] = useState<ApiStatus["program"] | null>(null);
+  const [pendingChallengeType, setPendingChallengeType] = useState<ApiStatus["challenge_type"] | null>(null);
   const [pendingPhase, setPendingPhase] = useState<ApiStatus["phase"] | null>(null);
 
   const mode = status?.mode ?? pendingMode ?? "alert_only";
-  const program = status?.program ?? pendingProgram ?? "challenge";
+  const challenge_type = status?.challenge_type ?? pendingChallengeType ?? "1-step";
   const phase = status?.phase ?? pendingPhase ?? 1;
 
   useEffect(() => {
     if (status) {
       setPendingMode(status.mode);
-      setPendingProgram(status.program);
+      setPendingChallengeType(status.challenge_type);
       setPendingPhase(status.phase);
     }
   }, [status]);
@@ -86,12 +87,12 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
     }
   }
 
-  async function handleProgram(p: ApiStatus["program"]) {
+  async function handleChallengeType(ct: ApiStatus["challenge_type"]) {
     try {
-      await setProgram(p);
-      setPendingProgram(p);
+      await setChallengeType(ct);
+      setPendingChallengeType(ct);
     } catch (e) {
-      console.error("setProgram failed", e);
+      console.error("setChallengeType failed", e);
     }
   }
 
@@ -160,20 +161,20 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
             </div>
           </div>
 
-          {/* Program */}
+          {/* Challenge Type */}
           <div className="space-y-1.5">
             <label className="text-xs text-slate-500 uppercase tracking-wide font-medium">
-              Program
+              Challenge Type
             </label>
             <div className="flex gap-2">
-              {PROGRAMS.map(({ value, label }) => (
+              {CHALLENGE_TYPES.map(({ value, label }) => (
                 <button
                   key={value}
-                  onClick={() => authed ? handleProgram(value) : undefined}
+                  onClick={() => authed ? handleChallengeType(value) : undefined}
                   disabled={!authed}
                   className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-full border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed
-                    ${program === value
-                      ? `${programColor(value)} ring-2 ring-offset-1 ring-offset-slate-900`
+                    ${challenge_type === value
+                      ? `${challengeTypeColor(value)} ring-2 ring-offset-1 ring-offset-slate-900`
                       : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
                     }`}
                 >
@@ -183,31 +184,44 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
             </div>
           </div>
 
-          {/* Phase — only shown for challenge program */}
-          <div
-            className="space-y-1.5 transition-all duration-300 ease-in-out"
-            style={{ opacity: program === "challenge" ? 1 : 0, height: program === "challenge" ? "auto" : 0, overflow: "hidden" }}
-          >
-            <label className="text-xs text-slate-500 uppercase tracking-wide font-medium">
-              Phase
-            </label>
-            <div className="flex gap-2">
-              {PHASES.map(({ value, label }) => (
-                <button
-                  key={value}
-                  onClick={() => authed ? handlePhase(value) : undefined}
-                  disabled={!authed}
-                  className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-full border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed
-                    ${phase === value
-                      ? `${phaseColor(value)} ring-2 ring-offset-1 ring-offset-slate-900`
-                      : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
-                    }`}
-                >
-                  {label}
-                </button>
-              ))}
+          {/* Phase — only shown for 1-step and 2-step challenge types */}
+          {(challenge_type === "1-step" || challenge_type === "2-step") && (
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-500 uppercase tracking-wide font-medium">
+                Phase
+              </label>
+              <div className="flex gap-2">
+                {PHASES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => authed ? handlePhase(value) : undefined}
+                    disabled={!authed}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-full border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed
+                      ${phase === value
+                        ? `${phaseColor(value)} ring-2 ring-offset-1 ring-offset-slate-900`
+                        : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
+                      }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Funded badge for instant challenge type */}
+          {challenge_type === "instant" && (
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-500 uppercase tracking-wide font-medium">
+                Status
+              </label>
+              <div className="flex gap-2">
+                <span className="flex-1 px-3 py-1.5 text-xs font-medium rounded-full bg-emerald-600 text-emerald-100 ring-2 ring-emerald-500 ring-offset-1 ring-offset-slate-900">
+                  Funded
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Re-scan */}
           <div className="pt-1">

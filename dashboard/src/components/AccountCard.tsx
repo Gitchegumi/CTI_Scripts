@@ -74,8 +74,8 @@ export default function AccountCard({ account }: AccountCardProps) {
             <div className="text-lg font-semibold text-white">${fmt(account.balance)}</div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 uppercase tracking-wide">NAV</div>
-            <div className="text-lg font-semibold text-white">${fmt(account.nav)}</div>
+            <div className="text-xs text-slate-500 uppercase tracking-wide">Funding Tier</div>
+            <div className="text-lg font-semibold text-white">{account.cti_tier_name}</div>
           </div>
           <div>
             <div className="text-xs text-slate-500 uppercase tracking-wide">Session PnL</div>
