@@ -53,6 +53,7 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
         <th className="text-right py-2 px-3 font-medium hidden sm:table-cell">Bid</th>
         <th className="text-right py-2 px-3 font-medium hidden sm:table-cell">Ask</th>
         <th className="text-center py-2 px-3 font-medium">State</th>
+        <th className="text-right py-2 px-3 font-medium hidden lg:table-cell">LR 1h</th>
         <th className="text-right py-2 px-3 font-medium hidden lg:table-cell">LR 15m</th>
         <th className="text-right py-2 px-3 font-medium hidden lg:table-cell">LR 5m</th>
       </tr>
@@ -90,6 +91,9 @@ export default function WatchlistSection({ data, loopState }: WatchlistSectionPr
         </td>
         <td className={`py-2 px-3 text-center text-sm font-medium ${color}`}>
           {arrow} <span className="hidden xs:inline">{trendLabel}</span>
+        </td>
+        <td className={`py-2 px-3 text-right font-mono text-xs hidden lg:table-cell ${(state?.lr_1h ?? 0) > 0 ? "text-green-400" : (state?.lr_1h ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
+          {state ? (state.lr_1h > 0 ? "+" : "") + state.lr_1h.toFixed(4) + "%" : "—"}
         </td>
         <td className={`py-2 px-3 text-right font-mono text-xs hidden lg:table-cell ${(state?.lr_15 ?? 0) > 0 ? "text-green-400" : (state?.lr_15 ?? 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
           {state ? (state.lr_15 > 0 ? "+" : "") + state.lr_15.toFixed(4) + "%" : "—"}
