@@ -17,10 +17,10 @@ const PHASE_LABELS: Record<number, string> = {
 export default function Footer({ data, apiStatus }: FooterProps) {
   const { account } = data;
 
-  const program = apiStatus?.program
-    ? apiStatus.program.charAt(0).toUpperCase() + apiStatus.program.slice(1)
-    : account.cti_program
-      ? account.cti_program.charAt(0).toUpperCase() + account.cti_program.slice(1)
+  const challenge_type = apiStatus?.challenge_type
+    ? apiStatus.challenge_type.charAt(0).toUpperCase() + apiStatus.challenge_type.slice(1)
+    : account.cti_challenge_type
+      ? account.cti_challenge_type.charAt(0).toUpperCase() + account.cti_challenge_type.slice(1)
       : "—";
 
   const phase = apiStatus
@@ -31,8 +31,8 @@ export default function Footer({ data, apiStatus }: FooterProps) {
     <footer className="border-t border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
       <div className="flex flex-wrap gap-4">
         <span>
-          <span className="text-slate-400">Program:</span>{" "}
-          <span className="text-slate-300">{program}</span>
+          <span className="text-slate-400">Challenge Type:</span>{" "}
+          <span className="text-slate-300">{challenge_type}</span>
         </span>
         <span>
           <span className="text-slate-400">Phase:</span>{" "}
