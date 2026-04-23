@@ -16,6 +16,9 @@ export interface AccountData {
   cti_program: string;
   cti_phase: number;
   cti_phase_label: string;
+  cti_challenge_type: string;
+  cti_tier_name: string;
+  cti_tier_dollars: number;
   active_target_pct: number;
   has_profit_target: boolean;
   profit_target_dollars: number;
