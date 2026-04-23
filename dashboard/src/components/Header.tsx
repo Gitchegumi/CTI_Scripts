@@ -43,6 +43,11 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
   return (
     <header className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-900">
       <div className="flex items-center gap-3">
+        <img
+          src="/tradegumi-logo.png"
+          alt="TradeGumi"
+          className="h-8 w-8 rounded"
+        />
         <span className="text-lg font-bold text-white tracking-wide">TradeGumi</span>
         <span className={`px-2 py-0.5 text-xs font-medium rounded ${modeColors[mode] ?? "bg-slate-600 text-slate-200"}`}>
           {mode}
