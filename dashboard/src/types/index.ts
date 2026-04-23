@@ -54,6 +54,7 @@ export interface SymbolState {
   symbol: string;
   state: string;
   trend: string;
+  lr_1h: number;
   lr_15: number;
   lr_5: number;
   score: number;

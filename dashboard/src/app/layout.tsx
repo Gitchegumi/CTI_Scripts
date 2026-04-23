@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TradeGumi",
   description: "CTI signal engine dashboard — live watchlist, signals, and trade analytics",
+  icons: {
+    icon: "/tradegumi-logo.svg",
+    shortcut: "/tradegumi-logo.svg",
+    apple: "/tradegumi-logo.svg",
+  },
 };
 
 export default function RootLayout({
