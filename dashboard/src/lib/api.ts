@@ -12,8 +12,18 @@ export interface ApiStatus {
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  // Include auth cookie for protected endpoints
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (typeof document !== "undefined") {
+    const token = document.cookie
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("tg_journal_auth="));
+    if (token) headers["X-Auth-Token"] = token.split("=")[1];
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
