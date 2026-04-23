@@ -20,6 +20,7 @@ numpy = ">=2.2.6"
 backtrader = "^1.9.78.123"
 matplotlib = "^3.10.0"
 pytz = ">=2024.1"
+discord-py = "^2.4"
 
 
 [tool.poetry.group.dev.dependencies]
