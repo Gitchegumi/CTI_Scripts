@@ -200,13 +200,19 @@ function TradeGroupCard({
   expanded,
   onToggle,
   onGrade,
+  onNotes,
 }: {
   group: TradeGroup;
   expanded: boolean;
   onToggle: () => void;
   onGrade: (group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) => Promise<void>;
+  onNotes: (group: TradeGroup, notes: string, masterSignalId: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteText, setNoteText] = useState(
+    group.entries.find(e => e.notes)?.notes ?? ""
+  );
   // Default master = most recent trigger
   const [masterSignalId, setMasterSignalId] = useState<string>(
     group.entries[group.entries.length - 1].signal_id
@@ -286,18 +292,26 @@ function TradeGroupCard({
 
       {/* ── Notes ── */}
       <div className="px-3 pb-2 border-t border-slate-800 pt-1.5">
-        {group.entries.some(e => e.notes) ? (
-          <div className="text-xs text-slate-400 space-y-1">
-            {group.entries.filter(e => e.notes).map((e, i) => (
-              <div key={i} className="bg-slate-800/40 px-2 py-1 rounded">
-                <span className="text-slate-500 text-[10px]">#{i + 1}:</span>{" "}
-                <span className="text-slate-300">{e.notes}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-slate-600 italic">No notes</div>
-        )}
+        <div className="text-xs text-slate-500 mb-1">Notes</div>
+        <div className="flex items-start gap-2">
+          <textarea
+            className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 resize-none"
+            rows={2}
+            placeholder="Add notes..."
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            onBlur={() => {
+              const existing = group.entries.find(e => e.notes)?.notes ?? "";
+              if (noteText !== existing) {
+                onNotes(group, noteText, masterSignalId);
+              }
+            }}
+            disabled={noteBusy}
+          />
+          {noteBusy && (
+            <span className="text-slate-500 text-[10px]">…</span>
+          )}
+        </div>
       </div>
 
       {/* ── Timestamp ── */}
@@ -415,7 +429,21 @@ export default function JournalPage() {
   const [filter, setFilter]     = useState<GradeFilter>("ALL");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-    // ── Grade only the master signal in a group ──────────────────────────────
+    // ── Notes update ─────────────────────────────────────────────────────────
+  async function handleNotesGroup(group: TradeGroup, notes: string, masterSignalId: string) {
+    // Optimistic: update the master entry locally
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, notes } : e));
+    const res = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: masterSignalId, notes }),
+    });
+    if (!res.ok) {
+      // Revert on failure
+      const fresh = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
+      if (fresh.ok) setEntries(await fresh.json());
+    }
+  }
   async function handleGradeGroup(group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) {
     // Optimistic: update only the master entry
     setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade } : e));
@@ -535,6 +563,7 @@ export default function JournalPage() {
                           expanded={expanded.has(g.groupId)}
                           onToggle={() => toggleExpand(g.groupId)}
                           onGrade={handleGradeGroup}
+                          onNotes={handleNotesGroup}
                         />
                       ))}
                     </div>
