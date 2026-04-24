@@ -292,19 +292,19 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
             session_pnl = nav - start_balance
             session_pnl_pct = (session_pnl / start_balance * 100) if start_balance else 0
 
-            # Profit target: active_target_pct * start_balance (derived from balance)
-            profit_target_dollars = active_target_pct * start_balance
+            # Profit target: active_target_pct of funding tier (not balance-dependent)
+            profit_target_dollars = active_target_pct * cti_tier["tier_dollars"]
             profit_target_remaining = profit_target_dollars - max(0, session_pnl)
             profit_target_remaining_pct = max(0, (1 - max(0, session_pnl) / profit_target_dollars) * 100) if profit_target_dollars else 0
 
-            # Daily loss remaining: daily_loss_pct * start_balance - today's losses
-            daily_loss_limit = daily_loss_pct * start_balance
+            # Daily loss limit: daily_loss_pct of funding tier (resets daily)
+            daily_loss_limit = daily_loss_pct * cti_tier["tier_dollars"]
             daily_loss_used = max(0, -session_pnl)  # how much lost today
             daily_loss_remaining = daily_loss_limit - daily_loss_used
             daily_loss_remaining_pct = max(0, (1 - daily_loss_used / daily_loss_limit) * 100) if daily_loss_limit else 0
 
-            # Max drawdown remaining: max_dd_pct * start_balance - total drawdown from start
-            max_dd_dollars = max_dd_pct * start_balance
+            # Max drawdown limit: max_dd_pct of funding tier
+            max_dd_dollars = max_dd_pct * cti_tier["tier_dollars"]
             drawdown_from_start = start_balance - nav  # how far NAV is below starting balance
             dd_remaining = max_dd_dollars - max(0, drawdown_from_start)
             dd_remaining_pct = max(0, (1 - max(0, drawdown_from_start) / max_dd_dollars) * 100) if max_dd_dollars else 0
