@@ -214,6 +214,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             config.CTI_CHALLENGE_TYPE = challenge_type
             _update_env("CTI_CHALLENGE_TYPE", challenge_type)
             log.info("API: Challenge type changed to %s", challenge_type)
+            # Immediately refresh account metrics in watchlist.json
+            client = get_runtime_state().get("client")
+            if client:
+                from tradegumi.pre_session_scanner import refresh_account_metrics
+                metrics = refresh_account_metrics(client)
+                if metrics:
+                    log.info("API: Account metrics refreshed immediately")
             self._send_json({
                 "challenge_type": config.CTI_CHALLENGE_TYPE,
                 "phase": config.CTI_PHASE,
@@ -238,6 +245,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             config.CTI_PHASE = int(phase)
             _update_env("CTI_PHASE", str(config.CTI_PHASE))
             log.info("API: Phase changed to %d", config.CTI_PHASE)
+            # Immediately refresh account metrics in watchlist.json
+            client = get_runtime_state().get("client")
+            if client:
+                from tradegumi.pre_session_scanner import refresh_account_metrics
+                metrics = refresh_account_metrics(client)
+                if metrics:
+                    log.info("API: Account metrics refreshed immediately")
             self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
 
         elif self.path == "/api/journal/grade":
