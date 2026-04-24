@@ -173,7 +173,7 @@ def check_and_execute(
             return "flat", trend, lr_1h, lr_15, lr_5
         return f"{trend[0]}(no_sig)", trend, lr_1h, lr_15, lr_5
 
-    # ── Lot sizing (always calculate for alerts, even if blocked) ──────
+    # ── Lot / Unit sizing (always calculate for alerts, even if blocked) ──────
     try:
         balance = client.get_account_balance()
     except Exception as e:
@@ -182,12 +182,23 @@ def check_and_execute(
 
     if balance > 0:
         try:
-            signal_obj.lot_size = calc_lot_size(
-                account_balance=balance,
-                entry_price=signal_obj.entry_price,
-                stop_loss_price=signal_obj.stop_loss,
-                symbol=symbol,
-            )
+            if isinstance(client, OandaClient) and mode in ("alert_only", "demo"):
+                # Oanda: use units (not lots). 500 units = 0.005 lots
+                from tradegumi.risk import calc_position_units
+                signal_obj.lot_size = calc_position_units(
+                    account_balance=balance,
+                    entry_price=signal_obj.entry_price,
+                    stop_loss_price=signal_obj.stop_loss,
+                    symbol=symbol,
+                )
+            else:
+                # MatchTrader (live) or other: use standard lots
+                signal_obj.lot_size = calc_lot_size(
+                    account_balance=balance,
+                    entry_price=signal_obj.entry_price,
+                    stop_loss_price=signal_obj.stop_loss,
+                    symbol=symbol,
+                )
         except Exception as e:
             log.error("%s: lot sizing failed: %s", symbol, e)
 
