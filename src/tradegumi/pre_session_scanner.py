@@ -362,6 +362,112 @@ def load_watchlist() -> set[str]:
     return tier1 | tier2
 
 
+def refresh_account_metrics(client) -> dict | None:
+    """Immediately recompute and persist account metrics. Called by API after config changes."""
+    try:
+        from tradegumi.api.oanda_client import OandaClient
+        if not isinstance(client, OandaClient):
+            return None
+        
+        acct_data = client._request("GET", f"/v3/accounts/{client.account_id}/summary")
+        acct = acct_data.get("account", {})
+        balance = float(acct.get("balance", 0))
+        unrealized_pl = float(acct.get("unrealizedPL", 0))
+        realized_pl = float(acct.get("pl", 0))
+        nav = float(acct.get("NAV", 0))
+        open_trades = int(acct.get("openTradeCount", 0))
+
+        # Track session starting balance
+        state = _load_session_state()
+        now = datetime.now(CT_TZ)
+        today_str = now.strftime("%Y-%m-%d")
+        if state.get("start_date") != today_str or "start_balance" not in state:
+            state["start_date"] = today_str
+            state["start_balance"] = balance
+            _save_session_state(state)
+        start_balance = float(state.get("start_balance", balance))
+
+        # CTI metrics — all percentages, dollar amounts derived from live balance
+        cti_tier = config.get_cti_tier(balance)
+        daily_loss_pct = cti_tier["daily_loss_pct"]
+        max_dd_pct = cti_tier["max_dd_pct"]
+        active_target_pct = cti_tier["active_target_pct"]
+        program = cti_tier["program"]
+        phase = cti_tier["phase"]
+        phase_label = cti_tier["phase_label"]
+
+        session_pnl = nav - start_balance
+        session_pnl_pct = (session_pnl / start_balance * 100) if start_balance else 0
+
+        # Profit target: active_target_pct of funding tier (not balance-dependent)
+        profit_target_dollars = active_target_pct * cti_tier["tier_dollars"]
+        profit_target_remaining = profit_target_dollars - max(0, session_pnl)
+        profit_target_remaining_pct = max(0, (1 - max(0, session_pnl) / profit_target_dollars) * 100) if profit_target_dollars else 0
+
+        # Daily loss limit: daily_loss_pct of funding tier (resets daily)
+        daily_loss_limit = daily_loss_pct * cti_tier["tier_dollars"]
+        daily_loss_used = max(0, -session_pnl)  # how much lost today
+        daily_loss_remaining = daily_loss_limit - daily_loss_used
+        daily_loss_remaining_pct = max(0, (1 - daily_loss_used / daily_loss_limit) * 100) if daily_loss_limit else 0
+
+        # Max drawdown limit: max_dd_pct of funding tier
+        max_dd_dollars = max_dd_pct * cti_tier["tier_dollars"]
+        drawdown_from_start = start_balance - nav  # how far NAV is below starting balance
+        dd_remaining = max_dd_dollars - max(0, drawdown_from_start)
+        dd_remaining_pct = max(0, (1 - max(0, drawdown_from_start) / max_dd_dollars) * 100) if max_dd_dollars else 0
+
+        metrics = {
+            "balance": balance,
+            "nav": nav,
+            "unrealized_pl": unrealized_pl,
+            "realized_pl": realized_pl,
+            "open_trades": open_trades,
+            "start_balance": start_balance,
+            "session_pnl": session_pnl,
+            "session_pnl_pct": session_pnl_pct,
+            "cti_challenge_type": cti_tier["challenge_type"],
+            "cti_program": program,
+            "cti_phase": phase,
+            "cti_phase_label": phase_label,
+            "cti_tier_dollars": cti_tier["tier_dollars"],
+            "cti_tier_name": cti_tier["tier_name"],
+            "active_target_pct": active_target_pct,
+            "has_profit_target": True,
+            "profit_target_dollars": profit_target_dollars,
+            "profit_target_remaining": profit_target_remaining,
+            "profit_target_remaining_pct": profit_target_remaining_pct,
+            "daily_loss_limit": daily_loss_limit,
+            "daily_loss_remaining": daily_loss_remaining,
+            "daily_loss_remaining_pct": daily_loss_remaining_pct,
+            "max_dd_dollars": max_dd_dollars,
+            "dd_remaining": dd_remaining,
+            "dd_remaining_pct": dd_remaining_pct,
+            "daily_loss_pct": daily_loss_pct,
+            "max_dd_pct": max_dd_pct,
+        }
+
+        # Update watchlist.json account section only
+        if WATCHLIST_FILE.exists():
+            with open(WATCHLIST_FILE) as f:
+                watchlist = json.load(f)
+        else:
+            watchlist = {"timestamp": now.isoformat(), "tier1": [], "tier2": [], "below": [], "ranked": [], "detail": {}}
+        
+        watchlist["account"] = metrics
+        watchlist["timestamp"] = now.isoformat()
+        
+        WATCHLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(WATCHLIST_FILE, "w") as f:
+            json.dump(watchlist, f, indent=2, default=str)
+        
+        log.info("Account metrics refreshed: challenge=%s, phase=%s, profit_target=%.2f",
+                 metrics["cti_challenge_type"], metrics["cti_phase_label"], profit_target_dollars)
+        return metrics
+    except Exception as e:
+        log.warning("Failed to refresh account metrics: %s", e)
+        return None
+
+
 def load_watchlist_with_scores() -> dict[str, dict]:
     """Load watchlist with tier and score info for loop sorting.
 

@@ -157,6 +157,7 @@ def from_oanda_symbol(oanda_sym: str) -> str:
 
 CTI_CHALLENGE_TYPE = os.getenv("CTI_CHALLENGE_TYPE", "2-step").lower()  # "1-step", "2-step", or "instant"
 CTI_PHASE = int(os.getenv("CTI_PHASE", "1"))  # 1=Phase 1, 2=Phase 2, 3=Funded
+CTI_PROGRAM = os.getenv("CTI_PROGRAM", "challenge").lower()  # "challenge" or "instant"
 
 CTI_DAILY_LOSS_PCT = float(os.getenv("CTI_DAILY_LOSS_PCT", "0.05"))    # 5%
 CTI_MAX_DD_PCT = float(os.getenv("CTI_MAX_DD_PCT", "0.10"))             # 10%
