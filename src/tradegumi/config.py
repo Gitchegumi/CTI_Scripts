@@ -161,24 +161,43 @@ CTI_PHASE = int(os.getenv("CTI_PHASE", "1"))  # 1=Phase 1, 2=Phase 2, 3=Funded
 CTI_DAILY_LOSS_PCT = float(os.getenv("CTI_DAILY_LOSS_PCT", "0.05"))    # 5%
 CTI_MAX_DD_PCT = float(os.getenv("CTI_MAX_DD_PCT", "0.10"))             # 10%
 
+# Optional: Override auto-detected funding tier with a fixed value
+# Format: comma-separated list like "50000,100000,150000" or single value like "100000"
+CTI_FUNDING_TIER_ENV = os.getenv("CTI_FUNDING_TIER", "")
+
 # Tier lookup tables
 CTI_CHALLENGE_TIERS = [2500, 3750, 5000, 7500, 10000, 15000, 20000, 25000, 37500, 50000, 75000, 100000, 112500, 125000, 150000, 175000, 200000]
 CTI_INSTANT_TIERS  = [5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000, 1000000, 2000000]
 
 
-def get_cti_tier(balance: float) -> dict:
-    """Get CTI parameters based on account balance and configured challenge type.
-
-    Tier is auto-detected from balance. Balance comes from Oanda API.
-    Dollar amounts are calculated dynamically: e.g. daily loss = 5% of balance.
-    """
-    # Auto-detect tier from balance
+def _detect_tier_from_balance(balance: float) -> int:
+    """Auto-detect funding tier from current balance."""
     if CTI_CHALLENGE_TYPE == "instant":
         tiers = CTI_INSTANT_TIERS
     else:
         tiers = CTI_CHALLENGE_TIERS
+    return next((t for t in tiers if balance <= t), tiers[-1])
 
-    tier_dollars = next((t for t in tiers if balance <= t), tiers[-1])
+
+def get_cti_tier(balance: float) -> dict:
+    """Get CTI parameters based on account balance and configured challenge type.
+
+    Tier is auto-detected from balance by default. Can be overridden with
+    CTI_FUNDING_TIER env var for fixed funding tier regardless of balance.
+    Dollar amounts are calculated dynamically: e.g. daily loss = 5% of tier.
+    """
+    # Auto-detect tier from balance, or use configured funding tier
+    if CTI_FUNDING_TIER_ENV:
+        # Use configured funding tier (comma-separated list or single value)
+        try:
+            tier_values = [int(t.strip()) for t in CTI_FUNDING_TIER_ENV.split(",")]
+            tier_dollars = tier_values[0] if len(tier_values) == 1 else max(tier_values)
+        except ValueError:
+            # Fallback to auto-detection if parsing fails
+            tier_dollars = _detect_tier_from_balance(balance)
+    else:
+        tier_dollars = _detect_tier_from_balance(balance)
+    
     tier_name = f"${tier_dollars:,.0f}"
 
     if CTI_CHALLENGE_TYPE == "instant":
