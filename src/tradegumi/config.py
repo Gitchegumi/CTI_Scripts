@@ -198,7 +198,7 @@ def get_cti_tier(balance: float) -> dict:
     else:
         tier_dollars = _detect_tier_from_balance(balance)
     
-    tier_name = f"${tier_dollars:,}"
+    tier_name = f"${tier_dollars:,.0f}"
 
     if CTI_CHALLENGE_TYPE == "instant":
         phase_label = "Instant Funded" if CTI_PHASE == 3 else "Instant"
