@@ -137,6 +137,45 @@ def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> 
     return updated
 
 
+def _apply_notes(lookup_key: str, lookup_field: str, notes: str) -> bool:
+    """Update notes only — finds first entry where entry[lookup_field] == lookup_key,
+    updates notes, and atomically replaces the file. Must be called with _lock held.
+    """
+    if not JOURNAL_FILE.exists():
+        return False
+
+    lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    updated = False
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+            if not updated and entry.get(lookup_field) == lookup_key:
+                entry["notes"] = notes
+                stripped = json.dumps(entry)
+                updated = True
+        except json.JSONDecodeError:
+            pass
+        new_lines.append(stripped)
+
+    if updated:
+        tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        tmp.replace(JOURNAL_FILE)
+
+    return updated
+
+
+def set_notes_by_signal_id(signal_id: str, notes: str) -> bool:
+    """Set notes by signal_id (called from the dashboard UI)."""
+    with _lock:
+        return _apply_notes(signal_id, "signal_id", notes)
+
+
 def grade_signal(discord_msg_id: str, grade: str, notes: str = "") -> bool:
     """Grade by Discord message ID (called from bot button interactions)."""
     if grade not in VALID_GRADES:
