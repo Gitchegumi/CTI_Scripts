@@ -203,11 +203,18 @@ class OandaClient(ExecutionClient):
     def place_order(self, order: OrderRequest) -> str:
         """Place a market order.
 
-        Returns the trade/opened position id.
+        For alert_only / demo: order.volume is already in Oanda units (not lots).
+        For live: order.volume is in lots and gets converted to units.
         """
         oanda_inst = self._to_oanda(order.symbol)
-        # Oanda expects units (1 standard lot = 100,000 units)
-        raw_units = round(order.volume * 100_000)
+        # Oanda expects units. In alert_only/demo, volume is already units.
+        # In live mode (MatchTrader), volume is lots and would be converted
+        # here — but live mode uses MatchTrader, not Oanda.
+        if config.TRADEGUMI_MODE in ("alert_only", "demo"):
+            raw_units = round(order.volume)
+        else:
+            # Fallback: treat as lots (100k per lot)
+            raw_units = round(order.volume * 100_000)
         units = raw_units if order.side == "BUY" else -raw_units
 
         body = {
