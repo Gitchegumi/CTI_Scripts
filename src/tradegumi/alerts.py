@@ -82,7 +82,7 @@ def format_signal_message(signal: Signal) -> dict:
             {"name": "Buy Price",   "value": str(signal.entry_price), "inline": True},
             {"name": "Stop Loss",   "value": str(signal.stop_loss), "inline": True},
             {"name": "Take Profit", "value": str(signal.take_profit), "inline": True},
-            {"name": "Lot Size",    "value": f"{signal.lot_size:.2f}", "inline": True},
+            {"name": "Units",       "value": f"{signal.lot_size:,.0f}", "inline": True},
             {"name": "ATR",         "value": f"{signal.atr:.5f}", "inline": True},
             {"name": "R:R Ratio",    "value": "1:4", "inline": True},
         ]

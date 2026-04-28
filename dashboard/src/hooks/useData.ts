@@ -29,7 +29,7 @@ interface UseWatchlistReturn {
 }
 
 export function useWatchlist(marketOpen: boolean): UseWatchlistReturn {
-  const pollIntervalMs = marketOpen ? 30000 : SLOW_MS;
+  const pollIntervalMs = marketOpen ? 5000 : SLOW_MS;
   const [data, setData] = useState<WatchlistData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);

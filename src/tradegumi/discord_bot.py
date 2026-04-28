@@ -168,7 +168,7 @@ def post_signal_dm(signal, rr: Optional[float] = None) -> Optional[str]:
         f"{dir_emoji} **{signal.symbol} — {signal.direction}**",
         f"Strategy: **{strategy}** | Confidence: **{round(signal.confidence * 100)}%**",
         f"Entry: `{signal.entry_price}` | SL: `{signal.stop_loss}` | TP: `{signal.take_profit}`",
-        f"Lot: `{signal.lot_size}` | ATR: `{round(signal.atr, 5)}` | R:R: `{rr_str}`",
+        f"Units: `{signal.lot_size:,.0f}` | ATR: `{round(signal.atr, 5)}` | R:R: `{rr_str}`",
     ]
 
     future = asyncio.run_coroutine_threadsafe(

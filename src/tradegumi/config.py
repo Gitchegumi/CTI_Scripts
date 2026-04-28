@@ -139,40 +139,74 @@ def from_oanda_symbol(oanda_sym: str) -> str:
 
 
 # ── CTI Challenge Rules ────────────────────────────────────────────────────
-# All CTI accounts use the same percentages regardless of size.
-# The bot reads balance from Oanda API and calculates dollar amounts dynamically.
-# No hardcoded tier sizes — everything derives from live balance.
+# CTI_CHALLENGE_TYPE env var:
+#   1-step = 1-Step Challenge (8% profit target, single phase)
+#   2-step = 2-Step Challenge (Phase 1: 10%, Phase 2: 5%)
+#   instant = Instant Funding (10% profit target)
 #
 # CTI_PHASE env var:
-#   1 = Phase 1 (10% profit target)
-#   2 = Phase 2 (5% profit target)
-#   3 = Funded (5% first payout target, then scaling)
+#   1 = Phase 1
+#   2 = Phase 2
+#   3 = Funded (only for 2-step; instant uses phase 3 for "Funded")
 #
-# CTI_PROGRAM env var:
-#   challenge = 2-Step Challenge (default)
-#   instant = Instant Funding
+# Tier auto-detection (from balance):
+#   Challenge 1-Step / 2-Step tiers: $2,500 | $3,750 | $5,000 | $7,500 | $10,000 | $15,000 | $20,000 | $25,000 | $37,500 | $50,000 | $75,000 | $100,000 | $112,500 | $125,000 | $150,000 | $175,000 | $200,000
+#   Instant tiers: $5,000 | $10,000 | $20,000 | $40,000 | $80,000 | $160,000 | $320,000 | $640,000 | $1,000,000 | $2,000,000
 #
-# Both programs: 5% daily loss limit, 10% max DD, 1:30 leverage
+# All accounts: 5% daily loss limit, 10% max DD, 1:30 leverage
 
-CTI_PROGRAM = os.getenv("CTI_PROGRAM", "challenge").lower()  # "challenge" or "instant"
+CTI_CHALLENGE_TYPE = os.getenv("CTI_CHALLENGE_TYPE", "2-step").lower()  # "1-step", "2-step", or "instant"
 CTI_PHASE = int(os.getenv("CTI_PHASE", "1"))  # 1=Phase 1, 2=Phase 2, 3=Funded
+CTI_PROGRAM = os.getenv("CTI_PROGRAM", "challenge").lower()  # "challenge" or "instant"
 
 CTI_DAILY_LOSS_PCT = float(os.getenv("CTI_DAILY_LOSS_PCT", "0.05"))    # 5%
 CTI_MAX_DD_PCT = float(os.getenv("CTI_MAX_DD_PCT", "0.10"))             # 10%
 
+# Optional: Override auto-detected funding tier with a fixed value
+# Format: comma-separated list like "50000,100000,150000" or single value like "100000"
+CTI_FUNDING_TIER_ENV = os.getenv("CTI_FUNDING_TIER", "")
+
+# Tier lookup tables
+CTI_CHALLENGE_TIERS = [2500, 3750, 5000, 7500, 10000, 15000, 20000, 25000, 37500, 50000, 75000, 100000, 112500, 125000, 150000, 175000, 200000]
+CTI_INSTANT_TIERS  = [5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000, 1000000, 2000000]
+
+
+def _detect_tier_from_balance(balance: float) -> int:
+    """Auto-detect funding tier from current balance."""
+    if CTI_CHALLENGE_TYPE == "instant":
+        tiers = CTI_INSTANT_TIERS
+    else:
+        tiers = CTI_CHALLENGE_TIERS
+    return next((t for t in tiers if balance <= t), tiers[-1])
+
 
 def get_cti_tier(balance: float) -> dict:
-    """Get CTI parameters based on account balance and configured phase.
+    """Get CTI parameters based on account balance and configured challenge type.
 
-    All CTI accounts use the same percentages. Balance comes from Oanda API.
-    Dollar amounts are calculated dynamically: e.g. daily loss = 5% of balance.
-
-    When CTI issues a new (scaled) account, the balance changes automatically
-    and the bot picks up the correct dollar amounts.
+    Tier is auto-detected from balance by default. Can be overridden with
+    CTI_FUNDING_TIER env var for fixed funding tier regardless of balance.
+    Dollar amounts are calculated dynamically: e.g. daily loss = 5% of tier.
     """
-    if CTI_PROGRAM == "instant":
-        phase_label = "Instant Funded"
+    # Auto-detect tier from balance, or use configured funding tier
+    if CTI_FUNDING_TIER_ENV:
+        # Use configured funding tier (comma-separated list or single value)
+        try:
+            tier_values = [int(t.strip()) for t in CTI_FUNDING_TIER_ENV.split(",")]
+            tier_dollars = tier_values[0] if len(tier_values) == 1 else max(tier_values)
+        except ValueError:
+            # Fallback to auto-detection if parsing fails
+            tier_dollars = _detect_tier_from_balance(balance)
+    else:
+        tier_dollars = _detect_tier_from_balance(balance)
+    
+    tier_name = f"${tier_dollars:,.0f}"
+
+    if CTI_CHALLENGE_TYPE == "instant":
+        phase_label = "Instant Funded" if CTI_PHASE == 3 else "Instant"
         active_target_pct = 0.10  # 10% for all instant accounts
+    elif CTI_CHALLENGE_TYPE == "1-step":
+        phase_label = "1-Step Funded" if CTI_PHASE == 3 else "1-Step Challenge"
+        active_target_pct = 0.08  # 8% for 1-step
     elif CTI_PHASE == 1:
         phase_label = "Phase 1"
         active_target_pct = 0.10  # 10%
@@ -184,9 +218,12 @@ def get_cti_tier(balance: float) -> dict:
         active_target_pct = 0.10  # 10% first payout target
 
     return {
-        "program": CTI_PROGRAM,
+        "challenge_type": CTI_CHALLENGE_TYPE,
+        "program": "challenge" if CTI_CHALLENGE_TYPE != "instant" else "instant",
         "phase": CTI_PHASE,
         "phase_label": phase_label,
+        "tier_dollars": tier_dollars,
+        "tier_name": tier_name,
         "active_target_pct": active_target_pct,
         "daily_loss_pct": CTI_DAILY_LOSS_PCT,
         "max_dd_pct": CTI_MAX_DD_PCT,

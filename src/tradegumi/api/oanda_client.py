@@ -109,25 +109,50 @@ class OandaClient(ExecutionClient):
         return float(data["account"]["balance"])
 
     def get_open_positions(self) -> list[Position]:
-        """Return list of open positions from Oanda."""
+        """Return list of open positions from Oanda with live pricing and SL/TP."""
+        # Fetch positions
         data = self._request("GET", f"/v3/accounts/{self.account_id}/openPositions")
+        # Fetch open trades for SL/TP details
+        trades_data = self._request("GET", f"/v3/accounts/{self.account_id}/openTrades")
+        # Build lookup: instrument -> {sl, tp}
+        trade_details: dict[str, dict] = {}
+        for t in trades_data.get("trades", []):
+            inst = t.get("instrument", "")
+            sl = None
+            tp = None
+            if t.get("stopLossOrder"):
+                sl = float(t["stopLossOrder"].get("price", "0") or "0")
+            if t.get("takeProfitOrder"):
+                tp = float(t["takeProfitOrder"].get("price", "0") or "0")
+            trade_details[inst] = {"sl": sl, "tp": tp}
+
+        # Fetch live pricing for all instruments
+        instruments = [p["instrument"] for p in data.get("positions", [])]
+        pricing_map: dict[str, float] = {}
+        if instruments:
+            prices = self.get_pricing([self._from_oanda(i) for i in instruments])
+            for tick in prices:
+                pricing_map[self._to_oanda(tick.symbol)] = tick.bid
+
         positions = []
         for p in data.get("positions", []):
+            inst = p["instrument"]
             long_units = float(p.get("long", {}).get("units", "0") or "0")
             short_units = float(p.get("short", {}).get("units", "0") or "0")
             side = "BUY" if long_units > 0 else "SELL"
             volume = abs(long_units) if long_units > 0 else abs(short_units)
             avg_price = float(p.get("long", {}).get("averagePrice", "0") or "0") if long_units > 0 else float(p.get("short", {}).get("averagePrice", "0") or "0")
             unrealized = float(p.get("unrealizedPL", "0") or "0")
+            details = trade_details.get(inst, {})
             pos = Position(
-                id=p["instrument"].replace("_", ""),
-                symbol=self._from_oanda(p["instrument"]),
+                id=inst.replace("_", ""),
+                symbol=self._from_oanda(inst),
                 side=side,
                 volume=volume,
                 open_price=avg_price,
-                current_price=0,  # will be filled by pricing
-                stop_loss=None,
-                take_profit=None,
+                current_price=pricing_map.get(inst, avg_price),
+                stop_loss=details.get("sl"),
+                take_profit=details.get("tp"),
                 unrealized_pl=unrealized,
                 net_profit=float(p.get("pl", "0") or "0"),
             )
@@ -178,11 +203,18 @@ class OandaClient(ExecutionClient):
     def place_order(self, order: OrderRequest) -> str:
         """Place a market order.
 
-        Returns the trade/opened position id.
+        For alert_only / demo: order.volume is already in Oanda units (not lots).
+        For live: order.volume is in lots and gets converted to units.
         """
         oanda_inst = self._to_oanda(order.symbol)
-        # Oanda expects units (1 standard lot = 100,000 units)
-        raw_units = round(order.volume * 100_000)
+        # Oanda expects units. In alert_only/demo, volume is already units.
+        # In live mode (MatchTrader), volume is lots and would be converted
+        # here — but live mode uses MatchTrader, not Oanda.
+        if config.TRADEGUMI_MODE in ("alert_only", "demo"):
+            raw_units = round(order.volume)
+        else:
+            # Fallback: treat as lots (100k per lot)
+            raw_units = round(order.volume * 100_000)
         units = raw_units if order.side == "BUY" else -raw_units
 
         body = {

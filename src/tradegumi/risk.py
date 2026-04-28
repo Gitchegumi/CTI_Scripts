@@ -43,6 +43,48 @@ def calc_take_profit_price(entry_price: float, atr: float, side: str) -> float:
     return round(tp, _price_decimals(entry_price))
 
 
+def calc_position_units(
+    account_balance: float,
+    entry_price: float,
+    stop_loss_price: float,
+    symbol: str,
+) -> int:
+    """Calculate Oanda position size in units (not lots).
+
+    For Oanda, 1 unit = 1 unit of the base currency.
+    A "lot" of 0.05 = 5,000 units (not 100,000).
+
+    Risk = account_balance * RISK_PER_TRADE
+    Units = Risk / (SL distance in account currency per unit)
+
+    For USD-quote pairs (EUR/USD): loss per unit = SL distance (in USD)
+    For USD-base pairs (USD/JPY): loss per unit = SL distance / entry_price (converted to USD)
+
+    Args:
+        account_balance: Current account balance
+        entry_price: Price at entry
+        stop_loss_price: Calculated SL price
+        symbol: Symbol for pip/point value selection
+
+    Returns:
+        Position size in units (rounded to whole units).
+    """
+    risk_amount = account_balance * config.RISK_PER_TRADE
+    sl_distance = abs(entry_price - stop_loss_price)
+    if sl_distance == 0:
+        raise ValueError(f"SL distance is zero for {symbol}")
+
+    # For USD-base pairs (USDJPY, USDCHF, USDCAD), convert SL distance to USD terms
+    if symbol.startswith("USD"):
+        # SL distance is in quote currency; convert to USD
+        units = risk_amount * entry_price / sl_distance
+    else:
+        # SL distance is directly in USD (for EUR/USD, GBP/USD, etc.)
+        units = risk_amount / sl_distance
+
+    return max(1, int(round(units)))
+
+
 def calc_lot_size(
     account_balance: float,
     entry_price: float,

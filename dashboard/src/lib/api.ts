@@ -2,18 +2,29 @@ const BASE_URL = "";
 
 export interface ApiStatus {
   mode: "alert_only" | "demo" | "live";
-  program: "challenge" | "instant";
+  challenge_type: "1-step" | "2-step" | "instant";
   phase: 1 | 2 | 3;
   daily_loss_pct: number;
   max_dd_pct: number;
   running: boolean;
   loop_count: number;
   last_signal_time: string | null;
+  tiers: number[];
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  // Include auth cookie for protected endpoints
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (typeof document !== "undefined") {
+    const token = document.cookie
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("tg_journal_auth="));
+    if (token) headers["X-Auth-Token"] = token.split("=")[1];
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
@@ -31,10 +42,10 @@ export async function setMode(mode: ApiStatus["mode"]): Promise<void> {
   });
 }
 
-export async function setProgram(program: ApiStatus["program"]): Promise<void> {
-  await apiFetch("/api/config/program", {
+export async function setChallengeType(challenge_type: ApiStatus["challenge_type"]): Promise<void> {
+  await apiFetch("/api/config/challenge_type", {
     method: "POST",
-    body: JSON.stringify({ program }),
+    body: JSON.stringify({ challenge_type }),
   });
 }
 

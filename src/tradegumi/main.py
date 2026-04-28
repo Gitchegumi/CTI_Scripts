@@ -147,33 +147,33 @@ def check_and_execute(
     symbol: str,
     mode: str,
     trailing_manager: TrailingSLManager,
-) -> tuple[str, Optional[str], float, float]:
+) -> tuple[str, Optional[str], float, float, float]:
     """Run signal engine for one symbol; execute if allowed.
 
-    Returns (tag, trend, lr_15, lr_5) where tag is a summary like
+    Returns (tag, trend, lr_1h, lr_15, lr_5) where tag is a summary like
     'flat', 'U(no_sig)', 'U(conf=0.7)', 'blocked', 'err', 'closed'.
     """
     if not is_trading_open(symbol):
         log.debug("%s: outside trading hours", symbol)
-        return "closed", None, 0.0, 0.0
+        return "closed", None, 0.0, 0.0, 0.0
 
     if is_swap_blackout(symbol):
         log.debug("%s: swap rollover blackout — skipping signal check", symbol)
-        return "rollover", None, 0.0, 0.0
+        return "rollover", None, 0.0, 0.0, 0.0
 
     try:
-        signal_obj, trend, lr_15, lr_5 = engine.check_symbol(symbol)
+        signal_obj, trend, lr_1h, lr_15, lr_5 = engine.check_symbol(symbol)
     except Exception as e:
         log.error("%s: signal engine error: %s", symbol, e)
-        return "err", None, 0.0, 0.0
+        return "err", None, 0.0, 0.0, 0.0
 
     if signal_obj is None:
         # No signal — trend might be flat or no clear direction
         if trend is None:
-            return "flat", trend, lr_15, lr_5
-        return f"{trend[0]}(no_sig)", trend, lr_15, lr_5
+            return "flat", trend, lr_1h, lr_15, lr_5
+        return f"{trend[0]}(no_sig)", trend, lr_1h, lr_15, lr_5
 
-    # ── Lot sizing (always calculate for alerts, even if blocked) ──────
+    # ── Lot / Unit sizing (always calculate for alerts, even if blocked) ──────
     try:
         balance = client.get_account_balance()
     except Exception as e:
@@ -182,12 +182,23 @@ def check_and_execute(
 
     if balance > 0:
         try:
-            signal_obj.lot_size = calc_lot_size(
-                account_balance=balance,
-                entry_price=signal_obj.entry_price,
-                stop_loss_price=signal_obj.stop_loss,
-                symbol=symbol,
-            )
+            if isinstance(client, OandaClient) and mode in ("alert_only", "demo"):
+                # Oanda: use units (not lots). 500 units = 0.005 lots
+                from tradegumi.risk import calc_position_units
+                signal_obj.lot_size = calc_position_units(
+                    account_balance=balance,
+                    entry_price=signal_obj.entry_price,
+                    stop_loss_price=signal_obj.stop_loss,
+                    symbol=symbol,
+                )
+            else:
+                # MatchTrader (live) or other: use standard lots
+                signal_obj.lot_size = calc_lot_size(
+                    account_balance=balance,
+                    entry_price=signal_obj.entry_price,
+                    stop_loss_price=signal_obj.stop_loss,
+                    symbol=symbol,
+                )
         except Exception as e:
             log.error("%s: lot sizing failed: %s", symbol, e)
 
@@ -204,7 +215,7 @@ def check_and_execute(
             "mode": config.TRADEGUMI_MODE,
             "blocked": reason,
         })
-        return f"{signal_obj.direction[0]}(blocked)", trend, lr_15, lr_5
+        return f"{signal_obj.direction[0]}(blocked)", trend, lr_1h, lr_15, lr_5
 
     # Post signal to Discord (alert_only and demo both alert)
     post_signal(signal_obj)
@@ -213,6 +224,7 @@ def check_and_execute(
         "direction": signal_obj.direction,
         "confidence": signal_obj.confidence,
         "strategy": signal_obj.strategy,
+        "lr_1h": lr_1h,
         "lr_15": lr_15,
         "lr_5": lr_5,
         "trend": trend,
@@ -370,7 +382,7 @@ def run(mode: str):
             loop_summary = []
             loop_state = []
             for symbol in scan_symbols:
-                tag, trend, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
+                tag, trend, lr_1h, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
                 score = watchlist_data[symbol]["score"]
                 tier = watchlist_data[symbol]["tier"]
                 loop_summary.append((symbol, tag, tier, score))
@@ -378,6 +390,7 @@ def run(mode: str):
                     "symbol": symbol,
                     "state": tag,
                     "trend": tag if tag in ("closed", "rollover") else (trend or "flat"),
+                    "lr_1h": round(lr_1h, 6) if lr_1h else 0.0,
                     "lr_15": round(lr_15, 6) if lr_15 else 0.0,
                     "lr_5": round(lr_5, 6) if lr_5 else 0.0,
                     "score": round(score, 3),

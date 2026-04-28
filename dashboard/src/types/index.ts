@@ -16,6 +16,9 @@ export interface AccountData {
   cti_program: string;
   cti_phase: number;
   cti_phase_label: string;
+  cti_challenge_type: string;
+  cti_tier_name: string;
+  cti_tier_dollars: number;
   active_target_pct: number;
   has_profit_target: boolean;
   profit_target_dollars: number;
@@ -54,6 +57,7 @@ export interface SymbolState {
   symbol: string;
   state: string;
   trend: string;
+  lr_1h: number;
   lr_15: number;
   lr_5: number;
   score: number;
@@ -114,4 +118,34 @@ export interface TradeCorrelation {
   signal_timestamp: string;
   trade_timestamp: string;
   signal_lag_seconds: number;
+}
+
+// ── Manual Trades (alert-only backtesting) ───────────────────────────────────
+
+export interface ManualTrade {
+  id: number;
+  symbol: string;
+  direction: "long" | "short";
+  entry_price: number;
+  exit_price: number | null;
+  entry_time: string;
+  exit_time: string | null;
+  pnl: number;
+  pnl_percent: number;
+  status: "open" | "closed";
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManualTradeSummary {
+  total_trades: number;
+  closed_trades: number;
+  open_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl: number;
+  avg_pnl_percent: number;
 }

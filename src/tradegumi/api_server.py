@@ -10,9 +10,10 @@ import logging as log
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from tradegumi import config
+from tradegumi.manual_trades import _now_iso as manual_now_iso
 
 DATA_DIR = Path(__file__).parent / "data"
 API_PORT = int(__import__("os").getenv("TRADEGUMI_API_PORT", "8199"))
@@ -39,6 +40,21 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         log.debug("API: %s", format % args)
 
+    def _check_auth(self) -> bool:
+        """Verify X-API-Key header against JOURNAL_TOKEN."""
+        expected = config.JOURNAL_TOKEN
+        if not expected:
+            return True  # No auth required if not configured
+        provided = self.headers.get("X-API-Key", "")
+        return provided == expected
+
+    def _require_auth(self) -> bool:
+        """Send 401 if auth fails. Returns True if authenticated."""
+        if not self._check_auth():
+            self._send_json({"error": "Unauthorized"}, 401)
+            return False
+        return True
+
     def _send_json(self, data: Any, status: int = 200):
         body = json.dumps(data, indent=2, default=str).encode()
         self.send_response(status)
@@ -50,8 +66,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
 
     def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
@@ -62,6 +78,16 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return json.loads(raw)
         except json.JSONDecodeError:
             return {}
+
+    def _get_query_param(self, name: str) -> Optional[str]:
+        """Extract a query parameter from the path."""
+        if "?" not in self.path:
+            return None
+        qs = self.path.split("?", 1)[1]
+        for pair in qs.split("&"):
+            if pair.startswith(f"{name}="):
+                return pair.split("=", 1)[1]
+        return None
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -77,6 +103,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             state = get_runtime_state()
             self._send_json({
                 "mode": config.TRADEGUMI_MODE,
+                "challenge_type": config.CTI_CHALLENGE_TYPE,
                 "program": config.CTI_PROGRAM,
                 "phase": config.CTI_PHASE,
                 "daily_loss_pct": config.CTI_DAILY_LOSS_PCT,
@@ -84,6 +111,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 "running": state.get("running", False),
                 "loop_count": state.get("loop_count", 0),
                 "last_signal_time": state.get("last_signal_time"),
+                "tiers": config.CTI_CHALLENGE_TIERS if config.CTI_CHALLENGE_TYPE != "instant" else config.CTI_INSTANT_TIERS,
             })
             return
 
@@ -152,7 +180,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path.startswith("/api/trades"):
+        if self.path.startswith("/api/trades") and not self.path.startswith("/api/trades/manual"):
             client = get_runtime_state().get("client")
             if not client:
                 self._send_json({"error": "client not available"}, 503)
@@ -183,7 +211,124 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
+        # Manual trades endpoints — require auth
+        if self.path == "/api/trades/manual":
+            if not self._require_auth():
+                return
+            # GET /api/trades/manual — list manual trades with filters
+            try:
+                from tradegumi.manual_trades import get_all_trades
+                symbol = self._get_query_param("symbol")
+                status = self._get_query_param("status")
+                start_date = self._get_query_param("start_date")
+                end_date = self._get_query_param("end_date")
+                limit = int(self._get_query_param("limit") or 100)
+                
+                trades = get_all_trades(
+                    symbol=symbol or None,
+                    status=status or None,
+                    start_date=start_date or None,
+                    end_date=end_date or None,
+                    limit=limit
+                )
+                self._send_json(trades)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if self.path == "/api/trades/manual/stats":
+            if not self._require_auth():
+                return
+            # GET /api/trades/manual/stats — summary statistics
+            try:
+                from tradegumi.manual_trades import get_summary_stats
+                self._send_json(get_summary_stats())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         self._send_json({"error": "not found"}, 404)
+
+    def do_PUT(self):
+        body = self._read_body()
+        
+        if self.path.startswith("/api/trades/manual/"):
+            # PUT /api/trades/manual/:id — update trade
+            if not self._require_auth():
+                return
+            parts = self.path.split("/")
+            if len(parts) >= 5:
+                trade_id_str = parts[4]
+                try:
+                    trade_id = int(trade_id_str)
+                except ValueError:
+                    self._send_json({"error": "Invalid trade ID"}, 400)
+                    return
+                
+                try:
+                    from tradegumi.manual_trades import update_trade
+                    symbol = body.get("symbol")
+                    direction = body.get("direction", "").lower() if body.get("direction") else None
+                    entry_price = body.get("entry_price")
+                    if entry_price is not None:
+                        entry_price = float(entry_price)
+                    exit_price = body.get("exit_price")
+                    if exit_price is not None:
+                        exit_price = float(exit_price)
+                    entry_time = body.get("entry_time")
+                    exit_time = body.get("exit_time")
+                    notes = body.get("notes")
+                    
+                    updated = update_trade(
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        direction=direction if direction else None,
+                        entry_price=entry_price,
+                        exit_price=exit_price,
+                        entry_time=entry_time,
+                        exit_time=exit_time,
+                        notes=notes
+                    )
+                    if updated:
+                        self._send_json(updated)
+                    else:
+                        self._send_json({"error": "Trade not found"}, 404)
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"error": "not found"}, 404)
+            return
+        
+        self._send_json({"error": "Method not allowed"}, 405)
+
+    def do_DELETE(self):
+        if self.path.startswith("/api/trades/manual/"):
+            # DELETE /api/trades/manual/:id — delete trade
+            if not self._require_auth():
+                return
+            parts = self.path.split("/")
+            if len(parts) >= 5:
+                trade_id_str = parts[4]
+                try:
+                    trade_id = int(trade_id_str)
+                except ValueError:
+                    self._send_json({"error": "Invalid trade ID"}, 400)
+                    return
+                
+                try:
+                    from tradegumi.manual_trades import delete_trade
+                    deleted = delete_trade(trade_id)
+                    if deleted:
+                        self._send_json({"ok": True})
+                    else:
+                        self._send_json({"error": "Trade not found"}, 404)
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"error": "not found"}, 404)
+            return
+        
+        self._send_json({"error": "Method not allowed"}, 405)
 
     # ── POST endpoints ────────────────────────────────────────────────────
 
@@ -204,6 +349,26 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             send_mode_change_callback(mode, previous)
             self._send_json({"mode": config.TRADEGUMI_MODE})
 
+        elif self.path == "/api/config/challenge_type":
+            challenge_type = body.get("challenge_type", "").lower()
+            if challenge_type not in ("1-step", "2-step", "instant"):
+                self._send_json({"error": "invalid challenge_type. Use: 1-step, 2-step, or instant"}, 400)
+                return
+            config.CTI_CHALLENGE_TYPE = challenge_type
+            _update_env("CTI_CHALLENGE_TYPE", challenge_type)
+            log.info("API: Challenge type changed to %s", challenge_type)
+            # Immediately refresh account metrics in watchlist.json
+            client = get_runtime_state().get("client")
+            if client:
+                from tradegumi.pre_session_scanner import refresh_account_metrics
+                metrics = refresh_account_metrics(client)
+                if metrics:
+                    log.info("API: Account metrics refreshed immediately")
+            self._send_json({
+                "challenge_type": config.CTI_CHALLENGE_TYPE,
+                "phase": config.CTI_PHASE,
+            })
+
         elif self.path == "/api/config/program":
             program = body.get("program", "").lower()
             if program not in ("challenge", "instant"):
@@ -223,6 +388,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             config.CTI_PHASE = int(phase)
             _update_env("CTI_PHASE", str(config.CTI_PHASE))
             log.info("API: Phase changed to %d", config.CTI_PHASE)
+            # Immediately refresh account metrics in watchlist.json
+            client = get_runtime_state().get("client")
+            if client:
+                from tradegumi.pre_session_scanner import refresh_account_metrics
+                metrics = refresh_account_metrics(client)
+                if metrics:
+                    log.info("API: Account metrics refreshed immediately")
             self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
 
         elif self.path == "/api/journal/grade":
@@ -238,6 +410,61 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
             else:
                 self._send_json({"error": "Signal not found or invalid grade"}, 404)
+
+        elif self.path == "/api/journal/notes":
+            signal_id = body.get("signal_id", "").strip()
+            notes = body.get("notes", "").strip()
+            if not signal_id:
+                self._send_json({"error": "signal_id is required"}, 400)
+                return
+            from tradegumi.journal import set_notes_by_signal_id
+            ok = set_notes_by_signal_id(signal_id, notes)
+            if ok:
+                self._send_json({"ok": True})
+            else:
+                self._send_json({"error": "Signal not found"}, 404)
+
+        elif self.path == "/api/trades/manual":
+            # POST /api/trades/manual — create new manual trade
+            if not self._require_auth():
+                return
+            try:
+                from tradegumi.manual_trades import create_trade
+                symbol = body.get("symbol", "").strip().upper()
+                direction = body.get("direction", "").lower()
+                entry_price = float(body.get("entry_price", 0))
+                exit_price = body.get("exit_price")
+                if exit_price is not None:
+                    exit_price = float(exit_price)
+                entry_time = body.get("entry_time", manual_now_iso())
+                exit_time = body.get("exit_time")
+                notes = body.get("notes", "")
+                
+                if not symbol or direction not in ("long", "short"):
+                    self._send_json({"error": "symbol and direction (long/short) are required"}, 400)
+                    return
+                
+                if exit_price is not None and not exit_time:
+                    exit_time = manual_now_iso()
+                
+                trade = create_trade(
+                    symbol=symbol,
+                    direction=direction,
+                    entry_price=entry_price,
+                    entry_time=entry_time,
+                    exit_price=exit_price,
+                    exit_time=exit_time,
+                    notes=notes
+                )
+                self._send_json(trade, status=201)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        elif self.path.startswith("/api/trades/manual/"):
+            # PUT/DELETE are handled by do_PUT/do_DELETE
+            self._send_json({"error": "Method not allowed — use PUT or DELETE"}, 405)
+            return
 
         elif self.path == "/api/action/rescan":
             # Trigger an immediate re-scan
