@@ -1,14 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async rewrites() {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8199';
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${apiBase}/api/:path*`,
-      },
-    ];
-  },
+  // API routes are handled by App Router route handlers
+  // No global rewrite needed - each route proxies to the Python backend
 };
 
 module.exports = nextConfig;
