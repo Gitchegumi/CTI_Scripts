@@ -80,7 +80,7 @@ Dashboard runs on `http://localhost:3000`. The bot's API server runs on port `81
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │  TradeGumi Bot (Python)                            │
 │                                                    │
@@ -107,6 +107,7 @@ Dashboard runs on `http://localhost:3000`. The bot's API server runs on port `81
 ```
 
 **Data flow:**
+
 - Bot writes `loop_state.json` (1s), `watchlist.json` (30min), `signals.json` (on signal)
 - Dashboard reads JSON files + API endpoints for live data
 - API server (`:8199`) accepts config changes (mode, program, phase, re-scan)
@@ -114,13 +115,13 @@ Dashboard runs on `http://localhost:3000`. The bot's API server runs on port `81
 
 ### Main Loop Cadence
 
-| Component | Interval | Purpose |
-|---|---|---|
-| Price ticker | 1 second | Live bid/ask for all watchlist symbols (1 API call) |
-| Signal engine | 5 seconds | Indicators, LR slopes, signal detection |
-| Loop state write | 1 second | Dashboard data (prices, trends, LR values) |
-| Watchlist re-rank | 30 minutes | Re-evaluate tiers during market hours |
-| Pre-session scan | 02:00 ET daily | Full re-scan + instrument availability check |
+| Component         | Interval       | Purpose                                             |
+| ----------------- | -------------- | --------------------------------------------------- |
+| Price ticker      | 1 second       | Live bid/ask for all watchlist symbols (1 API call) |
+| Signal engine     | 5 seconds      | Indicators, LR slopes, signal detection             |
+| Loop state write  | 1 second       | Dashboard data (prices, trends, LR values)          |
+| Watchlist re-rank | 30 minutes     | Re-evaluate tiers during market hours               |
+| Pre-session scan  | 02:00 ET daily | Full re-scan + instrument availability check        |
 
 API budget: ~4 calls/sec (well within Oanda's 120/sec limit).
 
@@ -130,18 +131,19 @@ The dashboard is a Next.js app that reads data from the bot's JSON files and API
 
 ### Sections
 
-| Section | Column | Polls | Data Source |
-|---|---|---|---|
-| 💳 Account Metrics | Left | 30s | `watchlist.json` |
-| ⚙️ Settings | Left | 5s | `GET /api/status`, `POST /api/config/*` |
-| ⚡ Active Signals | Left | 30s | `signals.json` |
-| 📊 Open Trades | Left | 5s (open) / 60s (closed) | `GET /api/positions` |
-| 📊 Watchlist | Right | 30s (open) / 60s (closed) | `watchlist.json` + `loop_state.json` |
-| 📜 Trade History | Right | 30s (open) / 60s (closed) | `GET /api/trades` |
+| Section            | Column | Polls                     | Data Source                             |
+| ------------------ | ------ | ------------------------- | --------------------------------------- |
+| 💳 Account Metrics | Left   | 30s                       | `watchlist.json`                        |
+| ⚙️ Settings        | Left   | 5s                        | `GET /api/status`, `POST /api/config/*` |
+| ⚡ Active Signals  | Left   | 30s                       | `signals.json`                          |
+| 📊 Open Trades     | Left   | 5s (open) / 60s (closed)  | `GET /api/positions`                    |
+| 📊 Watchlist       | Right  | 30s (open) / 60s (closed) | `watchlist.json` + `loop_state.json`    |
+| 📜 Trade History   | Right  | 30s (open) / 60s (closed) | `GET /api/trades`                       |
 
 ### Weekend Mode
 
 When all symbols are closed (weekend/after-hours), the dashboard:
+
 - Throttles all polling from 2-5s → 60s
 - Shows a yellow banner: "🌙 Markets closed — polling throttled to 60s"
 - API status still polls at 5s (config changes take effect immediately)
@@ -157,23 +159,23 @@ When program is set to "Instant", the phase selector dynamically hides (instant 
 
 ### GET
 
-| Endpoint | Description |
-|---|---|
-| `GET /api/status` | Current mode, program, phase, runtime state |
-| `GET /api/data/loop_state` | Live prices, trends, LR values |
-| `GET /api/data/watchlist` | Ranked watchlist with tiers |
-| `GET /api/data/signals` | Active signals |
-| `GET /api/positions` | Open positions from Oanda |
-| `GET /api/trades?count=N` | Closed trade history |
+| Endpoint                   | Description                                 |
+| -------------------------- | ------------------------------------------- |
+| `GET /api/status`          | Current mode, program, phase, runtime state |
+| `GET /api/data/loop_state` | Live prices, trends, LR values              |
+| `GET /api/data/watchlist`  | Ranked watchlist with tiers                 |
+| `GET /api/data/signals`    | Active signals                              |
+| `GET /api/positions`       | Open positions from Oanda                   |
+| `GET /api/trades?count=N`  | Closed trade history                        |
 
 ### POST
 
-| Endpoint | Body | Description |
-|---|---|---|
-| `POST /api/config/mode` | `{"mode": "alert_only"\|"demo"\|"live"}` | Switch trading mode |
-| `POST /api/config/program` | `{"program": "challenge"\|"instant"}` | Switch CTI program |
-| `POST /api/config/phase` | `{"phase": 1\|2\|3}` | Switch CTI phase |
-| `POST /api/action/rescan` | `{}` | Trigger immediate watchlist re-scan |
+| Endpoint                   | Body                                     | Description                         |
+| -------------------------- | ---------------------------------------- | ----------------------------------- |
+| `POST /api/config/mode`    | `{"mode": "alert_only"\|"demo"\|"live"}` | Switch trading mode                 |
+| `POST /api/config/program` | `{"program": "challenge"\|"instant"}`    | Switch CTI program                  |
+| `POST /api/config/phase`   | `{"phase": 1\|2\|3}`                     | Switch CTI phase                    |
+| `POST /api/action/rescan`  | `{}`                                     | Trigger immediate watchlist re-scan |
 
 All endpoints include CORS headers for dashboard access.
 
@@ -181,57 +183,60 @@ All endpoints include CORS headers for dashboard access.
 
 When `TRADEGUMI_CALLBACK_URL` is set, the bot POSTs structured events to that URL:
 
-| Event | When | Payload |
-|---|---|---|
-| `signal` | Every trade signal | symbol, direction, confidence, strategy, LR values, mode |
-| `mode_change` | Mode switched via API | new mode, previous mode |
-| `rescan` | Watchlist re-scan completes | trigger type (full/periodic) |
-| `closed_market` | All markets close | day name, message |
-| `trade_open` | Position opened (future) | trade details |
-| `trade_close` | Position closed (future) | trade details |
+| Event           | When                        | Payload                                                  |
+| --------------- | --------------------------- | -------------------------------------------------------- |
+| `signal`        | Every trade signal          | symbol, direction, confidence, strategy, LR values, mode |
+| `mode_change`   | Mode switched via API       | new mode, previous mode                                  |
+| `rescan`        | Watchlist re-scan completes | trigger type (full/periodic)                             |
+| `closed_market` | All markets close           | day name, message                                        |
+| `trade_open`    | Position opened (future)    | trade details                                            |
+| `trade_close`   | Position closed (future)    | trade details                                            |
 
 Webhook receiver runs on DockeGumi at `:8198` for automated orchestration.
 
 ## Run Modes
 
-| Mode | Signals | Execution | Use When |
-|---|---|---|---|
-| `alert_only` | ✅ Discord only | ❌ None | Initial testing — see what fires without risk |
-| `demo` | ✅ Discord | ✅ Oanda demo account | Forward testing — real market, fake money |
-| `live` | ✅ Discord | ✅ MatchTrader prop account | Stage 2 — live prop firm trading |
+| Mode         | Signals         | Execution                   | Use When                                      |
+| ------------ | --------------- | --------------------------- | --------------------------------------------- |
+| `alert_only` | ✅ Discord only | ❌ None                     | Initial testing — see what fires without risk |
+| `demo`       | ✅ Discord      | ✅ Oanda demo account       | Forward testing — real market, fake money     |
+| `live`       | ✅ Discord      | ✅ MatchTrader prop account | Stage 2 — live prop firm trading              |
 
 **Start with `alert_only`.** Run it for 1-2 weeks. Review signal quality and Layer 2 confidence scores. Then switch to `demo` from the dashboard.
 
 ## Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `OANDA_API_KEY` | *(required)* | Oanda v20 API token |
-| `OANDA_ACCOUNT_ID` | *(required)* | Oanda account ID |
-| `OANDA_BASE_URL` | `https://api-fxpractice.oanda.com` | Practice URL (change for live) |
-| `DISCORD_WEBHOOK_URL` | *(required)* | Discord webhook for trade alerts |
-| `TRADEGUMI_MODE` | `alert_only` | alert_only / demo / live |
-| `TRADEGUMI_CALLBACK_URL` | *(optional)* | DockeGumi webhook URL for orchestration |
-| `TRADEGUMI_API_PORT` | `8199` | API server port |
-| `MAX_OPEN_POSITIONS` | `5` | Max simultaneous positions |
-| `CTI_PROGRAM` | `challenge` | challenge (2-step) or instant (instant funding) |
-| `CTI_PHASE` | `1` | 1 = Phase 1 (10%), 2 = Phase 2 (5%), 3 = Funded (10%) |
-| `CTI_DAILY_LOSS_PCT` | `0.05` | 5% daily loss limit |
-| `CTI_MAX_DD_PCT` | `0.10` | 10% max drawdown |
-| `RISK_PER_TRADE` | `0.0025` | 0.25% account risk per trade |
-| `SL_ATR_MULTIPLIER` | `3` | Stop loss = 3× ATR |
-| `TP_ATR_MULTIPLIER` | `12` | Take profit = 12× ATR (1:4 R:R) |
+| Variable                 | Default                            | Description                                           |
+| ------------------------ | ---------------------------------- | ----------------------------------------------------- |
+| `OANDA_API_KEY`          | _(required)_                       | Oanda v20 API token                                   |
+| `OANDA_ACCOUNT_ID`       | _(required)_                       | Oanda account ID                                      |
+| `OANDA_BASE_URL`         | `https://api-fxpractice.oanda.com` | Practice URL (change for live)                        |
+| `DISCORD_WEBHOOK_URL`    | _(required)_                       | Discord webhook for trade alerts                      |
+| `TRADEGUMI_MODE`         | `alert_only`                       | alert_only / demo / live                              |
+| `TRADEGUMI_CALLBACK_URL` | _(optional)_                       | DockeGumi webhook URL for orchestration               |
+| `TRADEGUMI_API_PORT`     | `8199`                             | API server port                                       |
+| `MAX_OPEN_POSITIONS`     | `5`                                | Max simultaneous positions                            |
+| `CTI_PROGRAM`            | `challenge`                        | challenge (2-step) or instant (instant funding)       |
+| `CTI_PHASE`              | `1`                                | 1 = Phase 1 (10%), 2 = Phase 2 (5%), 3 = Funded (10%) |
+| `CTI_DAILY_LOSS_PCT`     | `0.05`                             | 5% daily loss limit                                   |
+| `CTI_MAX_DD_PCT`         | `0.10`                             | 10% max drawdown                                      |
+| `RISK_PER_TRADE`         | `0.0025`                           | 0.25% account risk per trade                          |
+| `SL_ATR_MULTIPLIER`      | `3`                                | Stop loss = 3× ATR                                    |
+| `TP_ATR_MULTIPLIER`      | `12`                               | Take profit = 12× ATR (1:4 R:R)                       |
 
 ## Strategy: CTI 4-Layer Signal Stack
 
 Every signal passes through all four layers. All must agree for a signal to fire:
 
 ### Layer 0 — Trend Filter
+
 - Linear Regression slope on 15m (length=50) AND 5m (length=14)
 - Both timeframes must agree on direction. No counter-trend trades.
 
 ### Layer 1 — Pre-Session Scanner
+
 Runs at startup, every morning at 06:30 ET, and every 30 minutes during market hours. Ranks all symbols by:
+
 - **ADR consumption** — how much daily range is already used
 - **Volatility regime** — 5d ATR vs 20d ATR (expanding vs contracting)
 - **Breakout probability** — % of recent sessions with >1× ATR moves during London/NY overlap
@@ -240,16 +245,18 @@ Runs at startup, every morning at 06:30 ET, and every 30 minutes during market h
 Output: Tier 1 (trade), Tier 2 (watch/alert), Below Threshold (skip). No hardcoded symbol restrictions — the data decides daily.
 
 ### Layer 2 — Signal Stack
-| Indicator | Parameters | BUY Condition | SELL Condition |
-|---|---|---|---|
-| **StochRSI** | 14,14,3,3 | k prev-3 min < 30, k > d | k prev-3 max > 70, k < d |
-| **MACD** | 12,26,9 | Histogram > prev-5 min | Histogram < prev-5 max |
-| **Keltner Channel** | 20, 1.5× EMA | Last-5 low ≤ KC middle min | Last-5 high ≥ KC middle max |
-| **Candlestick** *(optional)* | — | Engulfing, Hammer | Shooting Star, Engulfing |
+
+| Indicator                    | Parameters   | BUY Condition              | SELL Condition              |
+| ---------------------------- | ------------ | -------------------------- | --------------------------- |
+| **StochRSI**                 | 14,14,3,3    | k prev-3 min < 30, k > d   | k prev-3 max > 70, k < d    |
+| **MACD**                     | 12,26,9      | Histogram > prev-5 min     | Histogram < prev-5 max      |
+| **Keltner Channel**          | 20, 1.5× EMA | Last-5 low ≤ KC middle min | Last-5 high ≥ KC middle max |
+| **Candlestick** _(optional)_ | —            | Engulfing, Hammer          | Shooting Star, Engulfing    |
 
 Each indicator also produces a **0-1 strength score** (Layer 2 quality scoring). The weighted sum becomes the signal confidence percentage.
 
 ### Layer 3 — Risk Management
+
 - Position size = 0.25% account risk ÷ (ATR × SL multiplier × lot size)
 - SL = 3× ATR from entry
 - TP = 12× ATR from entry (1:4 risk:reward)
@@ -258,16 +265,16 @@ Each indicator also produces a **0-1 strength score** (Layer 2 quality scoring).
 
 ## Session Rules
 
-| Asset Class | Trading Hours (ET) | Notes |
-|---|---|---|
-| Forex | Mon–Fri 00:00–16:30 | 16:30–19:00 break (swap blackout) |
-| Indices | Mon–Fri 00:00–16:30 | 16:30–18:30 break |
-| Crypto | 24/7 | Low priority — doesn't fit session model |
-| All | — | No new entries during swap blackout |
+| Asset Class | Trading Hours (ET)  | Notes                                    |
+| ----------- | ------------------- | ---------------------------------------- |
+| Forex       | Mon–Fri 00:00–16:30 | 16:30–19:00 break (swap blackout)        |
+| Indices     | Mon–Fri 00:00–16:30 | 16:30–18:30 break                        |
+| Crypto      | 24/7                | Low priority — doesn't fit session model |
+| All         | —                   | No new entries during swap blackout      |
 
 ## File Structure
 
-```
+```bash
 CTI_Scripts/
 ├── .env.example                 # Template for API keys
 ├── .env                         # Your config (gitignored)
@@ -318,7 +325,7 @@ services:
   tradegumi-bot:
     build: .
     ports:
-      - "8199:8199"  # API server
+      - "8199:8199" # API server
     env_file: .env
     volumes:
       - tradegumi-data:/app/data
@@ -326,7 +333,7 @@ services:
   tradegumi-dashboard:
     build: ./dashboard
     ports:
-      - "3000:3000"  # Dashboard
+      - "3000:3000" # Dashboard
     environment:
       - NEXT_PUBLIC_API_URL=http://tradegumi-bot:8199
     depends_on:
@@ -340,7 +347,7 @@ services:
 3. **Find your account ID**: Shown in the Oanda dashboard or API response
 4. **Add to `.env`**: `OANDA_API_KEY` and `OANDA_ACCOUNT_ID`
 
-Oanda API reference: https://developer.oanda.com/rest-live-v20/introduction/
+Oanda API reference: [https://developer.oanda.com/rest-live-v20/introduction/](https://developer.oanda.com/rest-live-v20/introduction/)
 
 ## Stage 2 Roadmap
 

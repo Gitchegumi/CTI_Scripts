@@ -174,7 +174,7 @@ py_scripts/backtesting/back_test_strat.py
 
 # Generated files
 data/
-.claude/
+.claude/*.json
 
 # Private Strategies (not committed to public repo)
 # Add your profitable strategy files here
