@@ -119,3 +119,33 @@ export interface TradeCorrelation {
   trade_timestamp: string;
   signal_lag_seconds: number;
 }
+
+// ── Manual Trades (alert-only backtesting) ───────────────────────────────────
+
+export interface ManualTrade {
+  id: number;
+  symbol: string;
+  direction: "long" | "short";
+  entry_price: number;
+  exit_price: number | null;
+  entry_time: string;
+  exit_time: string | null;
+  pnl: number;
+  pnl_percent: number;
+  status: "open" | "closed";
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManualTradeSummary {
+  total_trades: number;
+  closed_trades: number;
+  open_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl: number;
+  avg_pnl_percent: number;
+}

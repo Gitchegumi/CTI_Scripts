@@ -22,5 +22,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/journal/:path*"],
+  matcher: ["/journal/:path*", "/manual-trades/:path*"],
 };

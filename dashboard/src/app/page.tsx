@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import Header from "@/components/Header";
 import AccountCard from "@/components/AccountCard";
 import WatchlistSection from "@/components/WatchlistSection";
@@ -23,9 +24,29 @@ export default function Home() {
   const { trades } = useTradeHistory(50, marketOpen);
   const correlations = useTradeCorrelations();
 
+  const mode = apiStatus?.mode ?? "alert_only";
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <Header data={data} lastUpdated={lastUpdated} isRefreshing={isRefreshing} loopState={loopState} apiStatus={apiStatus} />
+
+      {/* Nav links */}
+      <div className="border-b border-slate-800 px-4 py-2 flex items-center gap-4 text-xs">
+        <Link
+          href="/journal"
+          className="text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          📓 Signal Journal
+        </Link>
+        {mode === "alert_only" && (
+          <Link
+            href="/manual-trades"
+            className="text-slate-500 hover:text-blue-400 transition-colors"
+          >
+            📝 Manual Trades
+          </Link>
+        )}
+      </div>
 
       <main className="flex-1 px-4 py-4 max-w-7xl mx-auto w-full">
         {!marketOpen && (
