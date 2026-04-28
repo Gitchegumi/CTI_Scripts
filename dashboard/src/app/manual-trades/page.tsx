@@ -344,6 +344,8 @@ function DeleteConfirmModal({
 
 export default function ManualTradesPage() {
   const [trades, setTrades] = useState<ManualTrade[]>([]);
+  const [automatedTrades, setAutomatedTrades] = useState<any[]>([]);
+  const [mode, setMode] = useState<string>("alert_only");
   const [stats, setStats] = useState<ManualTradeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -352,6 +354,32 @@ export default function ManualTradesPage() {
   const [deletingTrade, setDeletingTrade] = useState<ManualTrade | null>(null);
   const [filterSymbol, setFilterSymbol] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "open" | "closed">("all");
+
+  // Load mode
+  async function loadMode() {
+    try {
+      const res = await fetch(`/api/status?_=${Date.now()}`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setMode(data.mode || "alert_only");
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  // Load automated trades (for demo/live modes)
+  async function loadAutomatedTrades() {
+    try {
+      const res = await fetch(`/api/trades?count=50&_=${Date.now()}`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setAutomatedTrades(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      // Non-critical
+    }
+  }
 
   // Load trades
   async function loadTrades() {
@@ -388,6 +416,7 @@ export default function ManualTradesPage() {
   useEffect(() => {
     async function init() {
       setLoading(true);
+      await loadMode();
       await Promise.all([loadTrades(), loadStats()]);
       setLoading(false);
     }
@@ -399,9 +428,12 @@ export default function ManualTradesPage() {
     const id = setInterval(() => {
       loadTrades();
       loadStats();
+      if (mode !== "alert_only") {
+        loadAutomatedTrades();
+      }
     }, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [mode]);
 
   // Create trade
   async function createTrade(data: Partial<TradeFormData>) {
@@ -475,7 +507,10 @@ export default function ManualTradesPage() {
             ← Dashboard
           </Link>
           <span className="text-slate-700">|</span>
-          <span className="text-white font-semibold text-sm">Manual Trade History</span>
+          <span className="text-white font-semibold text-sm">Trade History</span>
+          {mode !== "alert_only" && (
+            <span className="text-xs text-slate-500 ml-2">({mode} mode — notes only)</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -484,15 +519,17 @@ export default function ManualTradesPage() {
           >
             Journal →
           </Link>
-          <button
-            onClick={() => {
-              setEditingTrade(undefined);
-              setShowForm(true);
-            }}
-            className="bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded transition-colors"
-          >
-            + Add Trade
-          </button>
+          {mode === "alert_only" && (
+            <button
+              onClick={() => {
+                setEditingTrade(undefined);
+                setShowForm(true);
+              }}
+              className="bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded transition-colors"
+            >
+              + Add Trade
+            </button>
+          )}
         </div>
       </div>
 

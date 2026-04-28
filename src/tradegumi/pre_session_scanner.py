@@ -304,10 +304,13 @@ def run_scan(client: ExecutionClient, available: set[str] | None = None) -> dict
             daily_loss_remaining_pct = max(0, (1 - daily_loss_used / daily_loss_limit) * 100) if daily_loss_limit else 0
 
             # Max drawdown limit: max_dd_pct of funding tier
+            # Use tier_dollars as the baseline for drawdown calculation
             max_dd_dollars = max_dd_pct * cti_tier["tier_dollars"]
-            drawdown_from_start = start_balance - nav  # how far NAV is below starting balance
-            dd_remaining = max_dd_dollars - max(0, drawdown_from_start)
-            dd_remaining_pct = max(0, (1 - max(0, drawdown_from_start) / max_dd_dollars) * 100) if max_dd_dollars else 0
+            # Calculate drawdown from funding tier, not daily session start
+            # This shows total drawdown from the account's initial funding level
+            drawdown_from_tier = max(0, cti_tier["tier_dollars"] - nav)
+            dd_remaining = max_dd_dollars - drawdown_from_tier
+            dd_remaining_pct = max(0, (1 - drawdown_from_tier / max_dd_dollars) * 100) if max_dd_dollars else 0
 
             output["account"] = {
                 "balance": balance,
@@ -411,10 +414,12 @@ def refresh_account_metrics(client) -> dict | None:
         daily_loss_remaining_pct = max(0, (1 - daily_loss_used / daily_loss_limit) * 100) if daily_loss_limit else 0
 
         # Max drawdown limit: max_dd_pct of funding tier
+        # Use tier_dollars as the baseline for drawdown calculation
+        # This shows total drawdown from the account's initial funding level
         max_dd_dollars = max_dd_pct * cti_tier["tier_dollars"]
-        drawdown_from_start = start_balance - nav  # how far NAV is below starting balance
-        dd_remaining = max_dd_dollars - max(0, drawdown_from_start)
-        dd_remaining_pct = max(0, (1 - max(0, drawdown_from_start) / max_dd_dollars) * 100) if max_dd_dollars else 0
+        drawdown_from_tier = max(0, cti_tier["tier_dollars"] - nav)
+        dd_remaining = max_dd_dollars - drawdown_from_tier
+        dd_remaining_pct = max(0, (1 - drawdown_from_tier / max_dd_dollars) * 100) if max_dd_dollars else 0
 
         metrics = {
             "balance": balance,
