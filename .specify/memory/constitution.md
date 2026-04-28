@@ -1,14 +1,15 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: [template] → 1.0.0 (initial ratification)
-  Modified principles: N/A — first fill of all placeholder tokens
-  Added sections: Core Principles (5), Security & Credential Hygiene, Development Workflow, Governance
-  Removed sections: None (template slots fully resolved)
+  Version change: 1.1.0 → 1.2.0 (MINOR: task list final-task rule added to Pull Request Policy)
+  Modified principles: None
+  Added sections: "Submit PR" final-task rule within Pull Request Policy
+  Removed sections: None
   Templates requiring updates:
-    ✅ .specify/templates/plan-template.md — Constitution Check gate confirmed generic; no update needed
-    ✅ .specify/templates/spec-template.md — no constitution-specific sections; no update needed
-    ✅ .specify/templates/tasks-template.md — task categorization unchanged; no update needed
+    ✅ .specify/templates/plan-template.md — Constitution Check gate unchanged; no update needed
+    ✅ .specify/templates/spec-template.md — no impact; no update needed
+    ✅ .specify/templates/tasks-template.md — UPDATED: added "Submit PR with DockeGumi as reviewer"
+      as final task in Phase N Polish section
     ✅ .specify/templates/commands/ — no command files present; nothing to update
   Follow-up TODOs:
     - TODO(RATIFICATION_DATE): Using 2026-04-28 (first fill date) as ratification date.
@@ -161,4 +162,13 @@ Versioning policy:
 All PRs touching signal logic, risk code, or execution clients MUST pass the Constitution
 Check gate in `plan.md` before Phase 0 research begins.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-04-28
+### Pull Request Policy
+
+All PRs MUST request **DockeGumi** as a reviewer before merging. No PR may be merged
+without DockeGumi's review approval.
+
+Every task list generated for a feature MUST include **"Submit PR with DockeGumi as
+reviewer"** as the final task. This task is non-optional and MUST appear in the Polish
+phase of every `tasks.md`.
+
+**Version**: 1.2.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-04-28
