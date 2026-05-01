@@ -32,6 +32,12 @@
 - [ ] CHK005 Item with specific criteria
 - [ ] CHK006 Final item in this category
 
+## Code Quality & Documentation
+
+- [ ] CHKXXX Changed code uses intention-revealing names and simple control flow
+- [ ] CHKXXX Python changes include proper docstrings for modules, public classes, public functions, public methods, and non-trivial helpers
+- [ ] CHKXXX Comments explain non-obvious rationale, constraints, or algorithms rather than restating code
+
 ## Notes
 
 - Check items off as completed: `[x]`

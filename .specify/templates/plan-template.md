@@ -31,7 +31,10 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+[Generated plans MUST evaluate each applicable constitution gate with PASS/FAIL/PENDING
+status and concrete notes. Required gates include Signal Integrity, Execution Layer
+Abstraction, Risk-First, Observable by Default, Configuration-Driven Operations,
+Security & Credential Hygiene, Code Quality & Documentation, and Pull Request Policy.]
 
 ## Project Structure
 

@@ -1,21 +1,30 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: 1.1.0 → 1.2.0 (MINOR: task list final-task rule added to Pull Request Policy)
-  Modified principles: None
-  Added sections: "Submit PR" final-task rule within Pull Request Policy
+  Version change: 1.2.0 -> 1.3.0 (MINOR: code quality and Python docstring
+  requirements added as mandatory governance)
+  Modified principles:
+    - Development Workflow -> Development Workflow (expanded with code quality gate)
+  Added sections:
+    - Code Quality & Documentation
   Removed sections: None
   Templates requiring updates:
-    ✅ .specify/templates/plan-template.md — Constitution Check gate unchanged; no update needed
-    ✅ .specify/templates/spec-template.md — no impact; no update needed
-    ✅ .specify/templates/tasks-template.md — UPDATED: added "Submit PR with DockeGumi as reviewer"
-      as final task in Phase N Polish section
-    ✅ .specify/templates/commands/ — no command files present; nothing to update
+    - Updated: .specify/templates/plan-template.md (added Code Quality & Documentation
+      to required Constitution Check gates)
+    - Reviewed: .specify/templates/spec-template.md (no impact; requirements stay
+      product-focused)
+    - Updated: .specify/templates/tasks-template.md (added self-documenting code and
+      Python docstring tasks)
+    - Updated: .specify/templates/checklist-template.md (added quality checklist
+      sample items)
+    - Reviewed: .specify/templates/commands/ (no command files present)
+    - Reviewed: README.md and docs/private-strategies.md (no runtime guidance update
+      required)
   Follow-up TODOs:
     - TODO(RATIFICATION_DATE): Using 2026-04-28 (first fill date) as ratification date.
       If an earlier governance adoption date exists, update this field.
-    - MatchTrader live execution client is not yet implemented; Principle II
-      should be re-verified once it ships to confirm abstraction holds.
+    - MatchTrader live execution client is not yet implemented; Principle II should be
+      re-verified once it ships to confirm abstraction holds.
 -->
 
 # TradeGumi CTI Signal Engine Constitution
@@ -29,12 +38,12 @@ overrides, or layer bypasses are permitted under any circumstance.
 
 Layer execution order is fixed:
 
-- **Layer 0 — Trend Filter**: 15m + 5m LR slopes must agree on direction.
-- **Layer 1 — Pre-Session Scanner**: Symbol must be Tier 1 (or explicitly Tier 2 with
+- **Layer 0 - Trend Filter**: 15m + 5m LR slopes must agree on direction.
+- **Layer 1 - Pre-Session Scanner**: Symbol must be Tier 1 (or explicitly Tier 2 with
   justification). Below-threshold symbols MUST be skipped.
-- **Layer 2 — Signal Stack**: StochRSI + MACD + Keltner Channel must all confirm.
+- **Layer 2 - Signal Stack**: StochRSI + MACD + Keltner Channel must all confirm.
   Candlestick confirmation is optional but counted in confidence scoring.
-- **Layer 3 — Risk Management**: Position size, daily loss limit, and max drawdown checks
+- **Layer 3 - Risk Management**: Position size, daily loss limit, and max drawdown checks
   must pass before an order is placed.
 
 **Rationale**: CTI prop firm rules carry real financial penalty for violations. A single
@@ -48,7 +57,7 @@ Signal logic MUST be broker-agnostic. All execution is routed through a common
 session-rules code may import or reference a specific broker (Oanda, MatchTrader, etc.)
 directly.
 
-Swapping execution targets (Oanda demo → MatchTrader live) MUST require only a config
+Swapping execution targets (Oanda demo -> MatchTrader live) MUST require only a config
 change, not a code change.
 
 **Rationale**: The project's explicit design goal is zero signal logic changes when
@@ -61,10 +70,10 @@ Every trade entry MUST enforce all three risk constraints without exception:
 
 | Constraint | Default | Configurable? |
 | --- | --- | --- |
-| Risk per trade | 0.25% of account | Yes — via env var only |
-| Daily loss limit | 5% of account | Yes — via env var only |
-| Max drawdown | 10% of account | Yes — via env var only |
-| Max open positions | 5 | Yes — via env var only |
+| Risk per trade | 0.25% of account | Yes - via env var only |
+| Daily loss limit | 5% of account | Yes - via env var only |
+| Max drawdown | 10% of account | Yes - via env var only |
+| Max open positions | 5 | Yes - via env var only |
 
 Risk parameters are env-var driven, but the enforcement code MUST NOT be bypassable.
 `alert_only` mode is exempt from order placement, but risk checks MUST still run and log.
@@ -80,7 +89,7 @@ Silent failures are not permitted.
 Events that MUST be observable:
 
 - Signal fired (with symbol, direction, confidence %, all layer states)
-- Signal blocked (with reason — which layer failed)
+- Signal blocked (with reason - which layer failed)
 - Watchlist re-rank completed (with tier changes)
 - Mode/program/phase config change
 - Market open / market close / swap blackout entry
@@ -97,7 +106,7 @@ every decision is logged.
 
 Mode (`alert_only` / `demo` / `live`), CTI program (`challenge` / `instant`), and phase
 (1 / 2 / Funded) changes MUST take effect via the `/api/config/*` endpoints or `.env`
-edits — without code changes or process restarts where possible.
+edits - without code changes or process restarts where possible.
 
 All strategy parameters (ATR multipliers, LR lengths, indicator periods, risk percentages)
 MUST be env-var configurable. No magic numbers may be hardcoded in signal logic.
@@ -114,30 +123,60 @@ The `.env` file is gitignored and MUST never be committed.
 Rules:
 
 - `.env.example` MUST contain all required variable names with placeholder values and
-  inline documentation — it is the canonical configuration reference.
+  inline documentation - it is the canonical configuration reference.
 - No secret or credential value MUST appear in any source file, log output, or Discord
   message.
 - Webhook URLs and Oanda tokens in logs MUST be redacted or omitted.
 - Docker deployments MUST use `env_file` or mounted secrets, never hardcoded env values
   in `docker-compose.yml` or Dockerfiles.
 
+## Code Quality & Documentation
+
+All code MUST be self-documenting at the point of use. Names for modules, files,
+functions, classes, variables, types, API fields, and tests MUST describe their intent
+without requiring callers to inspect implementation details. Control flow MUST stay simple
+enough that the main path is visible without explanatory comments. Comments are reserved
+for non-obvious tradeoffs, external constraints, algorithms, or operational risks; they
+MUST NOT compensate for unclear names or tangled structure.
+
+Python code MUST include proper docstrings for every module, public class, public method,
+public function, and non-trivial private helper. Docstrings MUST state the purpose,
+important parameters or return values, raised exceptions when relevant, side effects, and
+domain constraints that affect signal, risk, execution, or configuration behavior.
+
+Generated tasks and PR reviews MUST include an explicit code-quality check confirming:
+
+- Changed code uses intention-revealing names and avoids unexplained magic values.
+- Python docstrings are present and useful for all new or modified modules, classes,
+  functions, and non-trivial helpers.
+- Inline comments explain why, not what, unless describing a complex algorithm.
+- Tests or validation cover behavior that is not obvious from type signatures and names.
+
+**Rationale**: Signal, risk, and execution code is safety-critical for a funded trading
+workflow. Future operators and agents must be able to understand behavior quickly without
+guessing at hidden intent.
+
 ## Development Workflow
 
 All signal logic changes MUST follow this promotion ladder before reaching a funded
 account:
 
-1. **alert_only** — Run for at minimum 1 week of market sessions. Review signal quality,
+1. **alert_only** - Run for at minimum 1 week of market sessions. Review signal quality,
    Layer 2 confidence scores, and Discord alert accuracy. No capital at risk.
-2. **demo** — Run until positive expectancy is demonstrated over a statistically
-   meaningful sample (≥30 closed trades). Real market conditions, simulated capital.
-3. **live** — Only after demo validation. Requires explicit manual mode switch via API
+2. **demo** - Run until positive expectancy is demonstrated over a statistically
+   meaningful sample (>=30 closed trades). Real market conditions, simulated capital.
+3. **live** - Only after demo validation. Requires explicit manual mode switch via API
    or dashboard. No automated promotion.
 
-Backtesting data in `src/backtesting/` is advisory only — live forward testing on demo
+Backtesting data in `src/backtesting/` is advisory only - live forward testing on demo
 is the authoritative validation gate.
 
 Docker Compose is the production deployment standard. Direct `python -m` invocation is
 for local development only.
+
+All implementation work MUST satisfy the Code Quality & Documentation section before it
+is considered complete. Python changes without required docstrings fail the Constitution
+Check even when tests pass.
 
 ## Governance
 
@@ -155,12 +194,12 @@ Amendment procedure:
 
 Versioning policy:
 
-- **MAJOR** — Principle removed, redefined, or enforcement relaxed.
-- **MINOR** — New principle or section added, or guidance materially expanded.
-- **PATCH** — Wording clarification, typo fix, non-semantic refinement.
+- **MAJOR** - Principle removed, redefined, or enforcement relaxed.
+- **MINOR** - New principle or section added, or guidance materially expanded.
+- **PATCH** - Wording clarification, typo fix, non-semantic refinement.
 
-All PRs touching signal logic, risk code, or execution clients MUST pass the Constitution
-Check gate in `plan.md` before Phase 0 research begins.
+All PRs touching signal logic, risk code, execution clients, configuration, or Python code
+MUST pass the Constitution Check gate in `plan.md` before Phase 0 research begins.
 
 ### Pull Request Policy
 
@@ -171,4 +210,4 @@ Every task list generated for a feature MUST include **"Submit PR with DockeGumi
 reviewer"** as the final task. This task is non-optional and MUST appear in the Polish
 phase of every `tasks.md`.
 
-**Version**: 1.2.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-04-28
+**Version**: 1.3.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-05-01
