@@ -139,6 +139,86 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json([])
             return
 
+        if self.path.startswith("/api/strategy-metrics/summary"):
+            try:
+                from tradegumi.strategy_metrics import get_summary
+                start = self._get_query_param("start")
+                end = self._get_query_param("end")
+                symbol = self._get_query_param("symbol")
+                if not start or not end:
+                    self._send_json({"error": "start and end are required"}, 400)
+                    return
+                self._send_json(get_summary(start, end, symbol=symbol or None))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if self.path.startswith("/api/strategy-metrics/opportunities"):
+            try:
+                from tradegumi.strategy_metrics import get_opportunities
+                start = self._get_query_param("start")
+                end = self._get_query_param("end")
+                symbol = self._get_query_param("symbol")
+                decision = self._get_query_param("decision")
+                near_miss_param = self._get_query_param("near_miss")
+                limit = int(self._get_query_param("limit") or 100)
+                near_miss = None
+                if near_miss_param is not None:
+                    near_miss = near_miss_param.lower() == "true"
+                if not start or not end:
+                    self._send_json({"error": "start and end are required"}, 400)
+                    return
+                self._send_json(get_opportunities(
+                    start,
+                    end,
+                    symbol=symbol or None,
+                    decision=decision or None,
+                    near_miss=near_miss,
+                    limit=limit,
+                ))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if self.path.startswith("/api/strategy-metrics/compare"):
+            try:
+                from tradegumi.strategy_metrics import compare_periods
+                base_start = self._get_query_param("base_start")
+                base_end = self._get_query_param("base_end")
+                compare_start = self._get_query_param("compare_start")
+                compare_end = self._get_query_param("compare_end")
+                symbol = self._get_query_param("symbol")
+                if not all([base_start, base_end, compare_start, compare_end]):
+                    self._send_json({"error": "base_start, base_end, compare_start, and compare_end are required"}, 400)
+                    return
+                self._send_json(compare_periods(base_start, base_end, compare_start, compare_end, symbol=symbol or None))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if self.path.startswith("/api/strategy-metrics/export"):
+            try:
+                from tradegumi.strategy_metrics import export_summary
+                start = self._get_query_param("start")
+                end = self._get_query_param("end")
+                symbol = self._get_query_param("symbol")
+                include = (self._get_query_param("include_opportunities") or "false").lower() == "true"
+                if not start or not end:
+                    self._send_json({"error": "start and end are required"}, 400)
+                    return
+                self._send_json(export_summary(start, end, symbol=symbol or None, include_opportunities=include))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         if self.path == "/api/data/journal":
             f = DATA_DIR / "signal_journal.jsonl"
             if f.exists():

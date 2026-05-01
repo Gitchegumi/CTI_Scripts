@@ -175,6 +175,12 @@ py_scripts/backtesting/back_test_strat.py
 # Generated files
 data/
 .claude/*.json
+node_modules/
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+coverage/
+*.tmp
 
 # Private Strategies (not committed to public repo)
 # Add your profitable strategy files here

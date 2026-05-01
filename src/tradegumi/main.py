@@ -33,6 +33,13 @@ from tradegumi.api.oanda_client import OandaClient
 from tradegumi.api.matchtrader_client import MatchTraderClient
 from tradegumi.api.base_client import ExecutionClient, OrderRequest
 from tradegumi.signal_engine import SignalEngine
+from tradegumi.strategy_metrics import (
+    CriterionResult,
+    EvaluatedOpportunity,
+    get_summary,
+    record_opportunity,
+    write_state_snapshot,
+)
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
@@ -153,21 +160,65 @@ def check_and_execute(
     Returns (tag, trend, lr_1h, lr_15, lr_5) where tag is a summary like
     'flat', 'U(no_sig)', 'U(conf=0.7)', 'blocked', 'err', 'closed'.
     """
+    def persist(opportunity: EvaluatedOpportunity) -> None:
+        try:
+            record_opportunity(opportunity)
+            end = datetime.now(CT_TZ)
+            start = end.replace(hour=0, minute=0, second=0, microsecond=0)
+            write_state_snapshot(get_summary(start.isoformat(), end.isoformat()))
+        except Exception as exc:
+            log.warning("%s: failed to persist strategy diagnostic: %s", symbol, exc)
+
     if not is_trading_open(symbol):
         log.debug("%s: outside trading hours", symbol)
+        now = datetime.now(CT_TZ).isoformat()
+        persist(EvaluatedOpportunity(
+            id=f"{symbol}:{now}",
+            evaluated_at=now,
+            symbol=symbol,
+            mode=mode,
+            final_decision="skipped",
+            decision_reason="market_closed",
+            data_quality_notes=["market closed"],
+            threshold_version="session",
+        ))
         return "closed", None, 0.0, 0.0, 0.0
 
     if is_swap_blackout(symbol):
         log.debug("%s: swap rollover blackout — skipping signal check", symbol)
+        now = datetime.now(CT_TZ).isoformat()
+        persist(EvaluatedOpportunity(
+            id=f"{symbol}:{now}",
+            evaluated_at=now,
+            symbol=symbol,
+            mode=mode,
+            final_decision="skipped",
+            decision_reason="rollover",
+            data_quality_notes=["swap rollover blackout"],
+            threshold_version="session",
+        ))
         return "rollover", None, 0.0, 0.0, 0.0
 
     try:
-        signal_obj, trend, lr_1h, lr_15, lr_5 = engine.check_symbol(symbol)
+        signal_obj, trend, lr_1h, lr_15, lr_5, diagnostic = engine.check_symbol(symbol)
     except Exception as e:
         log.error("%s: signal engine error: %s", symbol, e)
+        now = datetime.now(CT_TZ).isoformat()
+        persist(EvaluatedOpportunity(
+            id=f"{symbol}:{now}",
+            evaluated_at=now,
+            symbol=symbol,
+            mode=mode,
+            final_decision="indeterminate",
+            decision_reason="engine_error",
+            data_complete=False,
+            data_quality_notes=[str(e)],
+            threshold_version="unknown",
+        ))
         return "err", None, 0.0, 0.0, 0.0
 
     if signal_obj is None:
+        persist(diagnostic.to_opportunity(mode))
         # No signal — trend might be flat or no clear direction
         if trend is None:
             return "flat", trend, lr_1h, lr_15, lr_5
@@ -206,6 +257,21 @@ def check_and_execute(
     can_open, reason = can_open_position(client)
     if not can_open:
         signal_obj.blocked_reason = reason
+        opportunity = diagnostic.to_opportunity(mode)
+        opportunity.final_decision = "rejected"
+        opportunity.decision_reason = "risk_blocked"
+        opportunity.criteria.append(CriterionResult(
+            criterion_name="risk",
+            layer="risk",
+            measured_value=reason,
+            threshold_value="risk checks pass",
+            threshold_operator="boolean",
+            passed=False,
+            required=True,
+            blocked_signal=True,
+        ))
+        persist(opportunity)
+        log.warning("%s: risk-blocked actionable candidate: %s", symbol, reason)
         post_signal(signal_obj)
         send_signal_callback({
             "symbol": signal_obj.symbol,
@@ -218,6 +284,7 @@ def check_and_execute(
         return f"{signal_obj.direction[0]}(blocked)", trend, lr_1h, lr_15, lr_5
 
     # Post signal to Discord (alert_only and demo both alert)
+    persist(diagnostic.to_opportunity(mode))
     post_signal(signal_obj)
     send_signal_callback({
         "symbol": signal_obj.symbol,
@@ -258,7 +325,7 @@ def check_and_execute(
         except Exception as e:
             log.error("%s: order failed: %s", symbol, e)
 
-    return tag, trend, lr_15, lr_5
+    return tag, trend, lr_1h, lr_15, lr_5
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

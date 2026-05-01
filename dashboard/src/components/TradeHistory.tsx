@@ -144,7 +144,7 @@ export default function TradeHistory({ trades, correlations }: TradeHistoryProps
   }, [correlations]);
 
   const filtered = useMemo(() => {
-    let result = filterSide !== "all" ? trades.filter(t => t.side === filterSide) : [...trades];
+    const result = filterSide !== "all" ? trades.filter(t => t.side === filterSide) : [...trades];
     return result.sort((a, b) => {
       switch (sortBy) {
         case "pnl":    return b.pnl - a.pnl;

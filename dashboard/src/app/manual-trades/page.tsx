@@ -344,7 +344,7 @@ function DeleteConfirmModal({
 
 export default function ManualTradesPage() {
   const [trades, setTrades] = useState<ManualTrade[]>([]);
-  const [automatedTrades, setAutomatedTrades] = useState<any[]>([]);
+  const [, setAutomatedTrades] = useState<unknown[]>([]);
   const [mode, setMode] = useState<string>("alert_only");
   const [stats, setStats] = useState<ManualTradeSummary | null>(null);
   const [loading, setLoading] = useState(true);

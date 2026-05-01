@@ -61,9 +61,12 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
 
   useEffect(() => {
     if (status) {
-      setPendingMode(status.mode);
-      setPendingChallengeType(status.challenge_type);
-      setPendingPhase(status.phase);
+      const id = window.setTimeout(() => {
+        setPendingMode(status.mode);
+        setPendingChallengeType(status.challenge_type);
+        setPendingPhase(status.phase);
+      }, 0);
+      return () => window.clearTimeout(id);
     }
   }, [status]);
 
