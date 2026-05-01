@@ -123,7 +123,7 @@
 - [X] T047 Run backend validation commands and record signal-loop diagnostic overhead from `specs/002-strategy-metrics/quickstart.md`
 - [X] T048 Run dashboard validation commands and verify 90-day summary load timing from `specs/002-strategy-metrics/quickstart.md`
 - [X] T049 Update documentation notes for strategy metrics usage in `README.md`
-- [ ] T050 Submit PR with DockeGumi as reviewer using `specs/002-strategy-metrics/tasks.md` as the completion checklist
+- [X] T050 Submit PR with DockeGumi as reviewer using `specs/002-strategy-metrics/tasks.md` as the completion checklist
 
 ---
 
