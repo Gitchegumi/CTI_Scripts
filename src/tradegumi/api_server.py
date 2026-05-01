@@ -11,6 +11,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
 
 from tradegumi import config
 from tradegumi.manual_trades import _now_iso as manual_now_iso
@@ -81,13 +82,19 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def _get_query_param(self, name: str) -> Optional[str]:
         """Extract a query parameter from the path."""
-        if "?" not in self.path:
+        values = parse_qs(urlparse(self.path).query)
+        if name not in values or not values[name]:
             return None
-        qs = self.path.split("?", 1)[1]
-        for pair in qs.split("&"):
-            if pair.startswith(f"{name}="):
-                return pair.split("=", 1)[1]
-        return None
+        return values[name][0]
+
+    def _route_path(self) -> str:
+        """Return the request path without query parameters."""
+        path = urlparse(self.path).path
+        if path == "/api/manual-trades":
+            return "/api/trades/manual"
+        if path.startswith("/api/manual-trades/"):
+            return f"/api/trades/manual/{path.removeprefix('/api/manual-trades/')}"
+        return path
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -97,8 +104,9 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
     # ── GET endpoints ──────────────────────────────────────────────────────
 
     def do_GET(self):
+        path = self._route_path()
 
-        if self.path == "/api/status":
+        if path == "/api/status":
             # Current config + runtime state
             state = get_runtime_state()
             self._send_json({
@@ -115,7 +123,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             })
             return
 
-        if self.path == "/api/data/loop_state":
+        if path == "/api/data/loop_state":
             f = DATA_DIR / "loop_state.json"
             if f.exists():
                 self._send_json(json.loads(f.read_text()))
@@ -123,7 +131,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"symbols": [], "mode": config.TRADEGUMI_MODE, "provider": "Oanda"})
             return
 
-        if self.path == "/api/data/watchlist":
+        if path == "/api/data/watchlist":
             f = DATA_DIR / "watchlist.json"
             if f.exists():
                 self._send_json(json.loads(f.read_text()))
@@ -131,7 +139,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"tier1": [], "tier2": [], "below": [], "ranked": []})
             return
 
-        if self.path == "/api/data/signals":
+        if path == "/api/data/signals":
             f = DATA_DIR / "signals.json"
             if f.exists():
                 self._send_json(json.loads(f.read_text()))
@@ -139,7 +147,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json([])
             return
 
-        if self.path.startswith("/api/strategy-metrics/summary"):
+        if path.startswith("/api/strategy-metrics/summary"):
             try:
                 from tradegumi.strategy_metrics import get_summary
                 start = self._get_query_param("start")
@@ -155,7 +163,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path.startswith("/api/strategy-metrics/opportunities"):
+        if path.startswith("/api/strategy-metrics/opportunities"):
             try:
                 from tradegumi.strategy_metrics import get_opportunities
                 start = self._get_query_param("start")
@@ -184,7 +192,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path.startswith("/api/strategy-metrics/compare"):
+        if path.startswith("/api/strategy-metrics/compare"):
             try:
                 from tradegumi.strategy_metrics import compare_periods
                 base_start = self._get_query_param("base_start")
@@ -202,7 +210,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path.startswith("/api/strategy-metrics/export"):
+        if path.startswith("/api/strategy-metrics/export"):
             try:
                 from tradegumi.strategy_metrics import export_summary
                 start = self._get_query_param("start")
@@ -219,7 +227,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path == "/api/data/journal":
+        if path == "/api/data/journal":
             f = DATA_DIR / "signal_journal.jsonl"
             if f.exists():
                 entries = []
@@ -237,7 +245,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         # ── Live API endpoints (require Oanda client) ──
-        if self.path == "/api/positions":
+        if path == "/api/positions":
             client = get_runtime_state().get("client")
             if not client:
                 self._send_json({"error": "client not available"}, 503)
@@ -260,18 +268,16 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path.startswith("/api/trades") and not self.path.startswith("/api/trades/manual"):
+        if path.startswith("/api/trades") and not path.startswith("/api/trades/manual"):
             client = get_runtime_state().get("client")
             if not client:
                 self._send_json({"error": "client not available"}, 503)
                 return
             # Parse count from query string
             count = 50
-            if "?" in self.path:
-                qs = self.path.split("?", 1)[1]
-                for pair in qs.split("&"):
-                    if pair.startswith("count="):
-                        count = int(pair.split("=")[1])
+            count_param = self._get_query_param("count")
+            if count_param:
+                count = int(count_param)
             try:
                 trades = client.get_trade_history(count=count)
                 self._send_json([{
@@ -292,7 +298,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         # Manual trades endpoints — require auth
-        if self.path == "/api/trades/manual":
+        if path == "/api/trades/manual":
             if not self._require_auth():
                 return
             # GET /api/trades/manual — list manual trades with filters
@@ -316,7 +322,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        if self.path == "/api/trades/manual/stats":
+        if path == "/api/trades/manual/stats":
             if not self._require_auth():
                 return
             # GET /api/trades/manual/stats — summary statistics
@@ -331,12 +337,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         body = self._read_body()
+        path = self._route_path()
         
-        if self.path.startswith("/api/trades/manual/"):
+        if path.startswith("/api/trades/manual/"):
             # PUT /api/trades/manual/:id — update trade
             if not self._require_auth():
                 return
-            parts = self.path.split("/")
+            parts = path.split("/")
             if len(parts) >= 5:
                 trade_id_str = parts[4]
                 try:
@@ -382,11 +389,12 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Method not allowed"}, 405)
 
     def do_DELETE(self):
-        if self.path.startswith("/api/trades/manual/"):
+        path = self._route_path()
+        if path.startswith("/api/trades/manual/"):
             # DELETE /api/trades/manual/:id — delete trade
             if not self._require_auth():
                 return
-            parts = self.path.split("/")
+            parts = path.split("/")
             if len(parts) >= 5:
                 trade_id_str = parts[4]
                 try:
@@ -414,8 +422,9 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self._read_body()
+        path = self._route_path()
 
-        if self.path == "/api/config/mode":
+        if path == "/api/config/mode":
             mode = body.get("mode", "").lower()
             if mode not in ("alert_only", "demo", "live"):
                 self._send_json({"error": "invalid mode. Use: alert_only, demo, live"}, 400)
@@ -429,7 +438,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             send_mode_change_callback(mode, previous)
             self._send_json({"mode": config.TRADEGUMI_MODE})
 
-        elif self.path == "/api/config/challenge_type":
+        elif path == "/api/config/challenge_type":
             challenge_type = body.get("challenge_type", "").lower()
             if challenge_type not in ("1-step", "2-step", "instant"):
                 self._send_json({"error": "invalid challenge_type. Use: 1-step, 2-step, or instant"}, 400)
@@ -449,7 +458,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 "phase": config.CTI_PHASE,
             })
 
-        elif self.path == "/api/config/program":
+        elif path == "/api/config/program":
             program = body.get("program", "").lower()
             if program not in ("challenge", "instant"):
                 self._send_json({"error": "invalid program. Use: challenge, instant"}, 400)
@@ -460,7 +469,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             log.info("API: Program changed to %s", program)
             self._send_json({"program": config.CTI_PROGRAM, "phase": config.CTI_PHASE})
 
-        elif self.path == "/api/config/phase":
+        elif path == "/api/config/phase":
             phase = body.get("phase")
             if phase is None or int(phase) not in (1, 2, 3):
                 self._send_json({"error": "invalid phase. Use: 1, 2, or 3"}, 400)
@@ -477,7 +486,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     log.info("API: Account metrics refreshed immediately")
             self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
 
-        elif self.path == "/api/journal/grade":
+        elif path == "/api/journal/grade":
             signal_id = body.get("signal_id", "").strip()
             grade = body.get("grade", "").strip().upper()
             notes = body.get("notes", "").strip()
@@ -491,7 +500,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Signal not found or invalid grade"}, 404)
 
-        elif self.path == "/api/journal/notes":
+        elif path == "/api/journal/notes":
             signal_id = body.get("signal_id", "").strip()
             notes = body.get("notes", "").strip()
             if not signal_id:
@@ -504,7 +513,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Signal not found"}, 404)
 
-        elif self.path == "/api/trades/manual":
+        elif path == "/api/trades/manual":
             # POST /api/trades/manual — create new manual trade
             if not self._require_auth():
                 return
@@ -541,12 +550,12 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
-        elif self.path.startswith("/api/trades/manual/"):
+        elif path.startswith("/api/trades/manual/"):
             # PUT/DELETE are handled by do_PUT/do_DELETE
             self._send_json({"error": "Method not allowed — use PUT or DELETE"}, 405)
             return
 
-        elif self.path == "/api/action/rescan":
+        elif path == "/api/action/rescan":
             # Trigger an immediate re-scan
             state = get_runtime_state()
             state["force_rescan"] = True
@@ -554,7 +563,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             log.info("API: Re-scan triggered via API")
             self._send_json({"status": "rescan_triggered"})
 
-        elif self.path == "/api/action/restart":
+        elif path == "/api/action/restart":
             # Signal main loop to restart (set flag)
             state = get_runtime_state()
             state["restart_requested"] = True
