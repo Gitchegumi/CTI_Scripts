@@ -126,9 +126,13 @@ interface TradeFormData {
   exit_price: string;
   entry_time: string;
   exit_time: string;
+  volume: string;
+  fees: string;
   notes: string;
   tags: string;
 }
+
+type TradePayload = Omit<Partial<TradeFormData>, "tags"> & { tags?: string[] };
 
 const EMPTY_FORM: TradeFormData = {
   symbol: "",
@@ -137,6 +141,8 @@ const EMPTY_FORM: TradeFormData = {
   exit_price: "",
   entry_time: "",
   exit_time: "",
+  volume: "",
+  fees: "",
   notes: "",
   tags: "",
 };
@@ -149,7 +155,7 @@ function TradeFormModal({
 }: {
   trade?: ManualTrade;
   mode: string;
-  onSave: (data: Partial<TradeFormData>) => void;
+  onSave: (data: TradePayload) => void;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<TradeFormData>(() => {
@@ -161,6 +167,8 @@ function TradeFormModal({
       exit_price: trade.exit_price?.toString() ?? "",
       entry_time: trade.entry_time.slice(0, 16), // datetime-local format
       exit_time: trade.exit_time?.slice(0, 16) ?? "",
+      volume: trade.volume?.toString() ?? "",
+      fees: trade.fees?.toString() ?? "",
       notes: trade.notes,
       tags: trade.tags?.join(", ") ?? "",
     };
@@ -175,7 +183,7 @@ function TradeFormModal({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const payload: Partial<TradeFormData> = {};
+    const payload: TradePayload = {};
 
     if (canEditAll) {
       if (form.symbol.trim()) payload.symbol = form.symbol.trim().toUpperCase();
@@ -184,9 +192,14 @@ function TradeFormModal({
       if (form.exit_price) payload.exit_price = form.exit_price;
       if (form.entry_time) payload.entry_time = new Date(form.entry_time).toISOString();
       if (form.exit_time) payload.exit_time = new Date(form.exit_time).toISOString();
+      if (form.volume) payload.volume = form.volume;
+      if (form.fees) payload.fees = form.fees;
     }
     payload.notes = form.notes;
-    payload.tags = form.tags;
+    payload.tags = form.tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
 
     onSave(payload);
   }
@@ -286,6 +299,33 @@ function TradeFormModal({
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Volume</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.volume}
+                onChange={(e) => updateField("volume", e.target.value)}
+                placeholder="Optional"
+                disabled={!canEditAll}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Fees</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.fees}
+                onChange={(e) => updateField("fees", e.target.value)}
+                placeholder="0.00"
+                disabled={!canEditAll}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+              />
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs text-slate-500 mb-1">Notes</label>
             <textarea
@@ -368,6 +408,16 @@ function DeleteConfirmModal({
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
+async function readApiError(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data?.error === "string" && data.error.trim()) return data.error;
+  } catch {
+    // Fall through to status text below.
+  }
+  return res.statusText || `HTTP ${res.status}`;
+}
+
 export default function ManualTradesPage() {
   const [trades, setTrades] = useState<ManualTrade[]>([]);
   const [, setAutomatedTrades] = useState<unknown[]>([]);
@@ -417,7 +467,7 @@ export default function ManualTradesPage() {
           setError("Unauthorized — please log in");
           return;
         }
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error(await readApiError(res));
       }
       const data = await res.json();
       setTrades(Array.isArray(data) ? data : []);
@@ -464,14 +514,14 @@ export default function ManualTradesPage() {
   }, [mode]);
 
   // Create trade
-  async function createTrade(data: Partial<TradeFormData>) {
+  async function createTrade(data: TradePayload) {
     try {
       const res = await fetch("/api/manual-trades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await readApiError(res));
       await loadTrades();
       await loadStats();
       setShowForm(false);
@@ -481,14 +531,14 @@ export default function ManualTradesPage() {
   }
 
   // Update trade
-  async function updateTrade(id: string, data: Partial<TradeFormData>) {
+  async function updateTrade(id: string, data: TradePayload) {
     try {
       const res = await fetch(`/api/manual-trades/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await readApiError(res));
       await loadTrades();
       await loadStats();
       setEditingTrade(undefined);
@@ -502,7 +552,7 @@ export default function ManualTradesPage() {
   async function deleteTrade(id: string) {
     try {
       const res = await fetch(`/api/manual-trades/${encodeURIComponent(id)}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await readApiError(res));
       await loadTrades();
       await loadStats();
       setDeletingTrade(null);
@@ -533,7 +583,7 @@ export default function ManualTradesPage() {
       if (filterSymbol) params.set("symbol", filterSymbol);
       if (filterStatus !== "all") params.set("status", filterStatus);
       const res = await fetch(`/api/manual-trades/export?${params.toString()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -671,6 +721,8 @@ export default function ManualTradesPage() {
                       <th className="px-3 py-2 text-left font-medium">Dir</th>
                       <th className="px-3 py-2 text-right font-medium">Entry</th>
                       <th className="px-3 py-2 text-right font-medium">Exit</th>
+                      <th className="px-3 py-2 text-right font-medium">Volume</th>
+                      <th className="px-3 py-2 text-right font-medium">Fees</th>
                       <th className="px-3 py-2 text-right font-medium">P&L</th>
                       <th className="px-3 py-2 text-left font-medium">Status</th>
                       <th className="px-3 py-2 text-left font-medium">Entry Time</th>
@@ -703,6 +755,14 @@ export default function ManualTradesPage() {
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-slate-300">
                           {trade.exit_price ? fmtPrice(trade.exit_price, trade.symbol) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-300">
+                          {trade.volume !== null && trade.volume !== undefined
+                            ? trade.volume.toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-300">
+                          {fmtPL(trade.fees || 0)}
                         </td>
                         <td className="px-3 py-2">
                           <PLCell

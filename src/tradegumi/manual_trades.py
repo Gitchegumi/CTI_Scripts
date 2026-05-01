@@ -969,8 +969,12 @@ def delete_trade_record(
     try:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM manual_trades WHERE id = ? AND (bot_mode = ? OR bot_mode IS NULL OR bot_mode = '')", (trade_id, ALERT_ONLY))
+        deleted = cursor.rowcount > 0
+        if deleted:
+            cursor.execute("DELETE FROM trade_annotations WHERE trade_identity = ?", (identity,))
+            cursor.execute("DELETE FROM trade_overrides WHERE trade_identity = ?", (identity,))
         conn.commit()
-        return cursor.rowcount > 0
+        return deleted
     finally:
         conn.close()
 

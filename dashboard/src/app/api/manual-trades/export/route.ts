@@ -10,7 +10,7 @@ function isAuthed(req: NextRequest): boolean {
 }
 
 function getApiHeaders(req: NextRequest): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = req.cookies.get(COOKIE)?.value;
   if (token) headers["X-API-Key"] = token;
   return headers;

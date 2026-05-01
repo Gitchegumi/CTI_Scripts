@@ -177,11 +177,39 @@ def test_delete_is_limited_to_alert_only_manual_trades(tmp_path):
         bot_mode="alert_only",
         db_path=db_path,
     )
+    update_trade_record(
+        created["id"],
+        {"notes": "remove me", "tags": ["cleanup"], "entry_price": 0.67},
+        bot_mode="alert_only",
+        db_path=db_path,
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO trade_annotations
+            (trade_identity, source, source_trade_id, bot_mode, notes, tags, created_at, updated_at)
+            VALUES (?, 'manual', ?, 'alert_only', 'orphan check', '[]', 'now', 'now')
+            """,
+            (created["id"], created["source_trade_id"]),
+        )
+        conn.execute(
+            """
+            INSERT INTO trade_overrides
+            (trade_identity, source, source_trade_id, bot_mode, values_json, created_at, updated_at)
+            VALUES (?, 'manual', ?, 'alert_only', '{}', 'now', 'now')
+            """,
+            (created["id"], created["source_trade_id"]),
+        )
 
     with pytest.raises(TradePermissionError):
         delete_trade_record(created["id"], bot_mode="demo", db_path=db_path)
     assert delete_trade_record(created["id"], bot_mode="alert_only", db_path=db_path) is True
     assert get_unified_trade_history(bot_mode="alert_only", db_path=db_path) == []
+    with sqlite3.connect(db_path) as conn:
+        annotation_count = conn.execute("SELECT COUNT(*) FROM trade_annotations").fetchone()[0]
+        override_count = conn.execute("SELECT COUNT(*) FROM trade_overrides").fetchone()[0]
+    assert annotation_count == 0
+    assert override_count == 0
 
 
 def test_summary_and_agent_export_include_current_mode_records(tmp_path):
