@@ -80,7 +80,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     // Extract ID from path: /api/manual-trades/123
-    const id = req.nextUrl.pathname.split("/").pop();
+    const id = decodeURIComponent(req.nextUrl.pathname.split("/").pop() ?? "");
     if (!id || id === "manual-trades") {
       return NextResponse.json({ error: "Trade ID required" }, { status: 400 });
     }
@@ -108,7 +108,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
-    const id = req.nextUrl.pathname.split("/").pop();
+    const id = decodeURIComponent(req.nextUrl.pathname.split("/").pop() ?? "");
     if (!id || id === "manual-trades") {
       return NextResponse.json({ error: "Trade ID required" }, { status: 400 });
     }

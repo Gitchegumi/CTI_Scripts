@@ -127,6 +127,7 @@ interface TradeFormData {
   entry_time: string;
   exit_time: string;
   notes: string;
+  tags: string;
 }
 
 const EMPTY_FORM: TradeFormData = {
@@ -137,14 +138,17 @@ const EMPTY_FORM: TradeFormData = {
   entry_time: "",
   exit_time: "",
   notes: "",
+  tags: "",
 };
 
 function TradeFormModal({
   trade,
+  mode,
   onSave,
   onClose,
 }: {
   trade?: ManualTrade;
+  mode: string;
   onSave: (data: Partial<TradeFormData>) => void;
   onClose: () => void;
 }) {
@@ -158,10 +162,12 @@ function TradeFormModal({
       entry_time: trade.entry_time.slice(0, 16), // datetime-local format
       exit_time: trade.exit_time?.slice(0, 16) ?? "",
       notes: trade.notes,
+      tags: trade.tags?.join(", ") ?? "",
     };
   });
 
   const isEdit = !!trade;
+  const canEditAll = !isEdit || mode === "alert_only";
 
   function updateField(field: keyof TradeFormData, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -171,13 +177,16 @@ function TradeFormModal({
     e.preventDefault();
     const payload: Partial<TradeFormData> = {};
 
-    if (form.symbol.trim()) payload.symbol = form.symbol.trim().toUpperCase();
-    if (form.direction) payload.direction = form.direction;
-    if (form.entry_price) payload.entry_price = form.entry_price;
-    if (form.exit_price) payload.exit_price = form.exit_price;
-    if (form.entry_time) payload.entry_time = new Date(form.entry_time).toISOString();
-    if (form.exit_time) payload.exit_time = new Date(form.exit_time).toISOString();
-    if (form.notes) payload.notes = form.notes;
+    if (canEditAll) {
+      if (form.symbol.trim()) payload.symbol = form.symbol.trim().toUpperCase();
+      if (form.direction) payload.direction = form.direction;
+      if (form.entry_price) payload.entry_price = form.entry_price;
+      if (form.exit_price) payload.exit_price = form.exit_price;
+      if (form.entry_time) payload.entry_time = new Date(form.entry_time).toISOString();
+      if (form.exit_time) payload.exit_time = new Date(form.exit_time).toISOString();
+    }
+    payload.notes = form.notes;
+    payload.tags = form.tags;
 
     onSave(payload);
   }
@@ -206,7 +215,8 @@ function TradeFormModal({
                 value={form.symbol}
                 onChange={(e) => updateField("symbol", e.target.value)}
                 placeholder="EURUSD"
-                required
+                required={canEditAll}
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
               />
             </div>
@@ -215,6 +225,7 @@ function TradeFormModal({
               <select
                 value={form.direction}
                 onChange={(e) => updateField("direction", e.target.value)}
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
               >
                 <option value="long">Long</option>
@@ -231,7 +242,8 @@ function TradeFormModal({
                 step="0.00001"
                 value={form.entry_price}
                 onChange={(e) => updateField("entry_price", e.target.value)}
-                required
+                required={canEditAll}
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -243,6 +255,7 @@ function TradeFormModal({
                 value={form.exit_price}
                 onChange={(e) => updateField("exit_price", e.target.value)}
                 placeholder="Optional"
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
               />
             </div>
@@ -255,7 +268,8 @@ function TradeFormModal({
                 type="datetime-local"
                 value={form.entry_time}
                 onChange={(e) => updateField("entry_time", e.target.value)}
-                required
+                required={canEditAll}
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 [color-scheme:dark]"
               />
             </div>
@@ -266,6 +280,7 @@ function TradeFormModal({
                 value={form.exit_time}
                 onChange={(e) => updateField("exit_time", e.target.value)}
                 placeholder="Optional"
+                disabled={!canEditAll}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600 [color-scheme:dark]"
               />
             </div>
@@ -282,12 +297,23 @@ function TradeFormModal({
             />
           </div>
 
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Tags</label>
+            <input
+              type="text"
+              value={form.tags}
+              onChange={(e) => updateField("tags", e.target.value)}
+              placeholder="setup, session, review"
+              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+            />
+          </div>
+
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
               className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-sm rounded py-2 transition-colors"
             >
-              {isEdit ? "Save Changes" : "Add Trade"}
+              {isEdit && !canEditAll ? "Save Notes & Tags" : isEdit ? "Save Changes" : "Add Trade"}
             </button>
             <button
               type="button"
@@ -354,6 +380,7 @@ export default function ManualTradesPage() {
   const [deletingTrade, setDeletingTrade] = useState<ManualTrade | null>(null);
   const [filterSymbol, setFilterSymbol] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "open" | "closed">("all");
+  const [exporting, setExporting] = useState(false);
 
   // Load mode
   async function loadMode() {
@@ -426,6 +453,7 @@ export default function ManualTradesPage() {
   // Refresh interval
   useEffect(() => {
     const id = setInterval(() => {
+      loadMode();
       loadTrades();
       loadStats();
       if (mode !== "alert_only") {
@@ -453,9 +481,9 @@ export default function ManualTradesPage() {
   }
 
   // Update trade
-  async function updateTrade(id: number, data: Partial<TradeFormData>) {
+  async function updateTrade(id: string, data: Partial<TradeFormData>) {
     try {
-      const res = await fetch(`/api/manual-trades/${id}`, {
+      const res = await fetch(`/api/manual-trades/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -471,9 +499,9 @@ export default function ManualTradesPage() {
   }
 
   // Delete trade
-  async function deleteTrade(id: number) {
+  async function deleteTrade(id: string) {
     try {
-      const res = await fetch(`/api/manual-trades/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/manual-trades/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await loadTrades();
       await loadStats();
@@ -497,6 +525,29 @@ export default function ManualTradesPage() {
     () => Array.from(new Set(trades.map((t) => t.symbol))).sort(),
     [trades]
   );
+
+  async function exportTrades() {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterSymbol) params.set("symbol", filterSymbol);
+      if (filterStatus !== "all") params.set("status", filterStatus);
+      const res = await fetch(`/api/manual-trades/export?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `trade-agent-export-${mode}-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to export trades");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -530,6 +581,13 @@ export default function ManualTradesPage() {
               + Add Trade
             </button>
           )}
+          <button
+            onClick={exportTrades}
+            disabled={exporting}
+            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs px-3 py-1.5 rounded transition-colors"
+          >
+            {exporting ? "Exporting..." : "Export JSON"}
+          </button>
         </div>
       </div>
 
@@ -617,6 +675,7 @@ export default function ManualTradesPage() {
                       <th className="px-3 py-2 text-left font-medium">Status</th>
                       <th className="px-3 py-2 text-left font-medium">Entry Time</th>
                       <th className="px-3 py-2 text-left font-medium">Notes</th>
+                      <th className="px-3 py-2 text-left font-medium">Tags</th>
                       <th className="px-3 py-2 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
@@ -626,7 +685,16 @@ export default function ManualTradesPage() {
                         key={trade.id}
                         className="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors"
                       >
-                        <td className="px-3 py-2 font-medium text-white">{trade.symbol}</td>
+                        <td className="px-3 py-2 font-medium text-white">
+                          <div className="flex items-center gap-2">
+                            <span>{trade.symbol}</span>
+                            {trade.has_overrides && (
+                              <span className="text-[10px] uppercase tracking-wide text-amber-300 border border-amber-700/70 rounded px-1">
+                                edited
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-3 py-2">
                           <DirectionBadge direction={trade.direction} />
                         </td>
@@ -649,6 +717,9 @@ export default function ManualTradesPage() {
                         <td className="px-3 py-2 text-slate-400 max-w-[200px] truncate">
                           {trade.notes || "—"}
                         </td>
+                        <td className="px-3 py-2 text-slate-400 max-w-[180px] truncate">
+                          {trade.tags?.length ? trade.tags.join(", ") : "—"}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button
@@ -661,13 +732,15 @@ export default function ManualTradesPage() {
                             >
                               ✎
                             </button>
-                            <button
-                              onClick={() => setDeletingTrade(trade)}
-                              className="text-slate-500 hover:text-red-400 transition-colors px-1"
-                              title="Delete"
-                            >
-                              🗑
-                            </button>
+                            {(trade.permissions?.can_delete ?? mode === "alert_only") && (
+                              <button
+                                onClick={() => setDeletingTrade(trade)}
+                                className="text-slate-500 hover:text-red-400 transition-colors px-1"
+                                title="Delete"
+                              >
+                                🗑
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -684,6 +757,7 @@ export default function ManualTradesPage() {
       {showForm && (
         <TradeFormModal
           trade={editingTrade}
+          mode={mode}
           onSave={(data) => {
             if (editingTrade) {
               updateTrade(editingTrade.id, data);

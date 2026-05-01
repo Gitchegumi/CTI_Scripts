@@ -17,10 +17,10 @@
 
 **Purpose**: Prepare existing backend/frontend files and test entry points for the feature.
 
-- [ ] T001 Inspect existing manual-trade schema and test isolation patterns in `src/tradegumi/manual_trades.py` and `src/tradegumi/tests/`
-- [ ] T002 [P] Inspect current dashboard trade-history data flow in `dashboard/src/hooks/useData.ts`, `dashboard/src/lib/api.ts`, and `dashboard/src/components/TradeHistory.tsx`
-- [ ] T003 [P] Inspect current manual trades UI and proxy behavior in `dashboard/src/app/manual-trades/page.tsx` and `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
-- [ ] T004 [P] Create or update Python manual-trade test module scaffold in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T001 Inspect existing manual-trade schema and test isolation patterns in `src/tradegumi/manual_trades.py` and `src/tradegumi/tests/`
+- [X] T002 [P] Inspect current dashboard trade-history data flow in `dashboard/src/hooks/useData.ts`, `dashboard/src/lib/api.ts`, and `dashboard/src/components/TradeHistory.tsx`
+- [X] T003 [P] Inspect current manual trades UI and proxy behavior in `dashboard/src/app/manual-trades/page.tsx` and `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
+- [X] T004 [P] Create or update Python manual-trade test module scaffold in `src/tradegumi/tests/test_manual_trades.py`
 
 ---
 
@@ -30,13 +30,13 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Add bot-mode, source identity, tags, annotation, and override schema support with legacy `alert_only` defaults in `src/tradegumi/manual_trades.py`
-- [ ] T006 Add canonical trade identity and normalization helpers for manual and source trade records in `src/tradegumi/manual_trades.py`
-- [ ] T007 Add permission calculation helper for `can_edit_all_fields`, `can_edit_notes_tags`, and `can_delete` in `src/tradegumi/manual_trades.py`
-- [ ] T008 Add backend response serialization for unified historical trades matching `contracts/manual-trades-api.md` in `src/tradegumi/manual_trades.py`
-- [ ] T009 Add agent export schema constants and field metadata helpers matching `contracts/agent-export.md` in `src/tradegumi/manual_trades.py`
-- [ ] T010 Update TypeScript trade history, permission, and agent export types in `dashboard/src/types/index.ts`
-- [ ] T011 Update API client types and unified trade-history/export method signatures in `dashboard/src/lib/api.ts`
+- [X] T005 Add bot-mode, source identity, tags, annotation, and override schema support with legacy `alert_only` defaults in `src/tradegumi/manual_trades.py`
+- [X] T006 Add canonical trade identity and normalization helpers for manual and source trade records in `src/tradegumi/manual_trades.py`
+- [X] T007 Add permission calculation helper for `can_edit_all_fields`, `can_edit_notes_tags`, and `can_delete` in `src/tradegumi/manual_trades.py`
+- [X] T008 Add backend response serialization for unified historical trades matching `contracts/manual-trades-api.md` in `src/tradegumi/manual_trades.py`
+- [X] T009 Add agent export schema constants and field metadata helpers matching `contracts/agent-export.md` in `src/tradegumi/manual_trades.py`
+- [X] T010 Update TypeScript trade history, permission, and agent export types in `dashboard/src/types/index.ts`
+- [X] T011 Update API client types and unified trade-history/export method signatures in `dashboard/src/lib/api.ts`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin.
 
@@ -50,21 +50,21 @@
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Add Python test for current-mode filtering and legacy `alert_only` defaulting in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T013 [P] [US1] Add Python test for duplicate canonical identity merge in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T014 [P] [US1] Add Python test for unified summary stats scoped to current mode in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T012 [P] [US1] Add Python test for current-mode filtering and legacy `alert_only` defaulting in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T013 [P] [US1] Add Python test for duplicate canonical identity merge in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T014 [P] [US1] Add Python test for unified summary stats scoped to current mode in `src/tradegumi/tests/test_manual_trades.py`
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Implement unified current-mode history query and merge logic in `src/tradegumi/manual_trades.py`
-- [ ] T016 [US1] Implement current-mode summary stats over unified history in `src/tradegumi/manual_trades.py`
-- [ ] T017 [US1] Update `GET /api/trades/manual`, `GET /api/trades/manual/stats`, and unified dashboard `GET /api/trades/history` handling in `src/tradegumi/api_server.py`
-- [ ] T018 [US1] Update Next.js manual-trades proxy query forwarding and response handling in `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
-- [ ] T019 [US1] Update Next.js manual-trades stats proxy response handling in `dashboard/src/app/api/manual-trades/stats/route.ts`
-- [ ] T020 [US1] Add Next.js proxy route for unified dashboard trade history in `dashboard/src/app/api/trades/history/route.ts`
-- [ ] T021 [US1] Update `useTradeHistory` to fetch unified current-mode history through `dashboard/src/lib/api.ts` in `dashboard/src/hooks/useData.ts`
-- [ ] T022 [US1] Update `/manual-trades` loading, empty, error, filtering, and table rendering for unified history in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T023 [US1] Update main dashboard `TradeHistory` field mapping for unified history records in `dashboard/src/components/TradeHistory.tsx`
+- [X] T015 [US1] Implement unified current-mode history query and merge logic in `src/tradegumi/manual_trades.py`
+- [X] T016 [US1] Implement current-mode summary stats over unified history in `src/tradegumi/manual_trades.py`
+- [X] T017 [US1] Update `GET /api/trades/manual`, `GET /api/trades/manual/stats`, and unified dashboard `GET /api/trades/history` handling in `src/tradegumi/api_server.py`
+- [X] T018 [US1] Update Next.js manual-trades proxy query forwarding and response handling in `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
+- [X] T019 [US1] Update Next.js manual-trades stats proxy response handling in `dashboard/src/app/api/manual-trades/stats/route.ts`
+- [X] T020 [US1] Add Next.js proxy route for unified dashboard trade history in `dashboard/src/app/api/trades/history/route.ts`
+- [X] T021 [US1] Update `useTradeHistory` to fetch unified current-mode history through `dashboard/src/lib/api.ts` in `dashboard/src/hooks/useData.ts`
+- [X] T022 [US1] Update `/manual-trades` loading, empty, error, filtering, and table rendering for unified history in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T023 [US1] Update main dashboard `TradeHistory` field mapping for unified history records in `dashboard/src/components/TradeHistory.tsx`
 
 **Checkpoint**: User Story 1 is fully functional and testable as the MVP.
 
@@ -78,19 +78,19 @@
 
 ### Tests for User Story 2
 
-- [ ] T024 [P] [US2] Add Python test for full-field manual trade updates in `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T025 [P] [US2] Add Python test for non-manual trade local overrides and merged display in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T026 [P] [US2] Add Python test preventing deletion of non-manual historical trades in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T024 [P] [US2] Add Python test for full-field manual trade updates in `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T025 [P] [US2] Add Python test for non-manual trade local overrides and merged display in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T026 [P] [US2] Add Python test preventing deletion of non-manual historical trades in `src/tradegumi/tests/test_manual_trades.py`
 
 ### Implementation for User Story 2
 
-- [ ] T027 [US2] Implement `alert_only` full-field update behavior for manual trades in `src/tradegumi/manual_trades.py`
-- [ ] T028 [US2] Implement local override create/update and merge behavior for non-manual trades in `src/tradegumi/manual_trades.py`
-- [ ] T029 [US2] Implement manual-only delete enforcement in `src/tradegumi/manual_trades.py`
-- [ ] T030 [US2] Update `PUT /api/trades/manual/{id}` and `DELETE /api/trades/manual/{id}` handling for `alert_only` permissions in `src/tradegumi/api_server.py`
-- [ ] T031 [US2] Update `/manual-trades` edit form to support all exposed unified trade fields in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T032 [US2] Update `/manual-trades` delete action visibility to allow only manual records in `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T033 [US2] Add local override indicator in `/manual-trades` for corrected non-manual records in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T027 [US2] Implement `alert_only` full-field update behavior for manual trades in `src/tradegumi/manual_trades.py`
+- [X] T028 [US2] Implement local override create/update and merge behavior for non-manual trades in `src/tradegumi/manual_trades.py`
+- [X] T029 [US2] Implement manual-only delete enforcement in `src/tradegumi/manual_trades.py`
+- [X] T030 [US2] Update `PUT /api/trades/manual/{id}` and `DELETE /api/trades/manual/{id}` handling for `alert_only` permissions in `src/tradegumi/api_server.py`
+- [X] T031 [US2] Update `/manual-trades` edit form to support all exposed unified trade fields in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T032 [US2] Update `/manual-trades` delete action visibility to allow only manual records in `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T033 [US2] Add local override indicator in `/manual-trades` for corrected non-manual records in `dashboard/src/app/manual-trades/page.tsx`
 
 **Checkpoint**: User Stories 1 and 2 both work independently.
 
@@ -104,19 +104,19 @@
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Add Python test for notes/tags-only updates outside `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T035 [P] [US3] Add Python test rejecting protected field changes outside `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T036 [P] [US3] Add Python test for annotation, override, and trade isolation across modes in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T034 [P] [US3] Add Python test for notes/tags-only updates outside `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T035 [P] [US3] Add Python test rejecting protected field changes outside `alert_only` in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T036 [P] [US3] Add Python test for annotation, override, and trade isolation across modes in `src/tradegumi/tests/test_manual_trades.py`
 
 ### Implementation for User Story 3
 
-- [ ] T037 [US3] Implement notes and tags persistence for all modes in `src/tradegumi/manual_trades.py`
-- [ ] T038 [US3] Implement protected-field rejection for non-`alert_only` updates in `src/tradegumi/manual_trades.py`
-- [ ] T039 [US3] Update API error responses for protected-field updates and disallowed creates/deletes in `src/tradegumi/api_server.py`
-- [ ] T040 [US3] Update `/manual-trades` form to render read-only trade facts and editable notes/tags outside `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T041 [US3] Hide Add Trade and Delete controls outside `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T042 [US3] Surface protected-field save errors from the proxy/API in `dashboard/src/app/manual-trades/page.tsx`
-- [ ] T043 [US3] Ensure dashboard and manual-trades refresh paths refetch after mode switches in `dashboard/src/hooks/useData.ts`
+- [X] T037 [US3] Implement notes and tags persistence for all modes in `src/tradegumi/manual_trades.py`
+- [X] T038 [US3] Implement protected-field rejection for non-`alert_only` updates in `src/tradegumi/manual_trades.py`
+- [X] T039 [US3] Update API error responses for protected-field updates and disallowed creates/deletes in `src/tradegumi/api_server.py`
+- [X] T040 [US3] Update `/manual-trades` form to render read-only trade facts and editable notes/tags outside `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T041 [US3] Hide Add Trade and Delete controls outside `alert_only` in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T042 [US3] Surface protected-field save errors from the proxy/API in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T043 [US3] Ensure dashboard and manual-trades refresh paths refetch after mode switches in `dashboard/src/hooks/useData.ts`
 
 **Checkpoint**: All user stories are independently functional.
 
@@ -130,17 +130,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T044 [P] [US4] Add Python test for Agent Export top-level schema, schema name, chunking metadata, and metadata in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T045 [P] [US4] Add Python test for Agent Export mode isolation and legacy `alert_only` defaulting in `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T046 [P] [US4] Add Python test for exported override/source/displayed values and optional linked strategy/signal context in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T044 [P] [US4] Add Python test for Agent Export top-level schema, schema name, chunking metadata, and metadata in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T045 [P] [US4] Add Python test for Agent Export mode isolation and legacy `alert_only` defaulting in `src/tradegumi/tests/test_manual_trades.py`
+- [X] T046 [P] [US4] Add Python test for exported override/source/displayed values and optional linked strategy/signal context in `src/tradegumi/tests/test_manual_trades.py`
 
 ### Implementation for User Story 4
 
-- [ ] T047 [US4] Implement current-mode Agent Export generation, including optional linked strategy/signal context when already available, in `src/tradegumi/manual_trades.py`
-- [ ] T048 [US4] Add `GET /api/trades/manual/export` handling in `src/tradegumi/api_server.py`
-- [ ] T049 [US4] Create Next.js export proxy route in `dashboard/src/app/api/manual-trades/export/route.ts` and verify it is not captured by `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
-- [ ] T050 [US4] Add manual-trades Agent Export client method in `dashboard/src/lib/api.ts`
-- [ ] T051 [US4] Add current-mode Agent Export action and error handling in `dashboard/src/app/manual-trades/page.tsx`
+- [X] T047 [US4] Implement current-mode Agent Export generation, including optional linked strategy/signal context when already available, in `src/tradegumi/manual_trades.py`
+- [X] T048 [US4] Add `GET /api/trades/manual/export` handling in `src/tradegumi/api_server.py`
+- [X] T049 [US4] Create Next.js export proxy route in `dashboard/src/app/api/manual-trades/export/route.ts` and verify it is not captured by `dashboard/src/app/api/manual-trades/[[...id]]/route.ts`
+- [X] T050 [US4] Add manual-trades Agent Export client method in `dashboard/src/lib/api.ts`
+- [X] T051 [US4] Add current-mode Agent Export action and error handling in `dashboard/src/app/manual-trades/page.tsx`
 
 **Checkpoint**: Agent-ready exports are available and mode-isolated.
 
@@ -150,12 +150,12 @@
 
 **Purpose**: Validate the full feature and satisfy project quality gates.
 
-- [ ] T052 [P] Update developer-facing notes for mode-isolated manual trade history and Agent Export in `src/tradegumi/manual_trades.py`
-- [ ] T053 Run Python tests for manual trade behavior with pytest from `src/tradegumi/tests/test_manual_trades.py`
-- [ ] T054 Run available dashboard lint/typecheck validation from `dashboard/package.json`
+- [X] T052 [P] Update developer-facing notes for mode-isolated manual trade history and Agent Export in `src/tradegumi/manual_trades.py`
+- [X] T053 Run Python tests for manual trade behavior with pytest from `src/tradegumi/tests/test_manual_trades.py`
+- [X] T054 Run available dashboard lint/typecheck validation from `dashboard/package.json`
 - [ ] T055 Run the manual validation flow in `specs/003-manual-trade-permissions/quickstart.md`
-- [ ] T056 Review changed Python code for required module, public function, public method, and non-trivial helper docstrings in `src/tradegumi/manual_trades.py` and `src/tradegumi/api_server.py`
-- [ ] T057 Review changed code for intention-revealing names, simple control flow, and no unexplained magic values across `src/tradegumi/` and `dashboard/src/`
+- [X] T056 Review changed Python code for required module, public function, public method, and non-trivial helper docstrings in `src/tradegumi/manual_trades.py` and `src/tradegumi/api_server.py`
+- [X] T057 Review changed code for intention-revealing names, simple control flow, and no unexplained magic values across `src/tradegumi/` and `dashboard/src/`
 - [ ] T058 Submit PR with DockeGumi as reviewer
 
 ---

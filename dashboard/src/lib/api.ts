@@ -1,7 +1,9 @@
 import type {
+  AgentExport,
   StrategyMetricOpportunity,
   StrategyMetricsComparison,
   StrategyMetricsSummary,
+  TradePermissions,
 } from "@/types";
 
 const BASE_URL = "";
@@ -91,6 +93,13 @@ export interface ClosedTrade {
   realized_pl: number;
   financing: number;
   pnl: number;
+  source?: string;
+  source_trade_id?: string;
+  bot_mode?: ApiStatus["mode"];
+  notes?: string;
+  tags?: string[];
+  has_overrides?: boolean;
+  permissions?: TradePermissions;
 }
 
 export async function getPositions(): Promise<OpenPosition[]> {
@@ -98,7 +107,11 @@ export async function getPositions(): Promise<OpenPosition[]> {
 }
 
 export async function getTradeHistory(count = 50): Promise<ClosedTrade[]> {
-  return apiFetch<ClosedTrade[]>(`/api/trades?count=${count}`);
+  return apiFetch<ClosedTrade[]>(`/api/trades/history?count=${count}`);
+}
+
+export async function getUnifiedTradeHistory(count = 50): Promise<ClosedTrade[]> {
+  return getTradeHistory(count);
 }
 
 function query(params: Record<string, string | number | boolean | undefined | null>): string {
@@ -145,4 +158,15 @@ export async function exportStrategyMetrics(params: {
   include_opportunities?: boolean;
 }): Promise<unknown> {
   return apiFetch<unknown>(`/api/strategy-metrics/export?${query(params)}`);
+}
+
+export async function exportManualTrades(params: {
+  symbol?: string;
+  status?: string;
+  tag?: string;
+  start_date?: string;
+  end_date?: string;
+  limit?: number;
+} = {}): Promise<AgentExport> {
+  return apiFetch<AgentExport>(`/api/manual-trades/export?${query(params)}`);
 }
