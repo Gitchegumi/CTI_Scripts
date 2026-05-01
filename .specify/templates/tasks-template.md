@@ -51,6 +51,7 @@ description: "Task list template for feature implementation"
 - [ ] T001 Create project structure per implementation plan
 - [ ] T002 Initialize [language] project with [framework] dependencies
 - [ ] T003 [P] Configure linting and formatting tools
+- [ ] TXXX [P] Configure Python docstring and code-quality checks where Python files are changed
 
 ---
 
@@ -152,6 +153,8 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
+- [ ] TXXX Review changed code for intention-revealing names, simple control flow, and no unexplained magic values
+- [ ] TXXX Add or update Python module, class, function, method, and non-trivial helper docstrings
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
