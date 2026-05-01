@@ -12,6 +12,12 @@ Real-time signal engine for the City Traders Imperium (CTI) prop firm strategy, 
 - **30-Min Re-Ranking** — Watchlist re-scans every 30 minutes during market hours to track range evolution
 - **Discord Alerts** — Every signal, blocked signal, and watchlist update posted to Discord
 
+## Strategy Metrics
+
+TradeGumi records diagnostics for every evaluated opportunity so no-signal periods can be reviewed without changing signal behavior. The dashboard route `/strategy-metrics` shows date-range summaries, near-misses, criterion pass/fail rates, blocker rankings, period comparison, and JSON export.
+
+Diagnostic history is stored locally in `src/tradegumi/data/strategy_metrics.db`, with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
+
 ## Quick Start
 
 ### 1. Install dependencies

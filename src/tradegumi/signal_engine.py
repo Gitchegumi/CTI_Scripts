@@ -3,15 +3,19 @@
 Ported from weekday_entries.py (CTI_Scripts). No MT5, no API calls here —
 just pure indicator logic driven by a client passed at construction time.
 """
+import hashlib
+import json
 import logging as log
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
 
 from tradegumi import config
 from tradegumi.api.base_client import ExecutionClient, Candle
+from tradegumi.strategy_metrics import CriterionResult, EvaluatedOpportunity
 from tradegumi.indicators import (
     calculate_stoch_rsi,
     calculate_macd,
@@ -64,6 +68,88 @@ class Signal:
 
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
+
+
+@dataclass
+class SignalDiagnostic:
+    """Diagnostic result for one evaluated symbol."""
+    symbol: str
+    evaluated_at: str
+    trend: Optional[str]
+    lr_1h: float
+    lr_15m: float
+    lr_5m: float
+    final_decision: str
+    decision_reason: str
+    direction: str = "none"
+    confidence: Optional[float] = None
+    criteria: list[CriterionResult] = None
+    data_quality_notes: list[str] = None
+    threshold_version: str = "unknown"
+
+    def to_opportunity(self, mode: str) -> EvaluatedOpportunity:
+        return EvaluatedOpportunity(
+            id=f"{self.symbol}:{self.evaluated_at}",
+            evaluated_at=self.evaluated_at,
+            symbol=self.symbol,
+            mode=mode,
+            direction=self.direction,
+            trend=self.trend or "flat",
+            final_decision=self.final_decision,
+            decision_reason=self.decision_reason,
+            confidence=self.confidence,
+            data_quality_notes=self.data_quality_notes or [],
+            threshold_version=self.threshold_version,
+            criteria=self.criteria or [],
+        )
+
+
+def get_threshold_version() -> str:
+    """Stable hash of active signal thresholds that affect diagnostics."""
+    payload = {
+        "lr_1h": SignalEngine.LR_1H_THRESHOLD,
+        "lr_15m": SignalEngine.LR_15M_THRESHOLD,
+        "lr_5m": SignalEngine.LR_5M_THRESHOLD,
+        "cooldown_seconds": SignalEngine.SIGNAL_COOLDOWN_SECONDS,
+        "candle_close_gate": SignalEngine.CANDLE_CLOSE_GATE,
+        "sl_atr": config.SL_ATR_MULTIPLIER,
+        "tp_atr": config.TP_ATR_MULTIPLIER,
+        "risk_per_trade": config.RISK_PER_TRADE,
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:12]
+
+
+def _criterion(
+    name: str,
+    layer: str,
+    measured: object,
+    threshold: object,
+    passed: Optional[bool],
+    margin: Optional[float] = None,
+    operator: str = "boolean",
+    required: bool = True,
+    quality: str = "complete",
+) -> CriterionResult:
+    normalized = None
+    if margin is not None:
+        try:
+            normalized = min(1.0, abs(float(margin)))
+        except (TypeError, ValueError):
+            normalized = None
+    return CriterionResult(
+        criterion_name=name,
+        layer=layer,
+        measured_value=measured,
+        threshold_value=threshold,
+        threshold_operator=operator,
+        passed=passed,
+        margin=margin,
+        normalized_margin=normalized,
+        required=required,
+        blocked_signal=required and passed is False,
+        data_quality=quality,
+    )
 
 
 # ── Main Engine ───────────────────────────────────────────────────────────────
@@ -121,7 +207,7 @@ class SignalEngine:
 
     # ── 4-Layer Signal Stack ─────────────────────────────────────────────────
 
-    def _get_signal(self, symbol: str, trend: str) -> Optional[Signal]:
+    def _get_signal(self, symbol: str, trend: str) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
         """Run the 4-layer signal stack on 5m candles.
 
         Args:
@@ -136,6 +222,8 @@ class SignalEngine:
 
         # ── Candle-close gate ───────────────────────────────────────────────
         # Only allow fresh entries near candle close to avoid mid-candle noise
+        criteria: list[CriterionResult] = []
+
         if self.CANDLE_CLOSE_GATE:
             last_candle = candles[-1] if candles else None
             if last_candle:
@@ -143,7 +231,8 @@ class SignalEngine:
                 # Require candle to be in last 60 seconds of its 5m period
                 if age_sec > 240:  # More than 4 minutes into the candle
                     log.debug("%s signal skipped: candle-close gate (age=%.0fs)", symbol, age_sec)
-                    return None
+                    criteria.append(_criterion("candle_close_gate", "timing", age_sec, "<=240s", False, 240 - age_sec))
+                    return None, criteria, "candle_gate", None
 
         # Swap ignored — session/timing filters disabled for early development
 
@@ -157,8 +246,10 @@ class SignalEngine:
 
         if trend == "Uptrend":
             stoch_ok = k_prev3.min() < 30 and k > d
+            stoch_margin = min(30 - float(k_prev3.min()), float(k - d))
         else:
             stoch_ok = k_prev3.max() > 70 and k < d
+            stoch_margin = min(float(k_prev3.max()) - 70, float(d - k))
 
         stoch_strength = stoch_rsi_score(
             k, d, k_prev3.min(), k_prev3.max(), trend
@@ -176,8 +267,10 @@ class SignalEngine:
 
         if trend == "Uptrend":
             macd_ok = macd_current > macd_prev5.min()
+            macd_margin = float(macd_current - macd_prev5.min())
         else:
             macd_ok = macd_current < macd_prev5.max()
+            macd_margin = float(macd_prev5.max() - macd_current)
 
         macd_strength = macd_histogram_score(
             macd_current,
@@ -199,9 +292,11 @@ class SignalEngine:
         if trend == "Uptrend":
             # Price must breach lower band (pullback into support)
             kc_ok = last5_low <= kc_lower_last5.min()
+            kc_margin = float(kc_lower_last5.min() - last5_low)
         else:
             # Price must breach upper band (rally into resistance)
             kc_ok = last5_high >= kc_upper_last5.max()
+            kc_margin = float(last5_high - kc_upper_last5.max())
 
         keltner_strength = keltner_score(
             last5_low, last5_high, kc_lower_last5.min(), kc_upper_last5.max(), trend
@@ -221,13 +316,20 @@ class SignalEngine:
 
         candle_strength = candlestick_score(patterns_df, trend)
 
+        criteria.extend([
+            _criterion("stoch_rsi", "signal_stack", {"k": float(k), "d": float(d)}, "pullback+cross", bool(stoch_ok), stoch_margin),
+            _criterion("macd", "signal_stack", float(macd_current), "histogram improves", bool(macd_ok), macd_margin),
+            _criterion("keltner", "signal_stack", {"last5_low": float(last5_low), "last5_high": float(last5_high)}, "band breach", bool(kc_ok), kc_margin),
+            _criterion("candlestick", "confirmation", identified, "optional pattern", bool(candle_ok), None, required=False),
+        ])
+
         # ── Aggregate ───────────────────────────────────────────────────────
         # StochRSI, MACD, KC must all pass; candle is optional confirmation
         all_pass = stoch_ok and macd_ok and kc_ok
         if not all_pass:
             log.debug("%s signal blocked: stoch=%s macd=%s kc=%s",
                       symbol, stoch_ok, macd_ok, kc_ok)
-            return None
+            return None, criteria, "criteria_failed", None
 
         # Layer 2 score breakdown
         breakdown = {
@@ -265,7 +367,10 @@ class SignalEngine:
         if raw_confidence < MIN_CONFIDENCE:
             log.debug("%s signal rejected: confidence %.1f%% < %.0f%% threshold",
                       symbol, raw_confidence * 100, MIN_CONFIDENCE * 100)
-            return None
+            criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, False, raw_confidence - MIN_CONFIDENCE, "gte"))
+            return None, criteria, "confidence_failed", raw_confidence
+
+        criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, True, raw_confidence - MIN_CONFIDENCE, "gte"))
 
         confidence = round(raw_confidence, 3)
 
@@ -309,11 +414,11 @@ class SignalEngine:
             lr_1h=lr_1h,
             lr_15m=lr_15,
             lr_5m=lr_5,
-        )
+        ), criteria, "emitted", confidence
 
     # ── Public API ───────────────────────────────────────────────────────────
 
-    def check_symbol(self, symbol: str) -> tuple[Optional[Signal], Optional[str], float, float, float]:
+    def check_symbol(self, symbol: str) -> tuple[Optional[Signal], Optional[str], float, float, float, SignalDiagnostic]:
         """Full pipeline: Layer 1 watchlist → trend filter → signal stack.
 
         Returns (signal, trend, lr_1h, lr_15, lr_5).
@@ -322,12 +427,41 @@ class SignalEngine:
         """
         if symbol not in self.watchlist:
             log.debug("%s not on watchlist, skipping", symbol)
-            return None, None, 0.0, 0.0, 0.0
+            diag = SignalDiagnostic(
+                symbol=symbol,
+                evaluated_at=datetime.now().astimezone().isoformat(),
+                trend=None,
+                lr_1h=0.0,
+                lr_15m=0.0,
+                lr_5m=0.0,
+                final_decision="skipped",
+                decision_reason="not_on_watchlist",
+                criteria=[],
+                threshold_version=get_threshold_version(),
+            )
+            return None, None, 0.0, 0.0, 0.0, diag
 
         trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+        trend_criteria = [
+            _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, (lr_1h > self.LR_1H_THRESHOLD) if trend == "Uptrend" else ((lr_1h < -self.LR_1H_THRESHOLD) if trend == "Downtrend" else False), abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
+            _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, (lr_15 > self.LR_15M_THRESHOLD) if trend == "Uptrend" else ((lr_15 < -self.LR_15M_THRESHOLD) if trend == "Downtrend" else False), abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
+            _criterion("trend_5m", "trend", lr_5, self.LR_5M_THRESHOLD, (lr_5 > self.LR_5M_THRESHOLD) if trend == "Uptrend" else ((lr_5 < -self.LR_5M_THRESHOLD) if trend == "Downtrend" else False), abs(lr_5) - self.LR_5M_THRESHOLD, "abs_gte"),
+        ]
         if trend is None:
             log.debug("%s no trend, skipping", symbol)
-            return None, trend, lr_1h, lr_15, lr_5
+            diag = SignalDiagnostic(
+                symbol=symbol,
+                evaluated_at=datetime.now().astimezone().isoformat(),
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15m=lr_15,
+                lr_5m=lr_5,
+                final_decision="skipped",
+                decision_reason="no_trend",
+                criteria=trend_criteria,
+                threshold_version=get_threshold_version(),
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
 
         # ── Cooldown check ───────────────────────────────────────────────────
         cooldown_key = f"{symbol}:{trend}"
@@ -335,13 +469,41 @@ class SignalEngine:
         if time.time() - last_signal_ts < self.SIGNAL_COOLDOWN_SECONDS:
             log.debug("%s in cooldown (%.0fs remaining), skipping", symbol,
                       self.SIGNAL_COOLDOWN_SECONDS - (time.time() - last_signal_ts))
-            return None, trend, lr_1h, lr_15, lr_5
+            remaining = self.SIGNAL_COOLDOWN_SECONDS - (time.time() - last_signal_ts)
+            diag = SignalDiagnostic(
+                symbol=symbol,
+                evaluated_at=datetime.now().astimezone().isoformat(),
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15m=lr_15,
+                lr_5m=lr_5,
+                final_decision="skipped",
+                decision_reason="cooldown",
+                direction="BUY" if trend == "Uptrend" else "SELL",
+                criteria=trend_criteria + [_criterion("cooldown", "timing", remaining, 0, False, -remaining)],
+                threshold_version=get_threshold_version(),
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
 
-        signal = self._get_signal(symbol, trend)
+        signal, criteria, reason, confidence = self._get_signal(symbol, trend)
         if signal:
             # Record signal timestamp for cooldown
             self._cooldown[cooldown_key] = time.time()
-        return signal, trend, lr_1h, lr_15, lr_5
+        diag = SignalDiagnostic(
+            symbol=symbol,
+            evaluated_at=datetime.now().astimezone().isoformat(),
+            trend=trend,
+            lr_1h=lr_1h,
+            lr_15m=lr_15,
+            lr_5m=lr_5,
+            final_decision="emitted" if signal else "rejected",
+            decision_reason=reason,
+            direction=("BUY" if trend == "Uptrend" else "SELL"),
+            confidence=confidence if confidence is not None else (signal.confidence if signal else None),
+            criteria=trend_criteria + criteria,
+            threshold_version=get_threshold_version(),
+        )
+        return signal, trend, lr_1h, lr_15, lr_5, diag
 
 
 def _price_decimals(price: float) -> int:

@@ -1,3 +1,9 @@
+import type {
+  StrategyMetricOpportunity,
+  StrategyMetricsComparison,
+  StrategyMetricsSummary,
+} from "@/types";
+
 const BASE_URL = "";
 
 export interface ApiStatus {
@@ -93,4 +99,50 @@ export async function getPositions(): Promise<OpenPosition[]> {
 
 export async function getTradeHistory(count = 50): Promise<ClosedTrade[]> {
   return apiFetch<ClosedTrade[]>(`/api/trades?count=${count}`);
+}
+
+function query(params: Record<string, string | number | boolean | undefined | null>): string {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") qs.set(key, String(value));
+  });
+  return qs.toString();
+}
+
+export async function getStrategyMetricsSummary(params: {
+  start: string;
+  end: string;
+  symbol?: string;
+}): Promise<StrategyMetricsSummary> {
+  return apiFetch<StrategyMetricsSummary>(`/api/strategy-metrics/summary?${query(params)}`);
+}
+
+export async function getStrategyMetricOpportunities(params: {
+  start: string;
+  end: string;
+  symbol?: string;
+  decision?: string;
+  near_miss?: boolean;
+  limit?: number;
+}): Promise<StrategyMetricOpportunity[]> {
+  return apiFetch<StrategyMetricOpportunity[]>(`/api/strategy-metrics/opportunities?${query(params)}`);
+}
+
+export async function getStrategyMetricsComparison(params: {
+  base_start: string;
+  base_end: string;
+  compare_start: string;
+  compare_end: string;
+  symbol?: string;
+}): Promise<StrategyMetricsComparison> {
+  return apiFetch<StrategyMetricsComparison>(`/api/strategy-metrics/compare?${query(params)}`);
+}
+
+export async function exportStrategyMetrics(params: {
+  start: string;
+  end: string;
+  symbol?: string;
+  include_opportunities?: boolean;
+}): Promise<unknown> {
+  return apiFetch<unknown>(`/api/strategy-metrics/export?${query(params)}`);
 }

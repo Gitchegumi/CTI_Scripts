@@ -149,3 +149,89 @@ export interface ManualTradeSummary {
   avg_pnl: number;
   avg_pnl_percent: number;
 }
+
+// Strategy Metrics
+
+export interface StrategyMetricCriterion {
+  criterion_name: string;
+  layer: string;
+  measured_value: unknown;
+  threshold_value: unknown;
+  threshold_operator: string;
+  passed: boolean | null;
+  margin: number | null;
+  normalized_margin: number | null;
+  required: boolean;
+  blocked_signal: boolean;
+  data_quality: "complete" | "missing" | "malformed" | "not_applicable";
+}
+
+export interface StrategyMetricOpportunity {
+  id: string;
+  evaluated_at: string;
+  symbol: string;
+  timeframe: string;
+  mode: string;
+  strategy: string;
+  direction: "BUY" | "SELL" | "none";
+  trend: string;
+  final_decision: "emitted" | "rejected" | "skipped" | "indeterminate";
+  decision_reason: string;
+  confidence: number | null;
+  failed_criteria_count: number;
+  near_miss: boolean;
+  data_complete: boolean;
+  data_quality_notes: string[];
+  threshold_version: string;
+  criteria: StrategyMetricCriterion[];
+}
+
+export interface StrategyCriterionSummary {
+  criterion_name: string;
+  evaluated_count: number;
+  pass_count: number;
+  fail_count: number;
+  pass_rate: number;
+  fail_rate: number;
+  near_miss_contribution: number;
+  average_failure_margin: number | null;
+  incomplete_count: number;
+}
+
+export interface StrategyBlockerSummary {
+  criterion_name: string;
+  blocked_count: number;
+  frequency_component: number;
+  margin_component: number;
+  quality_component: number;
+  combined_score: number;
+  example_opportunity_ids: string[];
+}
+
+export interface StrategyMetricsSummary {
+  start: string;
+  end: string;
+  total_evaluated: number;
+  emitted_count: number;
+  rejected_count: number;
+  skipped_count: number;
+  indeterminate_count: number;
+  near_miss_count: number;
+  criterion_summaries: StrategyCriterionSummary[];
+  top_blockers: StrategyBlockerSummary[];
+  data_quality_warnings: string[];
+}
+
+export interface StrategyMetricsComparison {
+  baseline: StrategyMetricsSummary;
+  comparison: StrategyMetricsSummary;
+  deltas: {
+    total_evaluated: number;
+    emitted_count: number;
+    near_miss_count: number;
+    rejected_count: number;
+    top_blocker_changed: boolean;
+    baseline_top_blocker: string | null;
+    comparison_top_blocker: string | null;
+  };
+}

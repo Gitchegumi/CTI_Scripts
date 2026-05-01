@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { WatchlistData, SignalEntry, LoopState, TradeCorrelation } from "@/types";
+import type { StrategyMetricOpportunity, StrategyMetricsComparison, StrategyMetricsSummary } from "@/types";
 import { ApiStatus, OpenPosition, ClosedTrade } from "@/lib/api";
 
 // ── Weekend / Market-Closed Detection ────────────────────────────────────────
@@ -54,9 +55,9 @@ export function useWatchlist(marketOpen: boolean): UseWatchlistReturn {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const first = window.setTimeout(() => { void fetchData(); }, 0);
     const id = setInterval(fetchData, pollIntervalMs);
-    return () => clearInterval(id);
+    return () => { window.clearTimeout(first); clearInterval(id); };
   }, [fetchData, pollIntervalMs]);
 
   return { data, lastUpdated, error, isRefreshing, refresh: fetchData };
@@ -250,6 +251,79 @@ export function useTradeCorrelations(): TradeCorrelation[] {
   }, []);
 
   return correlations;
+}
+
+export function useStrategyMetricsSummary(params: {
+  start: string;
+  end: string;
+  symbol?: string;
+}) {
+  const [summary, setSummary] = useState<StrategyMetricsSummary | null>(null);
+  const [opportunities, setOpportunities] = useState<StrategyMetricOpportunity[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!params.start || !params.end) return;
+    setLoading(true);
+    try {
+      const { getStrategyMetricOpportunities, getStrategyMetricsSummary } = await import("@/lib/api");
+      const [summaryData, opportunityData] = await Promise.all([
+        getStrategyMetricsSummary(params),
+        getStrategyMetricOpportunities({ ...params, limit: 200 }),
+      ]);
+      setSummary(summaryData);
+      setOpportunities(opportunityData);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load strategy metrics");
+      setSummary(null);
+      setOpportunities([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [params]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(id);
+  }, [refresh]);
+
+  return { summary, opportunities, error, loading, refresh };
+}
+
+export function useStrategyMetricsComparison(params: {
+  base_start: string;
+  base_end: string;
+  compare_start: string;
+  compare_end: string;
+  symbol?: string;
+}) {
+  const [comparison, setComparison] = useState<StrategyMetricsComparison | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!params.base_start || !params.base_end || !params.compare_start || !params.compare_end) return;
+    setLoading(true);
+    try {
+      const { getStrategyMetricsComparison } = await import("@/lib/api");
+      setComparison(await getStrategyMetricsComparison(params));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to compare strategy metrics");
+      setComparison(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [params]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(id);
+  }, [refresh]);
+
+  return { comparison, error, loading, refresh };
 }
 
 // ── Export market hook ──────────────────────────────────────────────────────

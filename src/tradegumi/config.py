@@ -38,6 +38,11 @@ DISCORD_USER_ID     = os.getenv("DISCORD_USER_ID", "")
 # Token required to access the /journal page on the dashboard.
 JOURNAL_TOKEN = os.getenv("JOURNAL_TOKEN", "")
 
+# Strategy diagnostics
+STRATEGY_METRICS_RETENTION_DAYS = int(os.getenv("STRATEGY_METRICS_RETENTION_DAYS", "90"))
+STRATEGY_METRICS_DEFAULT_DAYS = int(os.getenv("STRATEGY_METRICS_DEFAULT_DAYS", "7"))
+STRATEGY_METRICS_MAX_OPPORTUNITIES = int(os.getenv("STRATEGY_METRICS_MAX_OPPORTUNITIES", "1000"))
+
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
 # Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)
