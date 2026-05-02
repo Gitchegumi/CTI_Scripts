@@ -21,10 +21,9 @@ export default function Home() {
   const { signals } = useSignals(marketOpen);
   const { status: apiStatus } = useApiStatus(5000);
   const { positions } = usePositions(marketOpen);
-  const { trades } = useTradeHistory(50, marketOpen);
-  const correlations = useTradeCorrelations();
-
   const mode = apiStatus?.mode ?? "alert_only";
+  const { trades } = useTradeHistory(50, marketOpen, mode);
+  const correlations = useTradeCorrelations();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">

@@ -205,7 +205,7 @@ interface UseTradeHistoryReturn {
   error: string | null;
 }
 
-export function useTradeHistory(count = 50, marketOpen: boolean = true): UseTradeHistoryReturn {
+export function useTradeHistory(count = 50, marketOpen: boolean = true, modeKey = ""): UseTradeHistoryReturn {
   const pollIntervalMs = marketOpen ? 30000 : SLOW_MS;
   const [trades, setTrades] = useState<ClosedTrade[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +225,7 @@ export function useTradeHistory(count = 50, marketOpen: boolean = true): UseTrad
     fetchTrades();
     const id = setInterval(fetchTrades, pollIntervalMs);
     return () => { cancelled = true; clearInterval(id); };
-  }, [count, pollIntervalMs]);
+  }, [count, pollIntervalMs, modeKey]);
 
   return { trades, error };
 }

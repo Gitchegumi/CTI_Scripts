@@ -108,6 +108,13 @@ export interface ClosedTrade {
   realized_pl: number;
   financing: number;
   pnl: number;
+  source?: "manual" | "execution_history" | string;
+  source_trade_id?: string;
+  bot_mode?: "alert_only" | "demo" | "live";
+  notes?: string;
+  tags?: string[];
+  has_overrides?: boolean;
+  permissions?: TradePermissions;
 }
 
 export interface TradeCorrelation {
@@ -122,18 +129,32 @@ export interface TradeCorrelation {
 
 // ── Manual Trades (alert-only backtesting) ───────────────────────────────────
 
+export interface TradePermissions {
+  can_edit_all_fields: boolean;
+  can_edit_notes_tags: boolean;
+  can_delete: boolean;
+}
+
 export interface ManualTrade {
-  id: number;
+  id: string;
+  source: "manual" | "execution_history" | string;
+  source_trade_id: string;
+  bot_mode: "alert_only" | "demo" | "live";
   symbol: string;
   direction: "long" | "short";
   entry_price: number;
   exit_price: number | null;
   entry_time: string;
   exit_time: string | null;
+  volume: number | null;
+  fees: number;
   pnl: number;
   pnl_percent: number;
   status: "open" | "closed";
   notes: string;
+  tags: string[];
+  has_overrides: boolean;
+  permissions: TradePermissions;
   created_at: string;
   updated_at: string;
 }
@@ -148,6 +169,34 @@ export interface ManualTradeSummary {
   total_pnl: number;
   avg_pnl: number;
   avg_pnl_percent: number;
+}
+
+export interface AgentExportRecord {
+  id: string;
+  source: string;
+  symbol: string;
+  direction: "long" | "short";
+  status: "open" | "closed";
+  entry_time: string;
+  exit_time: string | null;
+  pnl: number;
+  pnl_percent: number;
+  notes: string;
+  tags: string[];
+}
+
+export interface AgentExport {
+  schema_name: "Agent Export";
+  schema_version: string;
+  generated_at: string;
+  bot_mode: "alert_only" | "demo" | "live";
+  chunking: {
+    chunk_index: number;
+    chunk_count: number;
+    record_offset: number;
+    record_limit: number;
+  };
+  records: AgentExportRecord[];
 }
 
 // Strategy Metrics
