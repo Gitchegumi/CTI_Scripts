@@ -63,6 +63,8 @@ class CriterionResult:
     threshold_value: Any = None
     threshold_operator: str = "boolean"
     passed: Optional[bool] = None
+    expected_pass: Optional[bool] = None   # computed from measured, threshold, operator
+    pass_mismatch: bool = False            # True when expected_pass != passed
     margin: Optional[float] = None
     normalized_margin: Optional[float] = None
     required: bool = True
@@ -95,6 +97,9 @@ class EvaluatedOpportunity:
     threshold_version: str = "unknown"
     created_at: str = field(default_factory=_now_iso)
     criteria: list[CriterionResult] = field(default_factory=list)
+    first_blocker: Optional[str] = None
+    all_blockers: list[str] = field(default_factory=list)
+    blocking_layer: Optional[str] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -141,6 +146,9 @@ class DiagnosticSummary:
     near_miss_count: int
     criterion_summaries: list[CriterionSummary] = field(default_factory=list)
     top_blockers: list[BlockerSummary] = field(default_factory=list)
+    first_blocker: Optional[str] = None   # criterion_name of the first blocker
+    all_blockers: list[str] = field(default_factory=list)  # all blocking criterion_names
+    blocking_layer: Optional[str] = None  # layer of the first blocker
     data_quality_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -216,6 +224,37 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_opp ON criterion_results(opportunity_id)")
 
 
+def _compute_threshold_pass(measured: Any, threshold: Any, operator: str) -> Optional[bool]:
+    """Compute expected_pass from measured, threshold, and operator."""
+    if operator == "boolean":
+        return bool(measured) if measured is not None else None
+    if measured is None:
+        return None
+    try:
+        measured_f = float(measured)
+    except (TypeError, ValueError):
+        return None
+    try:
+        threshold_f = float(threshold)
+    except (TypeError, ValueError):
+        return None
+    if operator == "gte":
+        return measured_f >= threshold_f
+    if operator == "lte":
+        return measured_f <= threshold_f
+    if operator == "gt":
+        return measured_f > threshold_f
+    if operator == "lt":
+        return measured_f < threshold_f
+    if operator == "abs_gte":
+        return abs(measured_f) >= threshold_f
+    if operator == "abs_lte":
+        return abs(measured_f) <= threshold_f
+    if operator == "eq":
+        return measured_f == threshold_f
+    return None
+
+
 def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportunity:
     if opportunity.final_decision not in VALID_DECISIONS:
         raise ValueError(f"Invalid final_decision: {opportunity.final_decision}")
@@ -235,10 +274,25 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
         if criterion.data_quality in {"missing", "malformed"}:
             complete = False
             notes.append(f"{criterion.criterion_name}:{criterion.data_quality}")
+        # Compute expected_pass and pass_mismatch
+        criterion.expected_pass = _compute_threshold_pass(
+            criterion.measured_value, criterion.threshold_value, criterion.threshold_operator
+        )
+        if criterion.expected_pass is not None and criterion.passed is not None:
+            criterion.pass_mismatch = criterion.expected_pass != criterion.passed
         if criterion.required and criterion.passed is False:
             failed_required += 1
             if opportunity.final_decision == "rejected":
                 criterion.blocked_signal = True
+
+    # Populate first_blocker / all_blockers / blocking_layer for rejected opportunitites
+    if opportunity.final_decision == "rejected":
+        blockers = [c for c in opportunity.criteria if c.blocked_signal]
+        blockers.sort(key=lambda c: c.criterion_name)  # stable order
+        opportunity.all_blockers = [c.criterion_name for c in blockers]
+        if blockers:
+            opportunity.first_blocker = blockers[0].criterion_name
+            opportunity.blocking_layer = blockers[0].layer
 
     opportunity.failed_criteria_count = failed_required
     opportunity.near_miss = opportunity.final_decision == "rejected" and failed_required == 1
@@ -466,7 +520,7 @@ def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], rejected_count:
         JOIN evaluated_opportunities o ON o.id = c.opportunity_id
         WHERE c.opportunity_id IN ({placeholders})
           AND o.final_decision = 'rejected'
-          AND c.blocked_signal = 1
+          AND c.required = 1 AND c.passed = 0
         GROUP BY c.criterion_name
         """,
         ids,
