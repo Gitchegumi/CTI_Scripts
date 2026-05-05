@@ -34,6 +34,30 @@ from tradegumi.indicators import (
 log = log.getLogger(__name__)
 
 
+def evaluate_threshold(measured: float, threshold: float, operator: str) -> bool:
+    """Evaluate a threshold condition. Supports:
+
+    gte, lte, gt, lt, abs_gte, abs_lte, eq, boolean
+    """
+    if operator == "gte":
+        return measured >= threshold
+    if operator == "lte":
+        return measured <= threshold
+    if operator == "gt":
+        return measured > threshold
+    if operator == "lt":
+        return measured < threshold
+    if operator == "abs_gte":
+        return abs(measured) >= threshold
+    if operator == "abs_lte":
+        return abs(measured) <= threshold
+    if operator == "eq":
+        return measured == threshold
+    if operator == "boolean":
+        return bool(measured)
+    return False
+
+
 # ── Signal dataclass ─────────────────────────────────────────────────────────
 
 @dataclass
@@ -443,9 +467,9 @@ class SignalEngine:
 
         trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
         trend_criteria = [
-            _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, (lr_1h > self.LR_1H_THRESHOLD) if trend == "Uptrend" else ((lr_1h < -self.LR_1H_THRESHOLD) if trend == "Downtrend" else False), abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
-            _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, (lr_15 > self.LR_15M_THRESHOLD) if trend == "Uptrend" else ((lr_15 < -self.LR_15M_THRESHOLD) if trend == "Downtrend" else False), abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
-            _criterion("trend_5m", "trend", lr_5, self.LR_5M_THRESHOLD, (lr_5 > self.LR_5M_THRESHOLD) if trend == "Uptrend" else ((lr_5 < -self.LR_5M_THRESHOLD) if trend == "Downtrend" else False), abs(lr_5) - self.LR_5M_THRESHOLD, "abs_gte"),
+            _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, abs(lr_1h) >= self.LR_1H_THRESHOLD, abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
+            _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, abs(lr_15) >= self.LR_15M_THRESHOLD, abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
+            _criterion("trend_5m", "trend", lr_5, self.LR_5M_THRESHOLD, abs(lr_5) >= self.LR_5M_THRESHOLD, abs(lr_5) - self.LR_5M_THRESHOLD, "abs_gte"),
         ]
         if trend is None:
             log.debug("%s no trend, skipping", symbol)
