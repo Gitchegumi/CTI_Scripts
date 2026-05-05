@@ -161,7 +161,8 @@ class OandaClient(ExecutionClient):
 
     def get_trade_history(self, count: int = 50) -> list[TradeHistory]:
         """Return recent closed trades from Oanda."""
-        params = {"count": count, "state": "CLOSED"}
+        safe_count = max(1, min(int(count), 500))
+        params = {"count": safe_count, "state": "CLOSED"}
         data = self._request("GET", f"/v3/accounts/{self.account_id}/trades", params=params)
         trades = []
         for t in data.get("trades", []):
