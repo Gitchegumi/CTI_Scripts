@@ -46,6 +46,11 @@ def candle_df():
 # ── DataFrame conversion ─────────────────────────────────────────────────────
 
 class TestCandleConversion:
+    def test_candle_exposes_datetime_time_alias(self):
+        candle = Candle(t="2026-05-05T19:50:32.132214Z", o=1.0, h=1.1, l=0.9, c=1.0)
+
+        assert candle.time.isoformat() == "2026-05-05T19:50:32.132214+00:00"
+
     def test_candles_to_df_correct_columns(self):
         candles = make_candles(10)
         df = candles_to_df(candles)

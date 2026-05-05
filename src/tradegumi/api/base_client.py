@@ -4,6 +4,7 @@ Swap Oanda for MatchTrader without touching signal logic.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 
@@ -16,6 +17,13 @@ class Candle:
     l: float
     c: float
     s: Optional[int] = None   # volume
+
+    @property
+    def time(self) -> datetime:
+        """Return the candle timestamp as a timezone-aware datetime."""
+        normalized = self.t[:-1] + "+00:00" if self.t.endswith("Z") else self.t
+        parsed = datetime.fromisoformat(normalized)
+        return parsed
 
 
 @dataclass
