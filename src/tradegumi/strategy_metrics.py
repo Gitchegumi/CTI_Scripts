@@ -23,7 +23,18 @@ STATE_FILE = DATA_DIR / "strategy_metrics.json"
 
 VALID_DECISIONS = {"emitted", "rejected", "skipped", "indeterminate"}
 VALID_DATA_QUALITY = {"complete", "missing", "malformed", "not_applicable"}
+INDETERMINATE_REASONS = {
+    "api_error",
+    "api_timeout",
+    "engine_error",
+    "incomplete_diagnostics",
+    "missing_candle_data",
+    "missing_candle_time",
+}
 _lock = threading.Lock()
+_initialized_db_paths: set[str] = set()
+_last_prune_by_db_path: dict[str, datetime] = {}
+_write_connections_by_db_path: dict[str, sqlite3.Connection] = {}
 
 
 def _now_iso() -> str:
@@ -100,6 +111,7 @@ class EvaluatedOpportunity:
     first_blocker: Optional[str] = None
     all_blockers: list[str] = field(default_factory=list)
     blocking_layer: Optional[str] = None
+    trend_decision: Optional[dict[str, Any]] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -149,6 +161,7 @@ class DiagnosticSummary:
     first_blocker: Optional[str] = None   # criterion_name of the first blocker
     all_blockers: list[str] = field(default_factory=list)  # all blocking criterion_names
     blocking_layer: Optional[str] = None  # layer of the first blocker
+    threshold_version_counts: dict[str, int] = field(default_factory=dict)
     data_quality_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -173,6 +186,9 @@ class ComparisonPeriod:
 
 
 def init_schema(db_path: Path = DB_FILE) -> None:
+    db_key = str(db_path.resolve())
+    if db_key in _initialized_db_paths:
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -194,7 +210,11 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 data_complete INTEGER NOT NULL,
                 data_quality_notes TEXT NOT NULL,
                 threshold_version TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                first_blocker TEXT,
+                all_blockers TEXT NOT NULL DEFAULT '[]',
+                blocking_layer TEXT,
+                trend_decision TEXT
             )
             """
         )
@@ -209,6 +229,8 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 threshold_value TEXT,
                 threshold_operator TEXT NOT NULL,
                 passed INTEGER,
+                expected_pass INTEGER,
+                pass_mismatch INTEGER NOT NULL DEFAULT 0,
                 margin REAL,
                 normalized_margin REAL,
                 required INTEGER NOT NULL,
@@ -222,6 +244,32 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_symbol ON evaluated_opportunities(symbol)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_decision ON evaluated_opportunities(final_decision)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_opp ON criterion_results(opportunity_id)")
+        _ensure_column(conn, "evaluated_opportunities", "first_blocker", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "all_blockers", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(conn, "evaluated_opportunities", "blocking_layer", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "trend_decision", "TEXT")
+        _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
+        _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
+    _initialized_db_paths.add(db_key)
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Add an additive SQLite column when an existing metrics database predates it."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _write_connection(db_path: Path) -> sqlite3.Connection:
+    """Return a reusable SQLite write connection for high-volume diagnostic inserts."""
+    db_key = str(db_path.resolve())
+    conn = _write_connections_by_db_path.get(db_key)
+    if conn is None:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        _write_connections_by_db_path[db_key] = conn
+    return conn
 
 
 def _compute_threshold_pass(measured: Any, threshold: Any, operator: str) -> Optional[bool]:
@@ -264,6 +312,8 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
         raise ValueError("evaluated_at is required")
     if not opportunity.decision_reason:
         raise ValueError("decision_reason is required")
+    if opportunity.decision_reason in INDETERMINATE_REASONS:
+        opportunity.final_decision = "indeterminate"
 
     failed_required = 0
     complete = True
@@ -282,17 +332,27 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
             criterion.pass_mismatch = criterion.expected_pass != criterion.passed
         if criterion.required and criterion.passed is False:
             failed_required += 1
-            if opportunity.final_decision == "rejected":
+            if opportunity.final_decision in {"rejected", "skipped"}:
                 criterion.blocked_signal = True
 
-    # Populate first_blocker / all_blockers / blocking_layer for rejected opportunitites
-    if opportunity.final_decision == "rejected":
+    if opportunity.final_decision in {"rejected", "skipped"}:
         blockers = [c for c in opportunity.criteria if c.blocked_signal]
         blockers.sort(key=lambda c: c.criterion_name)  # stable order
         opportunity.all_blockers = [c.criterion_name for c in blockers]
         if blockers:
             opportunity.first_blocker = blockers[0].criterion_name
             opportunity.blocking_layer = blockers[0].layer
+        elif opportunity.decision_reason == "no_trend":
+            no_trend_reason = _trend_no_trend_reason(opportunity.trend_decision)
+            blocker = f"trend:{no_trend_reason}"
+            opportunity.first_blocker = blocker
+            opportunity.all_blockers = [blocker]
+            opportunity.blocking_layer = "trend"
+        elif opportunity.decision_reason not in {"market_closed", "rollover"}:
+            blocker = opportunity.decision_reason or "unknown"
+            opportunity.first_blocker = blocker
+            opportunity.all_blockers = [blocker]
+            opportunity.blocking_layer = _layer_from_reason(blocker)
 
     opportunity.failed_criteria_count = failed_required
     opportunity.near_miss = opportunity.final_decision == "rejected" and failed_required == 1
@@ -301,17 +361,42 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
     return opportunity
 
 
+def _trend_no_trend_reason(trend_decision: Optional[dict[str, Any]]) -> str:
+    """Return the normalized no-trend reason from a nested trend diagnostic."""
+    if not trend_decision:
+        return "unknown"
+    output = trend_decision.get("trend_classification_output") or {}
+    return str(trend_decision.get("no_trend_reason") or output.get("no_trend_reason") or "unknown")
+
+
+def _layer_from_reason(reason: str) -> str:
+    """Map legacy skip/reject reason strings to a summary blocking layer."""
+    if reason.startswith("trend:") or reason == "no_trend":
+        return "trend"
+    if reason in {"engine_error", "api_error", "api_timeout"}:
+        return "engine"
+    if reason in {"missing_candle_data", "missing_candle_time", "incomplete_diagnostics"}:
+        return "data_quality"
+    if reason in {"risk", "risk_blocked"}:
+        return "risk"
+    if reason in {"cooldown", "candle_gate"}:
+        return "entry"
+    return "entry"
+
+
 def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FILE) -> EvaluatedOpportunity:
     opportunity = validate_opportunity(opportunity)
     init_schema(db_path)
-    with _lock, sqlite3.connect(db_path) as conn:
+    with _lock:
+        conn = _write_connection(db_path)
         conn.execute(
             """
             INSERT OR REPLACE INTO evaluated_opportunities (
                 id, evaluated_at, symbol, timeframe, mode, strategy, direction, trend,
                 final_decision, decision_reason, confidence, failed_criteria_count,
-                near_miss, data_complete, data_quality_notes, threshold_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                near_miss, data_complete, data_quality_notes, threshold_version, created_at,
+                first_blocker, all_blockers, blocking_layer, trend_decision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -331,6 +416,10 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 json.dumps(opportunity.data_quality_notes),
                 opportunity.threshold_version,
                 opportunity.created_at,
+                opportunity.first_blocker,
+                json.dumps(opportunity.all_blockers),
+                opportunity.blocking_layer,
+                json.dumps(opportunity.trend_decision) if opportunity.trend_decision is not None else None,
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
@@ -339,9 +428,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 """
                 INSERT INTO criterion_results (
                     opportunity_id, criterion_name, layer, measured_value, threshold_value,
-                    threshold_operator, passed, margin, normalized_margin, required,
-                    blocked_signal, data_quality
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    threshold_operator, passed, expected_pass, pass_mismatch, margin,
+                    normalized_margin, required, blocked_signal, data_quality
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     opportunity.id,
@@ -351,6 +440,8 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                     json.dumps(criterion.threshold_value),
                     criterion.threshold_operator,
                     None if criterion.passed is None else int(criterion.passed),
+                    None if criterion.expected_pass is None else int(criterion.expected_pass),
+                    int(criterion.pass_mismatch),
                     criterion.margin,
                     criterion.normalized_margin,
                     int(criterion.required),
@@ -358,8 +449,21 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                     criterion.data_quality,
                 ),
             )
-    prune_retention(db_path=db_path)
+        conn.commit()
+    _prune_retention_if_due(db_path=db_path)
     return opportunity
+
+
+def _prune_retention_if_due(db_path: Path = DB_FILE, interval: timedelta = timedelta(hours=1)) -> int:
+    """Prune old diagnostics at most once per interval for each database path."""
+    db_key = str(db_path.resolve())
+    now = datetime.now(timezone.utc)
+    last_prune = _last_prune_by_db_path.get(db_key)
+    if last_prune is not None and now - last_prune < interval:
+        return 0
+    removed = prune_retention(db_path=db_path)
+    _last_prune_by_db_path[db_key] = now
+    return removed
 
 
 def prune_retention(days: Optional[int] = None, db_path: Path = DB_FILE) -> int:
@@ -394,6 +498,10 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
         threshold_version=row["threshold_version"],
         created_at=row["created_at"],
         criteria=criteria,
+        first_blocker=row["first_blocker"] if "first_blocker" in row.keys() else None,
+        all_blockers=json.loads(row["all_blockers"] or "[]") if "all_blockers" in row.keys() else [],
+        blocking_layer=row["blocking_layer"] if "blocking_layer" in row.keys() else None,
+        trend_decision=json.loads(row["trend_decision"]) if "trend_decision" in row.keys() and row["trend_decision"] else None,
     )
 
 
@@ -442,6 +550,8 @@ def get_opportunities(
                     threshold_value=json.loads(c["threshold_value"]) if c["threshold_value"] else None,
                     threshold_operator=c["threshold_operator"],
                     passed=None if c["passed"] is None else bool(c["passed"]),
+                    expected_pass=None if "expected_pass" not in c.keys() or c["expected_pass"] is None else bool(c["expected_pass"]),
+                    pass_mismatch=bool(c["pass_mismatch"]) if "pass_mismatch" in c.keys() else False,
                     margin=c["margin"],
                     normalized_margin=c["normalized_margin"],
                     required=bool(c["required"]),
@@ -506,28 +616,43 @@ def _criterion_summaries(conn: sqlite3.Connection, ids: list[str]) -> list[Crite
     return summaries
 
 
-def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], rejected_count: int) -> list[BlockerSummary]:
-    if not ids or not rejected_count:
+def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], blocked_opportunity_count: int) -> list[BlockerSummary]:
+    """Summarize blockers from opportunity blocker fields, with legacy criterion fallback."""
+    if not ids or not blocked_opportunity_count:
         return []
     placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"""
-        SELECT c.criterion_name,
-               COUNT(*) AS blocked_count,
-               AVG(CASE WHEN c.normalized_margin IS NULL THEN NULL ELSE 1.0 - MIN(1.0, ABS(c.normalized_margin)) END) AS margin_component,
-               GROUP_CONCAT(c.opportunity_id) AS examples
-        FROM criterion_results c
-        JOIN evaluated_opportunities o ON o.id = c.opportunity_id
-        WHERE c.opportunity_id IN ({placeholders})
-          AND o.final_decision = 'rejected'
-          AND c.required = 1 AND c.passed = 0
-        GROUP BY c.criterion_name
-        """,
+    opportunity_rows = conn.execute(
+        f"SELECT id, all_blockers FROM evaluated_opportunities WHERE id IN ({placeholders}) AND final_decision IN ('rejected', 'skipped')",
         ids,
     ).fetchall()
+    blockers_by_name: dict[str, set[str]] = {}
+    for opp_id, blockers_json in opportunity_rows:
+        blockers = json.loads(blockers_json or "[]")
+        if not blockers:
+            legacy_rows = conn.execute(
+                """
+                SELECT criterion_name
+                FROM criterion_results
+                WHERE opportunity_id = ? AND required = 1 AND passed = 0
+                """,
+                (opp_id,),
+            ).fetchall()
+            blockers = [row[0] for row in legacy_rows]
+        for blocker in blockers:
+            blockers_by_name.setdefault(str(blocker), set()).add(opp_id)
+
     result = []
-    for name, blocked_count, margin_component, examples in rows:
-        opp_ids = (examples or "").split(",")
+    for name, opp_id_set in blockers_by_name.items():
+        opp_ids = sorted(opp_id_set)
+        blocked_count = len(opp_ids)
+        margin_component = conn.execute(
+            f"""
+            SELECT AVG(CASE WHEN normalized_margin IS NULL THEN NULL ELSE 1.0 - MIN(1.0, ABS(normalized_margin)) END)
+            FROM criterion_results
+            WHERE opportunity_id IN ({",".join("?" for _ in opp_ids)}) AND criterion_name = ?
+            """,
+            (*opp_ids, name),
+        ).fetchone()[0]
         quality_values = []
         for opp_id in opp_ids:
             total, passed = conn.execute(
@@ -540,7 +665,7 @@ def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], rejected_count:
             ).fetchone()
             if total:
                 quality_values.append((passed or 0) / total)
-        frequency = blocked_count / rejected_count
+        frequency = blocked_count / blocked_opportunity_count
         margin = 0.0 if margin_component is None else max(0.0, min(1.0, float(margin_component)))
         quality = sum(quality_values) / len(quality_values) if quality_values else 0.0
         combined = (frequency * 0.40) + (margin * 0.30) + (quality * 0.30)
@@ -570,7 +695,7 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            f"SELECT id, final_decision, near_miss, data_complete, threshold_version FROM evaluated_opportunities WHERE {' AND '.join(clauses)}",
+            f"SELECT id, final_decision, near_miss, data_complete, threshold_version, first_blocker, all_blockers, blocking_layer FROM evaluated_opportunities WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
         ids = [r[0] for r in rows]
@@ -580,6 +705,18 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
         skipped = sum(1 for r in rows if r[1] == "skipped")
         indeterminate = sum(1 for r in rows if r[1] == "indeterminate")
         near_miss_count = sum(1 for r in rows if r[2])
+        threshold_version_counts: dict[str, int] = {}
+        all_blockers: list[str] = []
+        first_blocker = None
+        blocking_layer = None
+        for row in rows:
+            version = row[4] or "unknown"
+            threshold_version_counts[version] = threshold_version_counts.get(version, 0) + 1
+            blockers = json.loads(row[6] or "[]")
+            all_blockers.extend(blockers)
+            if first_blocker is None and row[5]:
+                first_blocker = row[5]
+                blocking_layer = row[7]
         warnings: list[str] = []
         if total == 0:
             warnings.append("No evaluated opportunities in selected period")
@@ -598,7 +735,11 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             indeterminate_count=indeterminate,
             near_miss_count=near_miss_count,
             criterion_summaries=_criterion_summaries(conn, ids),
-            top_blockers=_blocker_summaries(conn, ids, rejected),
+            top_blockers=_blocker_summaries(conn, ids, rejected + skipped),
+            first_blocker=first_blocker,
+            all_blockers=sorted(set(all_blockers)),
+            blocking_layer=blocking_layer,
+            threshold_version_counts=threshold_version_counts,
             data_quality_warnings=warnings,
         )
         return summary.to_dict()

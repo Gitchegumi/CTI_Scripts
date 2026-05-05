@@ -1,10 +1,12 @@
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(os.getcwd(), ".numba_cache"))
 
-from tradegumi.signal_engine import get_threshold_version, evaluate_threshold
+from tradegumi.signal_engine import classify_trend_decision, get_threshold_version, evaluate_threshold
 from tradegumi.strategy_metrics import (
     CriterionResult,
     EvaluatedOpportunity,
@@ -21,6 +23,13 @@ from tradegumi.strategy_metrics import (
 
 def iso(days: int = 0) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
+def temp_db(name: str = "metrics.db") -> Path:
+    workspace = Path(__file__).resolve().parents[3]
+    base = workspace / ".tmp" / "strategy_metrics_tests" / uuid.uuid4().hex
+    base.mkdir(parents=True, exist_ok=True)
+    return base / name
 
 
 def opportunity(idx: int, *, decision: str = "rejected", failed: int = 1, threshold_version: str = "v1") -> EvaluatedOpportunity:
@@ -67,9 +76,9 @@ def opportunity(idx: int, *, decision: str = "rejected", failed: int = 1, thresh
     )
 
 
-def test_schema_near_miss_state_and_serialization(tmp_path):
-    db = tmp_path / "metrics.db"
-    state = tmp_path / "strategy_metrics.json"
+def test_schema_near_miss_state_and_serialization():
+    db = temp_db()
+    state = db.with_name("strategy_metrics.json")
     init_schema(db)
     recorded = record_opportunity(opportunity(1), db)
     assert recorded.near_miss is True
@@ -86,8 +95,8 @@ def test_schema_near_miss_state_and_serialization(tmp_path):
     assert rows[0]["criteria"][0]["criterion_name"] == "stoch_rsi"
 
 
-def test_retention_prunes_old_rows(tmp_path):
-    db = tmp_path / "metrics.db"
+def test_retention_prunes_old_rows():
+    db = temp_db()
     old = opportunity(1)
     old.evaluated_at = iso(-120)
     record_opportunity(old, db)
@@ -101,8 +110,8 @@ def test_threshold_version_is_stable():
     assert len(get_threshold_version()) == 12
 
 
-def test_criterion_summary_blockers_and_warnings(tmp_path):
-    db = tmp_path / "metrics.db"
+def test_criterion_summary_blockers_and_warnings():
+    db = temp_db()
     record_opportunity(opportunity(1, failed=1, threshold_version="v1"), db)
     record_opportunity(opportunity(2, failed=2, threshold_version="v2"), db)
     summary = get_summary(iso(-1), iso(1), db_path=db)
@@ -111,10 +120,12 @@ def test_criterion_summary_blockers_and_warnings(tmp_path):
     assert summary["criterion_summaries"]
     assert summary["top_blockers"][0]["combined_score"] >= 0
     assert "Strategy threshold version changed during selected period" in summary["data_quality_warnings"]
+    assert summary["threshold_version_counts"]["v1"] == 1
+    assert summary["threshold_version_counts"]["v2"] == 1
 
 
-def test_comparison_and_export(tmp_path):
-    db = tmp_path / "metrics.db"
+def test_comparison_and_export():
+    db = temp_db()
     first = opportunity(1)
     first.evaluated_at = iso(-10)
     second = opportunity(2, decision="emitted", failed=0)
@@ -129,8 +140,8 @@ def test_comparison_and_export(tmp_path):
     assert len(exported["opportunities"]) == 2
 
 
-def test_seeded_summary_performance(tmp_path):
-    db = tmp_path / "metrics.db"
+def test_seeded_summary_performance():
+    db = temp_db()
     start = datetime.now(timezone.utc)
     for i in range(250):
         record_opportunity(opportunity(i, failed=1 if i % 2 else 2), db)
@@ -193,48 +204,81 @@ class TestEvaluateThreshold:
 
 class TestComputeThresholdPass:
     def test_abs_gte_pass(self):
+        db = temp_db()
         # expected=True, passed=True → no mismatch
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.00783, threshold_value=0.005, threshold_operator="abs_gte", passed=True)
-        record_opportunity(EvaluatedOpportunity(id="test", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is True
         assert cr.pass_mismatch is False
 
     def test_abs_gte_pass_mismatch_positive_margin(self):
+        db = temp_db()
         # Core bug case: positive margin but passed=False → mismatch
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.00783, threshold_value=0.005, threshold_operator="abs_gte", passed=False, margin=0.00283)
-        record_opportunity(EvaluatedOpportunity(id="test2", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test2", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is True
         assert cr.pass_mismatch is True
 
     def test_abs_gte_pass_mismatch_negative_value(self):
+        db = temp_db()
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=-0.00783, threshold_value=0.005, threshold_operator="abs_gte", passed=False, margin=0.00283)
-        record_opportunity(EvaluatedOpportunity(id="test3", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test3", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is True
         assert cr.pass_mismatch is True
 
     def test_abs_gte_correct_fail(self):
+        db = temp_db()
         # Correctly failed: abs(value) < threshold
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.003, threshold_value=0.005, threshold_operator="abs_gte", passed=False)
-        record_opportunity(EvaluatedOpportunity(id="test4", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test4", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is False
         assert cr.pass_mismatch is False
 
     def test_gte_operator(self):
+        db = temp_db()
         cr = CriterionResult(criterion_name="stoch", layer="signal", measured_value=25, threshold_value=20, threshold_operator="gte", passed=True)
-        record_opportunity(EvaluatedOpportunity(id="test5", evaluated_at=iso(), symbol="EURUSD", final_decision="emitted", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test5", evaluated_at=iso(), symbol="EURUSD", final_decision="emitted", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is True
         assert cr.pass_mismatch is False
 
+    def test_expected_pass_rehydrates_from_export(self):
+        db = temp_db()
+        cr = CriterionResult(
+            criterion_name="trend_1h",
+            layer="trend",
+            measured_value=-0.00783,
+            threshold_value=0.005,
+            threshold_operator="abs_gte",
+            passed=False,
+        )
+        record_opportunity(
+            EvaluatedOpportunity(
+                id="rehydrate",
+                evaluated_at=iso(),
+                symbol="EURUSD",
+                final_decision="skipped",
+                decision_reason="no_trend",
+                criteria=[cr],
+            ),
+            db,
+        )
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)
+        criterion = exported[0]["criteria"][0]
+        assert criterion["expected_pass"] is True
+        assert criterion["pass_mismatch"] is True
+        assert criterion["blocked_signal"] is True
+
     def test_none_measured_yields_none_expected(self):
+        db = temp_db()
         cr = CriterionResult(criterion_name="stoch", layer="signal", measured_value=None, threshold_value=20, threshold_operator="gte", passed=False)
-        record_opportunity(EvaluatedOpportunity(id="test6", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]))
+        record_opportunity(EvaluatedOpportunity(id="test6", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="test", criteria=[cr]), db)
         assert cr.expected_pass is None
         assert cr.pass_mismatch is False
 
 
 class TestTopBlockers:
-    def test_all_opportunities_blocked_top_blockers_not_empty(self, tmp_path):
-        db = tmp_path / "metrics.db"
+    def test_all_opportunities_blocked_top_blockers_not_empty(self):
+        db = temp_db()
         init_schema(db)
         # Record 5 rejected opportunities, all failing trend_1h
         for i in range(5):
@@ -253,8 +297,8 @@ class TestTopBlockers:
         assert len(summary["top_blockers"]) > 0
         assert summary["top_blockers"][0]["criterion_name"] == "trend_1h"
 
-    def test_blockers_require_rejected_decision(self, tmp_path):
-        db = tmp_path / "metrics.db"
+    def test_blockers_require_rejected_decision(self):
+        db = temp_db()
         init_schema(db)
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.003, threshold_value=0.005, threshold_operator="abs_gte", passed=False, required=True)
         # Emitted (not rejected) — should not appear as blocker
@@ -264,8 +308,8 @@ class TestTopBlockers:
         # Should still have blockers (empty list since no rejections)
         assert summary["rejected_count"] == 0
 
-    def test_first_blocker_and_blocking_layer(self, tmp_path):
-        db = tmp_path / "metrics.db"
+    def test_first_blocker_and_blocking_layer(self):
+        db = temp_db()
         init_schema(db)
         cr1 = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.003, threshold_value=0.005, threshold_operator="abs_gte", passed=False, required=True)
         cr2 = CriterionResult(criterion_name="macd", layer="signal_stack", measured_value=0.0, threshold_value="improves", threshold_operator="boolean", passed=False, required=True)
@@ -275,3 +319,77 @@ class TestTopBlockers:
         assert recorded.blocking_layer in ("signal_stack", "trend")
         assert isinstance(recorded.all_blockers, list)
         assert len(recorded.all_blockers) == 2
+
+    def test_skipped_no_trend_classification_counts_as_top_blocker(self):
+        db = temp_db()
+        init_schema(db)
+        trend_decision = classify_trend_decision(0.009, 0.011, -0.003, 0.005, 0.008, 0.002)
+        opp = EvaluatedOpportunity(
+            id="opp-conflict",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="skipped",
+            decision_reason="no_trend",
+            trend="flat",
+            direction="none",
+            trend_decision=trend_decision,
+            criteria=[
+                CriterionResult("trend_1h", "trend", 0.009, 0.005, "abs_gte", True),
+                CriterionResult("trend_15m", "trend", 0.011, 0.008, "abs_gte", True),
+                CriterionResult("trend_5m", "trend", -0.003, 0.002, "abs_gte", True),
+            ],
+        )
+        recorded = record_opportunity(opp, db)
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert recorded.first_blocker == "trend:direction_conflict"
+        assert recorded.all_blockers == ["trend:direction_conflict"]
+        assert recorded.blocking_layer == "trend"
+        assert summary["skipped_count"] == 1
+        assert summary["indeterminate_count"] == 0
+        assert summary["top_blockers"][0]["criterion_name"] == "trend:direction_conflict"
+
+
+class TestTrendDecisionDiagnostics:
+    def test_all_strengths_pass_but_directions_conflict(self):
+        decision = classify_trend_decision(0.009, 0.011, -0.003, 0.005, 0.008, 0.002)
+
+        assert decision["strength_passed_1h"] is True
+        assert decision["strength_passed_15m"] is True
+        assert decision["strength_passed_5m"] is True
+        assert decision["direction_1h"] == "up"
+        assert decision["direction_15m"] == "up"
+        assert decision["direction_5m"] == "down"
+        assert decision["directions_agree"] is False
+        assert decision["trend_result"] == "flat"
+        assert decision["final_direction"] == "none"
+        assert decision["no_trend_reason"] == "direction_conflict"
+
+    def test_15m_strength_failure_is_named(self):
+        decision = classify_trend_decision(0.009, 0.004, 0.003, 0.005, 0.008, 0.002)
+
+        assert decision["strength_passed_15m"] is False
+        assert decision["no_trend_reason"] == "insufficient_strength_15m"
+
+    def test_multiple_strength_failures_are_grouped(self):
+        decision = classify_trend_decision(0.001, 0.004, 0.003, 0.005, 0.008, 0.002)
+
+        assert decision["no_trend_reason"] == "multiple_insufficient_strength"
+
+    def test_engine_error_reason_forces_indeterminate(self):
+        db = temp_db()
+        record_opportunity(
+            EvaluatedOpportunity(
+                id="engine-error",
+                evaluated_at=iso(),
+                symbol="EURUSD",
+                final_decision="skipped",
+                decision_reason="engine_error",
+                data_complete=False,
+            ),
+            db,
+        )
+
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+        assert summary["indeterminate_count"] == 1
+        assert summary["skipped_count"] == 0

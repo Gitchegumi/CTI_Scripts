@@ -6,6 +6,7 @@ just pure indicator logic driven by a client passed at construction time.
 import hashlib
 import json
 import logging as log
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -110,6 +111,7 @@ class SignalDiagnostic:
     criteria: list[CriterionResult] = None
     data_quality_notes: list[str] = None
     threshold_version: str = "unknown"
+    trend_decision: Optional[dict] = None
 
     def to_opportunity(self, mode: str) -> EvaluatedOpportunity:
         return EvaluatedOpportunity(
@@ -125,6 +127,7 @@ class SignalDiagnostic:
             data_quality_notes=self.data_quality_notes or [],
             threshold_version=self.threshold_version,
             criteria=self.criteria or [],
+            trend_decision=self.trend_decision,
         )
 
 
@@ -176,6 +179,104 @@ def _criterion(
     )
 
 
+def _lr_direction(value: object) -> str:
+    """Classify a linear regression result into a normalized direction label."""
+    if value is None:
+        return "missing"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "invalid"
+    if not math.isfinite(numeric):
+        return "invalid"
+    if numeric > 0:
+        return "up"
+    if numeric < 0:
+        return "down"
+    return "flat"
+
+
+def classify_trend_decision(
+    lr_1h: object,
+    lr_15m: object,
+    lr_5m: object,
+    threshold_1h: float,
+    threshold_15m: float,
+    threshold_5m: float,
+) -> dict:
+    """Explain the existing three-timeframe trend classification decision."""
+    values = {"1h": lr_1h, "15m": lr_15m, "5m": lr_5m}
+    directions = {name: _lr_direction(value) for name, value in values.items()}
+    missing = [name for name, direction in directions.items() if direction == "missing"]
+    invalid = [name for name, direction in directions.items() if direction == "invalid"]
+
+    numeric_values: dict[str, Optional[float]] = {}
+    for name, value in values.items():
+        try:
+            numeric_values[name] = float(value)
+        except (TypeError, ValueError):
+            numeric_values[name] = None
+
+    strength_passed = {
+        "1h": numeric_values["1h"] is not None and math.isfinite(numeric_values["1h"]) and abs(numeric_values["1h"]) >= threshold_1h,
+        "15m": numeric_values["15m"] is not None and math.isfinite(numeric_values["15m"]) and abs(numeric_values["15m"]) >= threshold_15m,
+        "5m": numeric_values["5m"] is not None and math.isfinite(numeric_values["5m"]) and abs(numeric_values["5m"]) >= threshold_5m,
+    }
+    actionable_directions = [directions["1h"], directions["15m"], directions["5m"]]
+    directions_agree = len(set(actionable_directions)) == 1 and actionable_directions[0] in {"up", "down"}
+    strengths_all_passed = all(strength_passed.values())
+
+    if missing:
+        no_trend_reason = "missing_data"
+    elif invalid:
+        no_trend_reason = "invalid_lr_result"
+    else:
+        insufficient = [name for name, passed in strength_passed.items() if not passed]
+        if len(insufficient) > 1:
+            no_trend_reason = "multiple_insufficient_strength"
+        elif insufficient:
+            no_trend_reason = f"insufficient_strength_{insufficient[0]}"
+        elif not directions_agree:
+            no_trend_reason = "direction_conflict"
+        else:
+            no_trend_reason = None
+
+    if no_trend_reason is None and strengths_all_passed and directions_agree:
+        trend_result = "up" if actionable_directions[0] == "up" else "down"
+        final_direction = "BUY" if trend_result == "up" else "SELL"
+    else:
+        trend_result = "flat"
+        final_direction = "none"
+        no_trend_reason = no_trend_reason or "flat_after_classification"
+
+    return {
+        "strength_passed_1h": strength_passed["1h"],
+        "strength_passed_15m": strength_passed["15m"],
+        "strength_passed_5m": strength_passed["5m"],
+        "direction_1h": directions["1h"],
+        "direction_15m": directions["15m"],
+        "direction_5m": directions["5m"],
+        "directions_agree": directions_agree,
+        "strengths_all_passed": strengths_all_passed,
+        "trend_classification_input": {
+            "lr_1h": numeric_values["1h"],
+            "lr_15m": numeric_values["15m"],
+            "lr_5m": numeric_values["5m"],
+            "threshold_1h": threshold_1h,
+            "threshold_15m": threshold_15m,
+            "threshold_5m": threshold_5m,
+        },
+        "trend_classification_output": {
+            "trend_result": trend_result,
+            "final_direction": final_direction,
+            "no_trend_reason": no_trend_reason,
+        },
+        "trend_result": trend_result,
+        "final_direction": final_direction,
+        "no_trend_reason": no_trend_reason,
+    }
+
+
 # ── Main Engine ───────────────────────────────────────────────────────────────
 
 class SignalEngine:
@@ -223,9 +324,12 @@ class SignalEngine:
 
         log.debug("%s LR_1h=%.4f%% LR_15m=%.4f%% LR_5m=%.4f%%", symbol, lr_1h, lr_15, lr_5)
 
-        if lr_1h > self.LR_1H_THRESHOLD and lr_15 > self.LR_15M_THRESHOLD and lr_5 > self.LR_5M_THRESHOLD:
+        trend_decision = classify_trend_decision(
+            lr_1h, lr_15, lr_5, self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD
+        )
+        if trend_decision["trend_result"] == "up":
             return "Uptrend", lr_1h, lr_15, lr_5
-        if lr_1h < -self.LR_1H_THRESHOLD and lr_15 < -self.LR_15M_THRESHOLD and lr_5 < -self.LR_5M_THRESHOLD:
+        if trend_decision["trend_result"] == "down":
             return "Downtrend", lr_1h, lr_15, lr_5
         return None, lr_1h, lr_15, lr_5
 
@@ -466,6 +570,9 @@ class SignalEngine:
             return None, None, 0.0, 0.0, 0.0, diag
 
         trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+        trend_decision = classify_trend_decision(
+            lr_1h, lr_15, lr_5, self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD
+        )
         trend_criteria = [
             _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, abs(lr_1h) >= self.LR_1H_THRESHOLD, abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
             _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, abs(lr_15) >= self.LR_15M_THRESHOLD, abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
@@ -484,6 +591,7 @@ class SignalEngine:
                 decision_reason="no_trend",
                 criteria=trend_criteria,
                 threshold_version=get_threshold_version(),
+                trend_decision=trend_decision,
             )
             return None, trend, lr_1h, lr_15, lr_5, diag
 
@@ -506,6 +614,7 @@ class SignalEngine:
                 direction="BUY" if trend == "Uptrend" else "SELL",
                 criteria=trend_criteria + [_criterion("cooldown", "timing", remaining, 0, False, -remaining)],
                 threshold_version=get_threshold_version(),
+                trend_decision=trend_decision,
             )
             return None, trend, lr_1h, lr_15, lr_5, diag
 
@@ -526,6 +635,7 @@ class SignalEngine:
             confidence=confidence if confidence is not None else (signal.confidence if signal else None),
             criteria=trend_criteria + criteria,
             threshold_version=get_threshold_version(),
+            trend_decision=trend_decision,
         )
         return signal, trend, lr_1h, lr_15, lr_5, diag
 
