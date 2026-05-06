@@ -30,6 +30,7 @@ INDETERMINATE_REASONS = {
     "incomplete_diagnostics",
     "missing_candle_data",
     "missing_candle_time",
+    "missing_signal_engine_data",
 }
 _lock = threading.Lock()
 _initialized_db_paths: set[str] = set()
@@ -102,6 +103,9 @@ class CriterionResult:
     data_quality: str = "complete"
     id: Optional[int] = None
     opportunity_id: Optional[str] = None
+    diagnostic_state: str = "evaluated"
+    reason: Optional[str] = None
+    context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -131,6 +135,9 @@ class EvaluatedOpportunity:
     all_blockers: list[str] = field(default_factory=list)
     blocking_layer: Optional[str] = None
     trend_decision: Optional[dict[str, Any]] = None
+    pipeline_state: Optional[str] = None
+    near_miss_reason: Optional[str] = None
+    threshold_version_unknown_reason: Optional[str] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -181,6 +188,9 @@ class DiagnosticSummary:
     all_blockers: list[str] = field(default_factory=list)  # all blocking criterion_names
     blocking_layer: Optional[str] = None  # layer of the first blocker
     threshold_version_counts: dict[str, int] = field(default_factory=dict)
+    threshold_version_unknown_reasons: dict[str, int] = field(default_factory=dict)
+    near_miss_reason_counts: dict[str, int] = field(default_factory=dict)
+    pipeline_funnel: dict[str, int] = field(default_factory=dict)
     data_quality_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -233,7 +243,10 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 first_blocker TEXT,
                 all_blockers TEXT NOT NULL DEFAULT '[]',
                 blocking_layer TEXT,
-                trend_decision TEXT
+                trend_decision TEXT,
+                pipeline_state TEXT,
+                near_miss_reason TEXT,
+                threshold_version_unknown_reason TEXT
             )
             """
         )
@@ -255,6 +268,9 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 required INTEGER NOT NULL,
                 blocked_signal INTEGER NOT NULL,
                 data_quality TEXT NOT NULL,
+                diagnostic_state TEXT NOT NULL DEFAULT 'evaluated',
+                reason TEXT,
+                context TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(opportunity_id) REFERENCES evaluated_opportunities(id)
             )
             """
@@ -267,8 +283,14 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         _ensure_column(conn, "evaluated_opportunities", "all_blockers", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "evaluated_opportunities", "blocking_layer", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "trend_decision", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "pipeline_state", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "near_miss_reason", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "threshold_version_unknown_reason", "TEXT")
         _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
         _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
+        _ensure_column(conn, "criterion_results", "reason", "TEXT")
+        _ensure_column(conn, "criterion_results", "context", "TEXT NOT NULL DEFAULT '{}'")
     _initialized_db_paths.add(db_key)
 
 
@@ -323,6 +345,7 @@ def _compute_threshold_pass(measured: Any, threshold: Any, operator: str) -> Opt
 
 
 def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportunity:
+    """Normalize one diagnostic opportunity before persistence and aggregation."""
     if opportunity.final_decision not in VALID_DECISIONS:
         raise ValueError(f"Invalid final_decision: {opportunity.final_decision}")
     if not opportunity.symbol:
@@ -343,6 +366,8 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
         if criterion.data_quality in {"missing", "malformed"}:
             complete = False
             notes.append(f"{criterion.criterion_name}:{criterion.data_quality}")
+            if criterion.required and opportunity.final_decision == "indeterminate":
+                criterion.blocked_signal = True
         # Compute expected_pass and pass_mismatch
         criterion.expected_pass = _compute_threshold_pass(
             criterion.measured_value, criterion.threshold_value, criterion.threshold_operator
@@ -354,12 +379,12 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
             if opportunity.final_decision in {"rejected", "skipped"}:
                 criterion.blocked_signal = True
 
-    if opportunity.final_decision in {"rejected", "skipped"}:
+    if opportunity.final_decision in {"rejected", "skipped", "indeterminate"}:
         blockers = [c for c in opportunity.criteria if c.blocked_signal]
-        blockers.sort(key=lambda c: c.criterion_name)  # stable order
-        opportunity.all_blockers = [c.criterion_name for c in blockers]
+        blockers.sort(key=lambda c: _criterion_pipeline_order(c))  # stable pipeline order
+        opportunity.all_blockers = [_criterion_blocker_name(c) for c in blockers]
         if blockers:
-            opportunity.first_blocker = blockers[0].criterion_name
+            opportunity.first_blocker = _criterion_blocker_name(blockers[0])
             opportunity.blocking_layer = blockers[0].layer
         elif opportunity.decision_reason == "no_trend":
             no_trend_reason = _trend_no_trend_reason(opportunity.trend_decision)
@@ -374,10 +399,76 @@ def validate_opportunity(opportunity: EvaluatedOpportunity) -> EvaluatedOpportun
             opportunity.blocking_layer = _layer_from_reason(blocker)
 
     opportunity.failed_criteria_count = failed_required
-    opportunity.near_miss = opportunity.final_decision == "rejected" and failed_required == 1
+    opportunity.pipeline_state = opportunity.pipeline_state or _classify_pipeline_state(opportunity)
+    if opportunity.threshold_version == "unknown" and not opportunity.threshold_version_unknown_reason:
+        opportunity.threshold_version_unknown_reason = "legacy_or_missing_threshold_version"
+    near_miss, near_miss_reason = _classify_near_miss(opportunity, failed_required)
+    opportunity.near_miss = near_miss
+    opportunity.near_miss_reason = near_miss_reason
     opportunity.data_complete = complete and opportunity.data_complete
     opportunity.data_quality_notes = sorted(set(notes))
     return opportunity
+
+
+def _criterion_pipeline_order(criterion: CriterionResult) -> tuple[int, str]:
+    """Return a deterministic order that follows the signal pipeline."""
+    layer_order = {
+        "trend": 10,
+        "data_quality": 20,
+        "signal_engine": 20,
+        "timing": 30,
+        "signal_stack": 40,
+        "confirmation": 50,
+        "confidence": 60,
+        "risk": 70,
+    }
+    return layer_order.get(criterion.layer, 90), criterion.criterion_name
+
+
+def _criterion_blocker_name(criterion: CriterionResult) -> str:
+    """Return the stable blocker name exported for a blocking criterion."""
+    if criterion.reason:
+        return criterion.reason
+    if criterion.criterion_name == "signal_engine_data" and criterion.data_quality in {"missing", "malformed"}:
+        return f"signal_engine_data:{criterion.data_quality}"
+    if criterion.criterion_name == "candle_close_gate":
+        return "candle_close_gate:failed"
+    return criterion.criterion_name
+
+
+def _classify_pipeline_state(opportunity: EvaluatedOpportunity) -> str:
+    """Classify an opportunity into the highest-signal stage reached."""
+    blockers = set(opportunity.all_blockers)
+    if opportunity.final_decision == "emitted":
+        return "signal_emitted"
+    if opportunity.decision_reason == "no_trend" or any(b.startswith("trend:") for b in blockers):
+        return "trend_skipped"
+    if any(b.startswith("signal_engine_data:") for b in blockers):
+        return "trend_candidate_signal_data_missing"
+    if any(b == "candle_close_gate:waiting_for_close" for b in blockers):
+        return "trend_candidate_candle_close_waiting"
+    if any(b.startswith("candle_close_gate:") for b in blockers):
+        return "trend_candidate_candle_close_failed"
+    if opportunity.final_decision == "rejected":
+        return "signal_rejected"
+    if opportunity.final_decision == "indeterminate":
+        return "indeterminate"
+    if opportunity.final_decision == "skipped":
+        return "trend_skipped"
+    return "signal_rules_evaluated"
+
+
+def _classify_near_miss(opportunity: EvaluatedOpportunity, failed_required: int) -> tuple[bool, Optional[str]]:
+    """Return whether the rejected opportunity satisfies the documented near-miss rule."""
+    if opportunity.final_decision != "rejected" or failed_required != 1:
+        return False, None
+    blocking = [c for c in opportunity.criteria if c.blocked_signal]
+    if len(blocking) != 1:
+        return False, None
+    blocker_name = _criterion_blocker_name(blocking[0])
+    if blocker_name == "candle_close_gate:waiting_for_close":
+        return False, None
+    return True, blocker_name
 
 
 def _trend_no_trend_reason(trend_decision: Optional[dict[str, Any]]) -> str:
@@ -394,8 +485,12 @@ def _layer_from_reason(reason: str) -> str:
         return "trend"
     if reason in {"engine_error", "api_error", "api_timeout"}:
         return "engine"
-    if reason in {"missing_candle_data", "missing_candle_time", "incomplete_diagnostics"}:
+    if reason.startswith("signal_engine_data:"):
         return "data_quality"
+    if reason in {"missing_candle_data", "missing_candle_time", "missing_signal_engine_data", "incomplete_diagnostics"}:
+        return "data_quality"
+    if reason.startswith("candle_close_gate:"):
+        return "timing"
     if reason in {"risk", "risk_blocked"}:
         return "risk"
     if reason in {"cooldown", "candle_gate"}:
@@ -414,8 +509,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 id, evaluated_at, symbol, timeframe, mode, strategy, direction, trend,
                 final_decision, decision_reason, confidence, failed_criteria_count,
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at,
-                first_blocker, all_blockers, blocking_layer, trend_decision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
+                near_miss_reason, threshold_version_unknown_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -439,6 +535,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 json.dumps(opportunity.all_blockers),
                 opportunity.blocking_layer,
                 json.dumps(opportunity.trend_decision) if opportunity.trend_decision is not None else None,
+                opportunity.pipeline_state,
+                opportunity.near_miss_reason,
+                opportunity.threshold_version_unknown_reason,
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
@@ -448,8 +547,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 INSERT INTO criterion_results (
                     opportunity_id, criterion_name, layer, measured_value, threshold_value,
                     threshold_operator, passed, expected_pass, pass_mismatch, margin,
-                    normalized_margin, required, blocked_signal, data_quality
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    normalized_margin, required, blocked_signal, data_quality, diagnostic_state,
+                    reason, context
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     opportunity.id,
@@ -466,6 +566,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                     int(criterion.required),
                     int(criterion.blocked_signal),
                     criterion.data_quality,
+                    criterion.diagnostic_state,
+                    criterion.reason,
+                    json.dumps(criterion.context),
                 ),
             )
         conn.commit()
@@ -521,6 +624,11 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
         all_blockers=json.loads(row["all_blockers"] or "[]") if "all_blockers" in row.keys() else [],
         blocking_layer=row["blocking_layer"] if "blocking_layer" in row.keys() else None,
         trend_decision=json.loads(row["trend_decision"]) if "trend_decision" in row.keys() and row["trend_decision"] else None,
+        pipeline_state=row["pipeline_state"] if "pipeline_state" in row.keys() else None,
+        near_miss_reason=row["near_miss_reason"] if "near_miss_reason" in row.keys() else None,
+        threshold_version_unknown_reason=(
+            row["threshold_version_unknown_reason"] if "threshold_version_unknown_reason" in row.keys() else None
+        ),
     )
 
 
@@ -577,6 +685,9 @@ def get_opportunities(
                     required=bool(c["required"]),
                     blocked_signal=bool(c["blocked_signal"]),
                     data_quality=c["data_quality"],
+                    diagnostic_state=c["diagnostic_state"] if "diagnostic_state" in c.keys() else "evaluated",
+                    reason=c["reason"] if "reason" in c.keys() else None,
+                    context=json.loads(c["context"] or "{}") if "context" in c.keys() else {},
                 )
                 for c in crit_rows
             ]
@@ -642,7 +753,7 @@ def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], blocked_opportu
         return []
     placeholders = ",".join("?" for _ in ids)
     opportunity_rows = conn.execute(
-        f"SELECT id, all_blockers FROM evaluated_opportunities WHERE id IN ({placeholders}) AND final_decision IN ('rejected', 'skipped')",
+        f"SELECT id, all_blockers FROM evaluated_opportunities WHERE id IN ({placeholders}) AND all_blockers != '[]'",
         ids,
     ).fetchall()
     blockers_by_name: dict[str, set[str]] = {}
@@ -703,6 +814,51 @@ def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], blocked_opportu
     return sorted(result, key=lambda b: (-b.combined_score, -b.blocked_count, b.criterion_name))
 
 
+def _pipeline_funnel(rows: list[sqlite3.Row], criterion_rows: list[sqlite3.Row]) -> dict[str, int]:
+    """Build stage counts that show where candidates fall out of the pipeline."""
+    criteria_by_opp: dict[str, list[sqlite3.Row]] = {}
+    for criterion in criterion_rows:
+        criteria_by_opp.setdefault(criterion["opportunity_id"], []).append(criterion)
+
+    trend_skipped = 0
+    signal_data_missing = 0
+    candle_gate_passed: set[str] = set()
+    candle_gate_waiting_or_failed: set[str] = set()
+    signal_rules_evaluated: set[str] = set()
+
+    for row in rows:
+        blockers = json.loads(row["all_blockers"] or "[]")
+        pipeline_state = row["pipeline_state"] or ""
+        if row["decision_reason"] == "no_trend" or pipeline_state == "trend_skipped" or any(b.startswith("trend:") for b in blockers):
+            trend_skipped += 1
+        if row["data_complete"] == 0 or any(b.startswith("signal_engine_data:") for b in blockers):
+            signal_data_missing += 1
+        for criterion in criteria_by_opp.get(row["id"], []):
+            name = criterion["criterion_name"]
+            if name == "candle_close_gate":
+                if criterion["passed"] == 1:
+                    candle_gate_passed.add(row["id"])
+                else:
+                    candle_gate_waiting_or_failed.add(row["id"])
+            if name in {"stoch_rsi", "macd", "keltner", "confidence"}:
+                signal_rules_evaluated.add(row["id"])
+
+    trend_candidate_found = max(0, len(rows) - trend_skipped)
+    return {
+        "total_evaluated": len(rows),
+        "trend_skipped": trend_skipped,
+        "trend_candidate_found": trend_candidate_found,
+        "signal_data_complete": max(0, trend_candidate_found - signal_data_missing),
+        "signal_data_missing": signal_data_missing,
+        "candle_close_gate_passed": len(candle_gate_passed),
+        "candle_close_gate_waiting_or_failed": len(candle_gate_waiting_or_failed),
+        "signal_rules_evaluated": len(signal_rules_evaluated),
+        "signal_rejected": sum(1 for row in rows if row["final_decision"] == "rejected"),
+        "signal_emitted": sum(1 for row in rows if row["final_decision"] == "emitted"),
+        "indeterminate": sum(1 for row in rows if row["final_decision"] == "indeterminate"),
+    }
+
+
 def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Path = DB_FILE) -> dict[str, Any]:
     init_schema(db_path)
     start_iso, end_iso = _normalize_range_bounds(start, end)
@@ -713,36 +869,57 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
         params.append(symbol.upper())
 
     with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            f"SELECT id, final_decision, near_miss, data_complete, threshold_version, first_blocker, all_blockers, blocking_layer FROM evaluated_opportunities WHERE {' AND '.join(clauses)}",
+            f"""
+            SELECT id, final_decision, decision_reason, near_miss, near_miss_reason,
+                   data_complete, threshold_version, threshold_version_unknown_reason,
+                   first_blocker, all_blockers, blocking_layer, pipeline_state
+            FROM evaluated_opportunities
+            WHERE {' AND '.join(clauses)}
+            """,
             params,
         ).fetchall()
-        ids = [r[0] for r in rows]
+        ids = [r["id"] for r in rows]
         total = len(rows)
-        emitted = sum(1 for r in rows if r[1] == "emitted")
-        rejected = sum(1 for r in rows if r[1] == "rejected")
-        skipped = sum(1 for r in rows if r[1] == "skipped")
-        indeterminate = sum(1 for r in rows if r[1] == "indeterminate")
-        near_miss_count = sum(1 for r in rows if r[2])
+        emitted = sum(1 for r in rows if r["final_decision"] == "emitted")
+        rejected = sum(1 for r in rows if r["final_decision"] == "rejected")
+        skipped = sum(1 for r in rows if r["final_decision"] == "skipped")
+        indeterminate = sum(1 for r in rows if r["final_decision"] == "indeterminate")
+        near_miss_count = sum(1 for r in rows if r["near_miss"])
         threshold_version_counts: dict[str, int] = {}
+        threshold_version_unknown_reasons: dict[str, int] = {}
+        near_miss_reason_counts: dict[str, int] = {}
         all_blockers: list[str] = []
         first_blocker = None
         blocking_layer = None
         for row in rows:
-            version = row[4] or "unknown"
+            version = row["threshold_version"] or "unknown"
             threshold_version_counts[version] = threshold_version_counts.get(version, 0) + 1
-            blockers = json.loads(row[6] or "[]")
+            if version == "unknown":
+                unknown_reason = row["threshold_version_unknown_reason"] or "legacy_or_missing_threshold_version"
+                threshold_version_unknown_reasons[unknown_reason] = threshold_version_unknown_reasons.get(unknown_reason, 0) + 1
+            if row["near_miss"] and row["near_miss_reason"]:
+                near_miss_reason_counts[row["near_miss_reason"]] = near_miss_reason_counts.get(row["near_miss_reason"], 0) + 1
+            blockers = json.loads(row["all_blockers"] or "[]")
             all_blockers.extend(blockers)
-            if first_blocker is None and row[5]:
-                first_blocker = row[5]
-                blocking_layer = row[7]
+            if first_blocker is None and row["first_blocker"]:
+                first_blocker = row["first_blocker"]
+                blocking_layer = row["blocking_layer"]
         warnings: list[str] = []
         if total == 0:
             warnings.append("No evaluated opportunities in selected period")
-        if any(not r[3] for r in rows):
+        if any(not r["data_complete"] for r in rows):
             warnings.append("Some opportunities have incomplete diagnostics")
-        if len({r[4] for r in rows}) > 1:
+        if len({r["threshold_version"] for r in rows}) > 1:
             warnings.append("Strategy threshold version changed during selected period")
+        criterion_rows = []
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            criterion_rows = conn.execute(
+                f"SELECT opportunity_id, criterion_name, passed FROM criterion_results WHERE opportunity_id IN ({placeholders})",
+                ids,
+            ).fetchall()
 
         summary = DiagnosticSummary(
             start=start_iso,
@@ -754,11 +931,14 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             indeterminate_count=indeterminate,
             near_miss_count=near_miss_count,
             criterion_summaries=_criterion_summaries(conn, ids),
-            top_blockers=_blocker_summaries(conn, ids, rejected + skipped),
+            top_blockers=_blocker_summaries(conn, ids, sum(1 for r in rows if json.loads(r["all_blockers"] or "[]"))),
             first_blocker=first_blocker,
             all_blockers=sorted(set(all_blockers)),
             blocking_layer=blocking_layer,
             threshold_version_counts=threshold_version_counts,
+            threshold_version_unknown_reasons=threshold_version_unknown_reasons,
+            near_miss_reason_counts=near_miss_reason_counts,
+            pipeline_funnel=_pipeline_funnel(rows, criterion_rows),
             data_quality_warnings=warnings,
         )
         return summary.to_dict()

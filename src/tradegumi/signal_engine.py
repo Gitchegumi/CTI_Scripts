@@ -9,7 +9,7 @@ import logging as log
 import math
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -157,7 +157,11 @@ def _criterion(
     operator: str = "boolean",
     required: bool = True,
     quality: str = "complete",
+    diagnostic_state: str = "evaluated",
+    reason: Optional[str] = None,
+    context: Optional[dict] = None,
 ) -> CriterionResult:
+    """Build one metrics criterion with optional structured diagnostic context."""
     normalized = None
     if margin is not None:
         try:
@@ -176,6 +180,9 @@ def _criterion(
         required=required,
         blocked_signal=required and passed is False,
         data_quality=quality,
+        diagnostic_state=diagnostic_state,
+        reason=reason,
+        context=context or {},
     )
 
 
@@ -194,6 +201,60 @@ def _lr_direction(value: object) -> str:
     if numeric < 0:
         return "down"
     return "flat"
+
+
+def _timeframe_seconds(timeframe: str) -> int:
+    """Return the number of seconds represented by a common candle timeframe."""
+    normalized = timeframe.upper()
+    if normalized.startswith("M"):
+        return int(normalized[1:]) * 60
+    if normalized.startswith("H"):
+        return int(normalized[1:]) * 60 * 60
+    if normalized.startswith("D"):
+        return int(normalized[1:]) * 24 * 60 * 60
+    return 300
+
+
+def _candle_close_context(candle: Candle, timeframe: str, current_time: Optional[datetime] = None) -> dict:
+    """Describe candle-close timing in stable export fields."""
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    candle_open = candle.time
+    if candle_open.tzinfo is None:
+        candle_open = candle_open.replace(tzinfo=timezone.utc)
+    candle_close = candle_open + timedelta(seconds=_timeframe_seconds(timeframe))
+    seconds_until_close = max(0.0, (candle_close - now).total_seconds())
+    seconds_since_close = max(0.0, (now - candle_close).total_seconds())
+    return {
+        "current_time": now.isoformat(),
+        "candle_open_time": candle_open.isoformat(),
+        "candle_close_time": candle_close.isoformat(),
+        "seconds_until_close": round(seconds_until_close, 3),
+        "seconds_since_close": round(seconds_since_close, 3),
+        "timeframe": timeframe,
+        "gate_rule": "pass_after_candle_close",
+        "margin_units": "seconds",
+    }
+
+
+def _compact_data_issue_context(exc: Exception, *, stage: str, timeframe: str = "M5") -> dict:
+    """Summarize missing signal inputs without exporting raw candle data."""
+    message = str(exc)
+    missing_input = "signal_stack_input"
+    if isinstance(exc, IndexError):
+        missing_input = "last_closed_candle_or_indicator_window"
+    elif isinstance(exc, KeyError):
+        missing_input = f"indicator_column:{message.strip()}"
+    elif isinstance(exc, ValueError):
+        missing_input = "malformed_price_or_indicator_data"
+    return {
+        "stage": stage,
+        "timeframe": timeframe,
+        "missing_input": missing_input,
+        "error_type": exc.__class__.__name__,
+        "error_message": message,
+    }
 
 
 def classify_trend_decision(
@@ -346,6 +407,21 @@ class SignalEngine:
             Signal or None
         """
         candles = self.client.get_candles(symbol, "M5", count=100)
+        if not candles:
+            criteria = [
+                _criterion(
+                    "signal_engine_data",
+                    "data_quality",
+                    {"timeframe": "M5", "missing_input": "candles", "available_count": 0},
+                    "M5 candles",
+                    None,
+                    quality="missing",
+                    diagnostic_state="missing_data",
+                    reason="signal_engine_data:missing",
+                    context={"timeframe": "M5", "missing_input": "candles", "available_count": 0},
+                )
+            ]
+            return None, criteria, "missing_candle_data", None
         df = candles_to_df(candles)
 
         # ── Candle-close gate ───────────────────────────────────────────────
@@ -354,13 +430,72 @@ class SignalEngine:
 
         if self.CANDLE_CLOSE_GATE:
             last_candle = candles[-1] if candles else None
-            if last_candle:
-                age_sec = time.time() - last_candle.time.timestamp()
-                # Require candle to be in last 60 seconds of its 5m period
-                if age_sec > 240:  # More than 4 minutes into the candle
-                    log.debug("%s signal skipped: candle-close gate (age=%.0fs)", symbol, age_sec)
-                    criteria.append(_criterion("candle_close_gate", "timing", age_sec, "<=240s", False, 240 - age_sec))
-                    return None, criteria, "candle_gate", None
+            if not last_candle:
+                context = {"timeframe": "M5", "gate_rule": "pass_after_candle_close", "missing_input": "last_closed_candle"}
+                criteria.append(
+                    _criterion(
+                        "candle_close_gate",
+                        "timing",
+                        None,
+                        "closed candle",
+                        None,
+                        None,
+                        quality="missing",
+                        diagnostic_state="missing_data",
+                        reason="candle_close_gate:missing_timing_data",
+                        context=context,
+                    )
+                )
+                return None, criteria, "missing_candle_time", None
+            context = _candle_close_context(last_candle, "M5")
+            seconds_until_close = context["seconds_until_close"]
+            seconds_since_close = context["seconds_since_close"]
+            if seconds_until_close > 0:
+                log.debug("%s signal waiting for candle close (%.0fs remaining)", symbol, seconds_until_close)
+                criteria.append(
+                    _criterion(
+                        "candle_close_gate",
+                        "timing",
+                        seconds_until_close,
+                        "0 seconds until close",
+                        False,
+                        -seconds_until_close,
+                        "lte",
+                        diagnostic_state="waiting",
+                        reason="candle_close_gate:waiting_for_close",
+                        context=context,
+                    )
+                )
+                return None, criteria, "candle_close_gate:waiting_for_close", None
+            if seconds_since_close > _timeframe_seconds("M5") * 2:
+                criteria.append(
+                    _criterion(
+                        "candle_close_gate",
+                        "timing",
+                        seconds_since_close,
+                        f"<={_timeframe_seconds('M5') * 2} seconds since close",
+                        False,
+                        (_timeframe_seconds("M5") * 2) - seconds_since_close,
+                        "lte",
+                        diagnostic_state="evaluated",
+                        reason="candle_close_gate:stale_candle",
+                        context=context,
+                    )
+                )
+                return None, criteria, "candle_close_gate:stale_candle", None
+            criteria.append(
+                _criterion(
+                    "candle_close_gate",
+                    "timing",
+                    seconds_since_close,
+                    ">=0 seconds since close",
+                    True,
+                    seconds_since_close,
+                    "gte",
+                    reason="candle_close_gate:passed",
+                    context=context,
+                )
+            )
 
         # Swap ignored — session/timing filters disabled for early development
 
@@ -556,16 +691,20 @@ class SignalEngine:
         lr_5: float = 0.0,
         criteria: Optional[list[CriterionResult]] = None,
         trend_decision: Optional[dict] = None,
+        context: Optional[dict] = None,
     ) -> SignalDiagnostic:
         """Build an indeterminate diagnostic for incomplete data instead of raising."""
         data_criterion = _criterion(
             "signal_engine_data",
             "data_quality",
-            note,
+            context or {"note": note},
             "complete candles and indicators",
             None,
             None,
             quality="missing",
+            diagnostic_state="missing_data",
+            reason="signal_engine_data:missing",
+            context=context or {"note": note},
         )
         return SignalDiagnostic(
             symbol=symbol,
@@ -611,9 +750,10 @@ class SignalEngine:
         try:
             trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
         except (IndexError, KeyError, ValueError) as exc:
-            note = f"trend data incomplete: {exc}"
+            context = _compact_data_issue_context(exc, stage="trend_filter", timeframe="mixed")
+            note = f"trend data incomplete: {context['missing_input']}"
             log.warning("%s signal engine data quality issue: %s", symbol, note)
-            diag = self._indeterminate_diagnostic(symbol, "missing_candle_data", note)
+            diag = self._indeterminate_diagnostic(symbol, "missing_signal_engine_data", note, context=context)
             return None, None, 0.0, 0.0, 0.0, diag
 
         trend_decision = classify_trend_decision(
@@ -667,12 +807,13 @@ class SignalEngine:
         try:
             signal, criteria, reason, confidence = self._get_signal(symbol, trend)
         except (IndexError, KeyError, ValueError) as exc:
-            note = f"signal stack data incomplete: {exc}"
+            context = _compact_data_issue_context(exc, stage="signal_stack", timeframe="M5")
+            note = f"signal stack data incomplete: {context['missing_input']}"
             log.warning("%s signal engine data quality issue: %s", symbol, note)
             criteria = trend_criteria
             diag = self._indeterminate_diagnostic(
                 symbol,
-                "missing_candle_data",
+                "missing_signal_engine_data",
                 note,
                 trend=trend,
                 lr_1h=lr_1h,
@@ -680,6 +821,7 @@ class SignalEngine:
                 lr_5=lr_5,
                 criteria=criteria,
                 trend_decision=trend_decision,
+                context=context,
             )
             return None, trend, lr_1h, lr_15, lr_5, diag
 
@@ -693,7 +835,15 @@ class SignalEngine:
             lr_1h=lr_1h,
             lr_15m=lr_15,
             lr_5m=lr_5,
-            final_decision="emitted" if signal else "rejected",
+            final_decision=(
+                "emitted"
+                if signal
+                else (
+                    "skipped"
+                    if str(reason).startswith("candle_close_gate:waiting_for_close")
+                    else ("indeterminate" if reason in {"missing_candle_time", "missing_candle_data"} else "rejected")
+                )
+            ),
             decision_reason=reason,
             direction=("BUY" if trend == "Uptrend" else "SELL"),
             confidence=confidence if confidence is not None else (signal.confidence if signal else None),
