@@ -35,11 +35,13 @@ If callers send a timestamped `end` value, it is treated as the exact exclusive 
 
 `expected_pass` is recalculated from `measured_value`, `threshold_value`, and `threshold_operator` when possible. `pass_mismatch` is true when the recalculated value differs from the stored `passed` value. `blocked_signal` is true when a failed required criterion stopped signal generation.
 
+Required criteria that cannot evaluate because data is missing or malformed also set `blocked_signal` when that missing data stops progression. In that case `diagnostic_state`, `reason`, and `context` explain why evaluation was impossible instead of leaving a silent `passed = null`.
+
 ## Blockers
 
 `first_blocker` is the first known blocker for an opportunity. `all_blockers` lists every known blocker, including trend classification reasons such as `trend:direction_conflict`. `blocking_layer` identifies where the signal stopped, such as `trend`, `entry`, `risk`, `data_quality`, or `engine`.
 
-`top_blockers` summarizes blockers across the report. It includes skipped and rejected opportunities with known blockers, so no-trend skips are visible in summary-level diagnostics.
+`top_blockers` summarizes blockers across the report. It includes skipped, rejected, and indeterminate opportunities with known blockers, so no-trend skips and missing signal data are visible in summary-level diagnostics.
 
 ## Decision Counts
 
@@ -47,3 +49,53 @@ If callers send a timestamped `end` value, it is treated as the exact exclusive 
 - `rejected`: a directional opportunity was stopped by strategy, confidence, or risk criteria.
 - `skipped`: the strategy intentionally skipped before an actionable entry, such as no trend or cooldown.
 - `indeterminate`: data, API, engine, missing candle, missing candle time, or incomplete diagnostic failures.
+
+`rejected` does not include opportunities that are merely waiting for a candle to close or unable to evaluate because required data is missing. Those are classified as skipped or indeterminate according to the blocker.
+
+## Signal Engine Data
+
+`signal_engine_data` describes whether the signal stack had enough data to evaluate a directional trend candidate. Missing inputs keep the final decision indeterminate and use stable blockers such as `signal_engine_data:missing`.
+
+The criterion `context` should name the compact missing input category, such as candles, last closed candle or indicator window, malformed price or indicator data, ATR, stochastic RSI, price data, or an indicator column. Raw candle arrays are not exported.
+
+## Candle Close Gate
+
+`candle_close_gate` describes whether a candidate was evaluated at the intended candle timing. The gate rule is `pass_after_candle_close`: a candidate can proceed only when the relevant candle has closed. If evaluation occurs before close, the opportunity is treated as waiting for candle close rather than a strategy rejection.
+
+Gate context includes `current_time`, `candle_open_time`, `candle_close_time`, `seconds_until_close`, `seconds_since_close`, `timeframe`, `gate_rule`, and `margin_units`. Margin values for this gate are expressed in seconds.
+
+Stable gate reasons include:
+
+- `candle_close_gate:passed`
+- `candle_close_gate:waiting_for_close`
+- `candle_close_gate:stale_candle`
+- `candle_close_gate:missing_timing_data`
+- `candle_close_gate:failed`
+
+## Near Misses
+
+`near_miss` is true only when a rejected opportunity failed exactly one required blocking criterion and that blocker satisfies the documented near-miss rule. Ordinary open-candle waiting is not a near miss.
+
+`near_miss_reason` names the blocking criterion or stable blocker that made the opportunity a near miss. `near_miss_reason_counts` summarizes those reasons, and `near_miss_count` must equal the sum of the reason counts.
+
+## Pipeline Funnel
+
+`pipeline_funnel` summarizes where evaluated opportunities fall out of the pipeline:
+
+- `total_evaluated`
+- `trend_skipped`
+- `trend_candidate_found`
+- `signal_data_complete`
+- `signal_data_missing`
+- `candle_close_gate_passed`
+- `candle_close_gate_waiting_or_failed`
+- `signal_rules_evaluated`
+- `signal_rejected`
+- `signal_emitted`
+- `indeterminate`
+
+Use the funnel to identify whether the next blocker is trend qualification, signal data completeness, candle timing, signal rules, or another indeterminate failure.
+
+## Threshold Versions
+
+`threshold_version_counts` remains the count of exported opportunities by strategy threshold version. When the version is `unknown`, `threshold_version_unknown_reasons` explains the best available reason, such as legacy or missing threshold provenance.

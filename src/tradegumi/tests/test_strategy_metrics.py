@@ -109,6 +109,39 @@ def test_threshold_version_is_stable():
     assert len(get_threshold_version()) == 12
 
 
+def test_additive_pipeline_fields_round_trip_and_json_compatible():
+    db = temp_db()
+    cr = CriterionResult(
+        criterion_name="signal_engine_data",
+        layer="data_quality",
+        measured_value={"missing_input": "candles"},
+        threshold_value="complete signal stack inputs",
+        passed=None,
+        required=True,
+        data_quality="missing",
+        diagnostic_state="missing_data",
+        reason="signal_engine_data:missing",
+        context={"timeframe": "M5", "missing_input": "candles"},
+    )
+    opp = EvaluatedOpportunity(
+        id="round-trip",
+        evaluated_at=iso(),
+        symbol="EURUSD",
+        final_decision="indeterminate",
+        decision_reason="missing_signal_engine_data",
+        threshold_version="unknown",
+        criteria=[cr],
+    )
+    record_opportunity(opp, db)
+
+    exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+
+    assert exported["pipeline_state"] == "trend_candidate_signal_data_missing"
+    assert exported["threshold_version_unknown_reason"] == "legacy_or_missing_threshold_version"
+    assert exported["criteria"][0]["diagnostic_state"] == "missing_data"
+    assert exported["criteria"][0]["context"]["missing_input"] == "candles"
+
+
 def test_criterion_summary_blockers_and_warnings():
     db = temp_db()
     record_opportunity(opportunity(1, failed=1, threshold_version="v1"), db)
@@ -365,6 +398,184 @@ class TestTopBlockers:
         assert summary["skipped_count"] == 1
         assert summary["indeterminate_count"] == 0
         assert summary["top_blockers"][0]["criterion_name"] == "trend:direction_conflict"
+
+    def test_indeterminate_signal_engine_missing_counts_as_top_blocker(self):
+        db = temp_db()
+        init_schema(db)
+        cr = CriterionResult(
+            criterion_name="signal_engine_data",
+            layer="data_quality",
+            measured_value={"missing_input": "last_closed_candle_or_indicator_window"},
+            threshold_value="complete signal stack inputs",
+            passed=None,
+            required=True,
+            data_quality="missing",
+            diagnostic_state="missing_data",
+            reason="signal_engine_data:missing",
+            context={"stage": "signal_stack", "timeframe": "M5"},
+        )
+        opp = EvaluatedOpportunity(
+            id="opp-signal-missing",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="indeterminate",
+            decision_reason="missing_signal_engine_data",
+            direction="BUY",
+            criteria=[cr],
+        )
+        recorded = record_opportunity(opp, db)
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert recorded.first_blocker == "signal_engine_data:missing"
+        assert recorded.all_blockers == ["signal_engine_data:missing"]
+        assert recorded.blocking_layer == "data_quality"
+        assert recorded.criteria[0].blocked_signal is True
+        assert summary["top_blockers"][0]["criterion_name"] == "signal_engine_data:missing"
+
+    def test_candle_close_waiting_is_not_near_miss_or_rejection(self):
+        db = temp_db()
+        cr = CriterionResult(
+            criterion_name="candle_close_gate",
+            layer="timing",
+            measured_value=31.27,
+            threshold_value="0 seconds until close",
+            threshold_operator="lte",
+            passed=False,
+            required=True,
+            diagnostic_state="waiting",
+            reason="candle_close_gate:waiting_for_close",
+            context={
+                "current_time": "2026-05-06T12:04:28+00:00",
+                "candle_open_time": "2026-05-06T12:00:00+00:00",
+                "candle_close_time": "2026-05-06T12:05:00+00:00",
+                "seconds_until_close": 31.27,
+                "seconds_since_close": 0,
+                "timeframe": "M5",
+                "gate_rule": "pass_after_candle_close",
+                "margin_units": "seconds",
+            },
+        )
+        opp = EvaluatedOpportunity(
+            id="opp-waiting",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="skipped",
+            decision_reason="candle_close_gate:waiting_for_close",
+            direction="BUY",
+            criteria=[cr],
+        )
+        recorded = record_opportunity(opp, db)
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert recorded.near_miss is False
+        assert recorded.pipeline_state == "trend_candidate_candle_close_waiting"
+        assert summary["near_miss_count"] == 0
+        assert summary["rejected_count"] == 0
+        assert summary["pipeline_funnel"]["candle_close_gate_waiting_or_failed"] == 1
+
+    def test_candle_close_after_close_pass_context_is_exported(self):
+        db = temp_db()
+        cr = CriterionResult(
+            criterion_name="candle_close_gate",
+            layer="timing",
+            measured_value=2.0,
+            threshold_value=">=0 seconds since close",
+            threshold_operator="gte",
+            passed=True,
+            required=True,
+            diagnostic_state="evaluated",
+            reason="candle_close_gate:passed",
+            context={
+                "current_time": "2026-05-06T12:05:02+00:00",
+                "candle_open_time": "2026-05-06T12:00:00+00:00",
+                "candle_close_time": "2026-05-06T12:05:00+00:00",
+                "seconds_until_close": 0,
+                "seconds_since_close": 2.0,
+                "timeframe": "M5",
+                "gate_rule": "pass_after_candle_close",
+                "margin_units": "seconds",
+            },
+        )
+        record_opportunity(
+            EvaluatedOpportunity(
+                id="opp-after-close",
+                evaluated_at=iso(),
+                symbol="EURUSD",
+                final_decision="emitted",
+                decision_reason="emitted",
+                criteria=[cr],
+            ),
+            db,
+        )
+
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert exported["criteria"][0]["context"]["seconds_since_close"] == 2.0
+        assert exported["criteria"][0]["context"]["margin_units"] == "seconds"
+        assert summary["pipeline_funnel"]["candle_close_gate_passed"] == 1
+
+    def test_near_miss_reason_counts_explain_count(self):
+        db = temp_db()
+        record_opportunity(opportunity(1, failed=1), db)
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert summary["near_miss_count"] == 1
+        assert sum(summary["near_miss_reason_counts"].values()) == 1
+        assert "stoch_rsi" in summary["near_miss_reason_counts"]
+
+    def test_summary_funnel_counts_pipeline_stages(self):
+        db = temp_db()
+        trend_skip = EvaluatedOpportunity(
+            id="funnel-trend",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="skipped",
+            decision_reason="no_trend",
+            trend_decision=classify_trend_decision(0.001, 0.004, 0.003, 0.005, 0.008, 0.002),
+        )
+        missing = EvaluatedOpportunity(
+            id="funnel-missing",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="indeterminate",
+            decision_reason="missing_signal_engine_data",
+            criteria=[
+                CriterionResult(
+                    criterion_name="signal_engine_data",
+                    layer="data_quality",
+                    measured_value={"missing_input": "candles"},
+                    threshold_value="complete",
+                    passed=None,
+                    data_quality="missing",
+                    diagnostic_state="missing_data",
+                    reason="signal_engine_data:missing",
+                )
+            ],
+        )
+        record_opportunity(trend_skip, db)
+        record_opportunity(missing, db)
+        record_opportunity(opportunity(3, decision="emitted", failed=0), db)
+        record_opportunity(opportunity(4, decision="rejected", failed=1), db)
+
+        funnel = get_summary(iso(-1), iso(1), db_path=db)["pipeline_funnel"]
+
+        assert funnel["total_evaluated"] == 4
+        assert funnel["trend_skipped"] == 1
+        assert funnel["trend_candidate_found"] == 3
+        assert funnel["signal_data_missing"] == 1
+        assert funnel["signal_rejected"] == 1
+        assert funnel["signal_emitted"] == 1
+        assert funnel["indeterminate"] == 1
+
+    def test_threshold_version_unknown_reason_is_summarized(self):
+        db = temp_db()
+        record_opportunity(opportunity(1, threshold_version="unknown"), db)
+
+        summary = get_summary(iso(-1), iso(1), db_path=db)
+
+        assert summary["threshold_version_counts"]["unknown"] == 1
+        assert summary["threshold_version_unknown_reasons"]["legacy_or_missing_threshold_version"] == 1
 
 
 class TestTrendDecisionDiagnostics:
