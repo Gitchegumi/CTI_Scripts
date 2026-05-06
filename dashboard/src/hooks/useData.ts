@@ -304,12 +304,18 @@ export function useStrategyMetricsComparison(params: {
   compare_start: string;
   compare_end: string;
   symbol?: string;
-}) {
+}, enabled = true) {
   const [comparison, setComparison] = useState<StrategyMetricsComparison | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setComparison(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     if (!params.base_start || !params.base_end || !params.compare_start || !params.compare_end) return;
     setLoading(true);
     try {
@@ -322,7 +328,7 @@ export function useStrategyMetricsComparison(params: {
     } finally {
       setLoading(false);
     }
-  }, [params]);
+  }, [enabled, params]);
 
   useEffect(() => {
     const id = window.setTimeout(() => { void refresh(); }, 0);
