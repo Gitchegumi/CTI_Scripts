@@ -58,22 +58,30 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, data: Any, status: int = 200):
         body = json.dumps(data, indent=2, default=str).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            log.debug("API: client disconnected before JSON response completed")
+            self.close_connection = True
 
     def _send_text(self, body: str, content_type: str = "text/plain; charset=utf-8", status: int = 200):
         """Send a text response for non-JSON exports."""
         encoded = body.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(encoded)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(encoded)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            log.debug("API: client disconnected before text response completed")
+            self.close_connection = True
 
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
