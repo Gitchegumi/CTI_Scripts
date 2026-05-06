@@ -130,7 +130,7 @@
 - [x] T048 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and required docstrings
 - [x] T049 Verify `specs/007-repair-db-signals/analysis.md` documents root causes, slowest paths, and codebase analysis findings
 - [x] T050 Verify `specs/007-repair-db-signals/quickstart.md` documents how to reproduce performance measurements locally
-- [ ] T051 Submit PR with DockeGumi as reviewer
+- [x] T051 Submit PR with DockeGumi as reviewer
 
 ---
 
