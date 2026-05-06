@@ -317,15 +317,20 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 from tradegumi.manual_trades import get_dashboard_trade_history
                 count = int(self._get_query_param("count") or self._get_query_param("limit") or 50)
                 source_trades = self._source_trade_history(count=max(count, 1000))
-                self._send_json(get_dashboard_trade_history(
-                    source_trades=source_trades,
-                    bot_mode=config.TRADEGUMI_MODE,
-                    symbol=self._get_query_param("symbol") or None,
-                    tag=self._get_query_param("tag") or None,
-                    start_date=self._get_query_param("start_date") or None,
-                    end_date=self._get_query_param("end_date") or None,
-                    limit=count,
-                ))
+                history_params = {
+                    "bot_mode": config.TRADEGUMI_MODE,
+                    "symbol": self._get_query_param("symbol") or None,
+                    "tag": self._get_query_param("tag") or None,
+                    "start_date": self._get_query_param("start_date") or None,
+                    "end_date": self._get_query_param("end_date") or None,
+                    "count": count,
+                }
+                try:
+                    history = get_dashboard_trade_history(source_trades=source_trades, **history_params)
+                except Exception as merge_error:
+                    log.warning("API: source trade history could not be merged for dashboard: %s", merge_error)
+                    history = get_dashboard_trade_history(source_trades=[], **history_params)
+                self._send_json(history)
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
             return
