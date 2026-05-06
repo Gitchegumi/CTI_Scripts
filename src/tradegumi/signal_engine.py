@@ -10,7 +10,7 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -238,6 +238,60 @@ def _candle_close_context(candle: Candle, timeframe: str, current_time: Optional
     }
 
 
+def _closed_candle_index(
+    candles: Sequence[Candle],
+    timeframe: str,
+    current_time: Optional[datetime] = None,
+) -> Optional[int]:
+    """Return the latest index whose candle has fully closed."""
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    latest_index: Optional[int] = None
+    for index, candle in enumerate(candles):
+        candle_open = candle.time
+        if candle_open.tzinfo is None:
+            candle_open = candle_open.replace(tzinfo=timezone.utc)
+        candle_close = candle_open + timedelta(seconds=_timeframe_seconds(timeframe))
+        if candle_close <= now:
+            latest_index = index
+    return latest_index
+
+
+def _last_closed_candle_window(
+    candles: Sequence[Candle],
+    timeframe: str,
+    current_time: Optional[datetime] = None,
+) -> tuple[Optional[Candle], list[Candle], dict]:
+    """Select the latest closed candle and complete window ending at it."""
+    if not candles:
+        return None, [], {
+            "timeframe": timeframe,
+            "missing_input": "candles",
+            "available_count": 0,
+            "gate_rule": "pass_after_candle_close",
+        }
+    closed_index = _closed_candle_index(candles, timeframe, current_time)
+    if closed_index is None:
+        return None, [], _candle_close_context(candles[-1], timeframe, current_time)
+    window = list(candles[: closed_index + 1])
+    return window[-1], window, _candle_close_context(window[-1], timeframe, current_time)
+
+
+def _signal_window_issue(candles: Sequence[Candle], required_count: int) -> Optional[dict]:
+    """Describe missing signal inputs when the closed candle window is too short."""
+    available = len(candles)
+    if available >= required_count:
+        return None
+    return {
+        "stage": "signal_stack",
+        "timeframe": "M5",
+        "missing_input": "last_closed_candle_or_indicator_window",
+        "available_count": available,
+        "required_count": required_count,
+    }
+
+
 def _compact_data_issue_context(exc: Exception, *, stage: str, timeframe: str = "M5") -> dict:
     """Summarize missing signal inputs without exporting raw candle data."""
     message = str(exc)
@@ -354,6 +408,7 @@ class SignalEngine:
     LR_5M_THRESHOLD   = 0.002   # %
     SIGNAL_COOLDOWN_SECONDS = 300  # 5-minute cooldown per symbol/direction
     CANDLE_CLOSE_GATE = True    # Require candle close for fresh entries
+    SIGNAL_WINDOW_MIN_CANDLES = 35
 
     # Cooldown tracking: key = f"{symbol}:{trend}", value = last_signal_ts
     _cooldown: dict[str, float] = {}
@@ -422,16 +477,33 @@ class SignalEngine:
                 )
             ]
             return None, criteria, "missing_candle_data", None
-        df = candles_to_df(candles)
+        closed_candle, closed_window, close_context = _last_closed_candle_window(candles, "M5")
 
         # ── Candle-close gate ───────────────────────────────────────────────
         # Only allow fresh entries near candle close to avoid mid-candle noise
         criteria: list[CriterionResult] = []
 
         if self.CANDLE_CLOSE_GATE:
-            last_candle = candles[-1] if candles else None
-            if not last_candle:
+            if not closed_candle:
                 context = {"timeframe": "M5", "gate_rule": "pass_after_candle_close", "missing_input": "last_closed_candle"}
+                context.update(close_context)
+                seconds_until_close = context.get("seconds_until_close", 0)
+                if seconds_until_close > 0:
+                    criteria.append(
+                        _criterion(
+                            "candle_close_gate",
+                            "timing",
+                            seconds_until_close,
+                            "0 seconds until close",
+                            False,
+                            -seconds_until_close,
+                            "lte",
+                            diagnostic_state="waiting",
+                            reason="candle_close_gate:waiting_for_close",
+                            context=context,
+                        )
+                    )
+                    return None, criteria, "candle_close_gate:waiting_for_close", None
                 criteria.append(
                     _criterion(
                         "candle_close_gate",
@@ -443,13 +515,12 @@ class SignalEngine:
                         quality="missing",
                         diagnostic_state="missing_data",
                         reason="candle_close_gate:missing_timing_data",
-                        context=context,
+                        context=close_context,
                     )
                 )
                 return None, criteria, "missing_candle_time", None
-            context = _candle_close_context(last_candle, "M5")
-            seconds_until_close = context["seconds_until_close"]
-            seconds_since_close = context["seconds_since_close"]
+            seconds_until_close = close_context["seconds_until_close"]
+            seconds_since_close = close_context["seconds_since_close"]
             if seconds_until_close > 0:
                 log.debug("%s signal waiting for candle close (%.0fs remaining)", symbol, seconds_until_close)
                 criteria.append(
@@ -463,7 +534,7 @@ class SignalEngine:
                         "lte",
                         diagnostic_state="waiting",
                         reason="candle_close_gate:waiting_for_close",
-                        context=context,
+                        context=close_context,
                     )
                 )
                 return None, criteria, "candle_close_gate:waiting_for_close", None
@@ -479,7 +550,7 @@ class SignalEngine:
                         "lte",
                         diagnostic_state="evaluated",
                         reason="candle_close_gate:stale_candle",
-                        context=context,
+                        context=close_context,
                     )
                 )
                 return None, criteria, "candle_close_gate:stale_candle", None
@@ -493,13 +564,31 @@ class SignalEngine:
                     seconds_since_close,
                     "gte",
                     reason="candle_close_gate:passed",
-                    context=context,
+                    context=close_context,
                 )
             )
 
         # Swap ignored — session/timing filters disabled for early development
 
         # ── Layer 1: StochRSI ────────────────────────────────────────────────
+        window_issue = _signal_window_issue(closed_window, self.SIGNAL_WINDOW_MIN_CANDLES)
+        if window_issue:
+            criteria.append(
+                _criterion(
+                    "signal_engine_data",
+                    "data_quality",
+                    window_issue,
+                    "complete candles and indicators",
+                    None,
+                    quality="missing",
+                    diagnostic_state="missing_data",
+                    reason="signal_engine_data:missing",
+                    context=window_issue,
+                )
+            )
+            return None, criteria, "missing_signal_engine_data", None
+
+        df = candles_to_df(closed_window)
         stoch = calculate_stoch_rsi(df, length=14, k=3, d=3)
         k_col = [c for c in stoch.columns if "k" in c.lower()][0]
         d_col = [c for c in stoch.columns if "d" in c.lower()][0]

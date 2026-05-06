@@ -134,7 +134,7 @@ export default function StrategyMetricsPage() {
     compare_end: end,
     symbol: symbol || undefined,
   }), [baseStart, baseEnd, start, end, symbol]);
-  const { comparison } = useStrategyMetricsComparison(comparisonParams);
+  const { comparison } = useStrategyMetricsComparison(comparisonParams, compare);
 
   async function handleExport() {
     const data = await exportStrategyMetrics({ ...summaryParams, include_opportunities: true });

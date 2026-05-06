@@ -36,6 +36,12 @@ _lock = threading.Lock()
 _initialized_db_paths: set[str] = set()
 _last_prune_by_db_path: dict[str, datetime] = {}
 _write_connections_by_db_path: dict[str, sqlite3.Connection] = {}
+_LEGACY_CRITERION_NAMES = {"singal_engine_data": "signal_engine_data"}
+
+
+def _canonical_criterion_name(name: str) -> str:
+    """Return the stable diagnostic criterion name used for metrics aggregation."""
+    return _LEGACY_CRITERION_NAMES.get(str(name), str(name))
 
 
 def _now_iso() -> str:
@@ -278,7 +284,10 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_at ON evaluated_opportunities(evaluated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_symbol ON evaluated_opportunities(symbol)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_decision ON evaluated_opportunities(final_decision)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_symbol ON evaluated_opportunities(evaluated_at, symbol)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_decision ON evaluated_opportunities(evaluated_at, final_decision)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_opp ON criterion_results(opportunity_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_name_opp ON criterion_results(criterion_name, opportunity_id)")
         _ensure_column(conn, "evaluated_opportunities", "first_blocker", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "all_blockers", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "evaluated_opportunities", "blocking_layer", "TEXT")
@@ -553,7 +562,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 """,
                 (
                     opportunity.id,
-                    criterion.criterion_name,
+                    _canonical_criterion_name(criterion.criterion_name),
                     criterion.layer,
                     json.dumps(criterion.measured_value),
                     json.dumps(criterion.threshold_value),
@@ -662,35 +671,40 @@ def get_opportunities(
             f"SELECT * FROM evaluated_opportunities WHERE {' AND '.join(clauses)} ORDER BY evaluated_at DESC LIMIT ?",
             (*params, limit),
         ).fetchall()
+        ids = [row["id"] for row in rows]
+        criteria_by_opportunity: dict[str, list[CriterionResult]] = {opportunity_id: [] for opportunity_id in ids}
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            crit_rows = conn.execute(
+                f"SELECT * FROM criterion_results WHERE opportunity_id IN ({placeholders}) ORDER BY opportunity_id, id",
+                ids,
+            ).fetchall()
+            for c in crit_rows:
+                criteria_by_opportunity.setdefault(c["opportunity_id"], []).append(
+                    CriterionResult(
+                        id=c["id"],
+                        opportunity_id=c["opportunity_id"],
+                        criterion_name=_canonical_criterion_name(c["criterion_name"]),
+                        layer=c["layer"],
+                        measured_value=json.loads(c["measured_value"]) if c["measured_value"] else None,
+                        threshold_value=json.loads(c["threshold_value"]) if c["threshold_value"] else None,
+                        threshold_operator=c["threshold_operator"],
+                        passed=None if c["passed"] is None else bool(c["passed"]),
+                        expected_pass=None if "expected_pass" not in c.keys() or c["expected_pass"] is None else bool(c["expected_pass"]),
+                        pass_mismatch=bool(c["pass_mismatch"]) if "pass_mismatch" in c.keys() else False,
+                        margin=c["margin"],
+                        normalized_margin=c["normalized_margin"],
+                        required=bool(c["required"]),
+                        blocked_signal=bool(c["blocked_signal"]),
+                        data_quality=c["data_quality"],
+                        diagnostic_state=c["diagnostic_state"] if "diagnostic_state" in c.keys() else "evaluated",
+                        reason=c["reason"] if "reason" in c.keys() else None,
+                        context=json.loads(c["context"] or "{}") if "context" in c.keys() else {},
+                    )
+                )
         result = []
         for row in rows:
-            crit_rows = conn.execute(
-                "SELECT * FROM criterion_results WHERE opportunity_id = ? ORDER BY id",
-                (row["id"],),
-            ).fetchall()
-            criteria = [
-                CriterionResult(
-                    id=c["id"],
-                    opportunity_id=c["opportunity_id"],
-                    criterion_name=c["criterion_name"],
-                    layer=c["layer"],
-                    measured_value=json.loads(c["measured_value"]) if c["measured_value"] else None,
-                    threshold_value=json.loads(c["threshold_value"]) if c["threshold_value"] else None,
-                    threshold_operator=c["threshold_operator"],
-                    passed=None if c["passed"] is None else bool(c["passed"]),
-                    expected_pass=None if "expected_pass" not in c.keys() or c["expected_pass"] is None else bool(c["expected_pass"]),
-                    pass_mismatch=bool(c["pass_mismatch"]) if "pass_mismatch" in c.keys() else False,
-                    margin=c["margin"],
-                    normalized_margin=c["normalized_margin"],
-                    required=bool(c["required"]),
-                    blocked_signal=bool(c["blocked_signal"]),
-                    data_quality=c["data_quality"],
-                    diagnostic_state=c["diagnostic_state"] if "diagnostic_state" in c.keys() else "evaluated",
-                    reason=c["reason"] if "reason" in c.keys() else None,
-                    context=json.loads(c["context"] or "{}") if "context" in c.keys() else {},
-                )
-                for c in crit_rows
-            ]
+            criteria = criteria_by_opportunity.get(row["id"], [])
             result.append(_row_to_opportunity(row, criteria).to_dict())
         return result
 

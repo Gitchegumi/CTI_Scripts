@@ -26,7 +26,7 @@ def iso(days: int = 0) -> str:
 
 
 def temp_db(name: str = "metrics.db") -> Path:
-    base = Path("C:/tmp/cti_strategy_metrics_tests") / uuid.uuid4().hex
+    base = Path(__file__).resolve().parents[3] / ".tmp" / "cti_strategy_metrics_tests" / uuid.uuid4().hex
     base.mkdir(parents=True, exist_ok=True)
     return base / name
 
@@ -140,6 +140,37 @@ def test_additive_pipeline_fields_round_trip_and_json_compatible():
     assert exported["threshold_version_unknown_reason"] == "legacy_or_missing_threshold_version"
     assert exported["criteria"][0]["diagnostic_state"] == "missing_data"
     assert exported["criteria"][0]["context"]["missing_input"] == "candles"
+
+
+def test_legacy_signal_engine_data_typo_is_normalized():
+    db = temp_db()
+    cr = CriterionResult(
+        criterion_name="singal_engine_data",
+        layer="data_quality",
+        measured_value={"missing_input": "last_closed_candle_or_indicator_window"},
+        threshold_value="complete signal stack inputs",
+        passed=None,
+        required=True,
+        data_quality="missing",
+        diagnostic_state="missing_data",
+        reason=None,
+        context={"missing_input": "last_closed_candle_or_indicator_window"},
+    )
+    opp = EvaluatedOpportunity(
+        id="legacy-typo",
+        evaluated_at=iso(),
+        symbol="EURUSD",
+        final_decision="indeterminate",
+        decision_reason="missing_signal_engine_data",
+        criteria=[cr],
+    )
+
+    record_opportunity(opp, db)
+    exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+    summary = get_summary(iso(-1), iso(1), db_path=db)
+
+    assert exported["criteria"][0]["criterion_name"] == "signal_engine_data"
+    assert summary["criterion_summaries"][0]["criterion_name"] == "signal_engine_data"
 
 
 def test_criterion_summary_blockers_and_warnings():
