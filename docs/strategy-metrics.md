@@ -2,6 +2,12 @@
 
 Strategy metrics explain why each evaluated opportunity emitted, rejected, skipped, or ended indeterminate. They are diagnostic evidence only; they do not tune thresholds or make the bot trade more often.
 
+## Date Ranges
+
+Strategy Metrics uses an inclusive calendar-day UI and an exclusive internal query boundary. When the dashboard sends a date-only `end` value such as `2026-05-06`, the backend queries records before `2026-05-07T00:00:00`, so all opportunities evaluated on May 6 are included and May 7 records are excluded.
+
+If callers send a timestamped `end` value, it is treated as the exact exclusive upper bound.
+
 ## Trend Decision
 
 `trend_decision` explains the trend filter after linear regression values are measured.

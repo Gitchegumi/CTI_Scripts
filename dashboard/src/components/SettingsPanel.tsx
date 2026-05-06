@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ApiStatus, setMode, setChallengeType, setPhase, triggerRescan } from "@/lib/api";
+import { ApiStatus, modeDisplayLabel, setMode, setChallengeType, setPhase, triggerRescan } from "@/lib/api";
 
 interface SettingsPanelProps {
   status: ApiStatus | null;
 }
 
 const MODES: { value: ApiStatus["mode"]; label: string }[] = [
-  { value: "alert_only", label: "Alert Only" },
+  { value: "alert_only", label: modeDisplayLabel("alert_only") },
   { value: "demo", label: "Demo" },
   { value: "live", label: "Live ⚠️" },
 ];

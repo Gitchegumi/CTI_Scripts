@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { ManualTrade, ManualTradeSummary } from "@/types";
+import { modeDisplayLabel, readApiError } from "@/lib/api";
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -128,6 +129,8 @@ interface TradeFormData {
   exit_time: string;
   volume: string;
   fees: string;
+  pnl: string;
+  pnl_percent: string;
   notes: string;
   tags: string;
 }
@@ -143,6 +146,8 @@ const EMPTY_FORM: TradeFormData = {
   exit_time: "",
   volume: "",
   fees: "",
+  pnl: "",
+  pnl_percent: "",
   notes: "",
   tags: "",
 };
@@ -169,6 +174,8 @@ function TradeFormModal({
       exit_time: trade.exit_time?.slice(0, 16) ?? "",
       volume: trade.volume?.toString() ?? "",
       fees: trade.fees?.toString() ?? "",
+      pnl: trade.pnl?.toString() ?? "",
+      pnl_percent: trade.pnl_percent?.toString() ?? "",
       notes: trade.notes,
       tags: trade.tags?.join(", ") ?? "",
     };
@@ -194,6 +201,8 @@ function TradeFormModal({
       if (form.exit_time) payload.exit_time = new Date(form.exit_time).toISOString();
       if (form.volume) payload.volume = form.volume;
       if (form.fees) payload.fees = form.fees;
+      if (form.pnl) payload.pnl = form.pnl;
+      if (form.pnl_percent) payload.pnl_percent = form.pnl_percent;
     }
     payload.notes = form.notes;
     payload.tags = form.tags
@@ -246,6 +255,35 @@ function TradeFormModal({
               </select>
             </div>
           </div>
+
+          {mode === "alert_only" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">P&L</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.pnl}
+                  onChange={(e) => updateField("pnl", e.target.value)}
+                  placeholder="Calculated"
+                  disabled={!canEditAll}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">P&L %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.pnl_percent}
+                  onChange={(e) => updateField("pnl_percent", e.target.value)}
+                  placeholder="Calculated"
+                  disabled={!canEditAll}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -407,16 +445,6 @@ function DeleteConfirmModal({
 }
 
 // ── Main page ───────────────────────────────────────────────────────────────
-
-async function readApiError(res: Response): Promise<string> {
-  try {
-    const data = await res.json();
-    if (typeof data?.error === "string" && data.error.trim()) return data.error;
-  } catch {
-    // Fall through to status text below.
-  }
-  return res.statusText || `HTTP ${res.status}`;
-}
 
 export default function ManualTradesPage() {
   const [trades, setTrades] = useState<ManualTrade[]>([]);
@@ -610,7 +638,7 @@ export default function ManualTradesPage() {
           <span className="text-slate-700">|</span>
           <span className="text-white font-semibold text-sm">Trade History</span>
           {mode !== "alert_only" && (
-            <span className="text-xs text-slate-500 ml-2">({mode} mode — notes only)</span>
+            <span className="text-xs text-slate-500 ml-2">({modeDisplayLabel(mode)} mode — notes only)</span>
           )}
         </div>
         <div className="flex items-center gap-3">

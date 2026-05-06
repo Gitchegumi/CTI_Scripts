@@ -7,6 +7,7 @@ from tradegumi.manual_trades import (
     create_trade,
     delete_trade_record,
     export_agent_data,
+    get_dashboard_trade_history,
     get_summary_stats,
     get_unified_trade_history,
     init_schema,
@@ -242,3 +243,63 @@ def test_summary_and_agent_export_include_current_mode_records(tmp_path):
     assert payload["schema_version"] == "manual-trade-agent-export.v1"
     assert payload["chunking"]["chunk_count"] == 1
     assert payload["records"]
+
+
+def test_dashboard_history_returns_manual_trades_when_source_history_is_empty(tmp_path):
+    db_path = tmp_path / "manual.db"
+    created = create_trade(
+        symbol="EURUSD",
+        direction="long",
+        entry_price=1.1,
+        exit_price=1.105,
+        entry_time="2026-05-05T10:00:00Z",
+        exit_time="2026-05-05T11:00:00Z",
+        bot_mode="alert_only",
+        db_path=db_path,
+    )
+
+    history = get_dashboard_trade_history(count=50, bot_mode="alert_only", source_trades=[], db_path=db_path)
+
+    assert [trade["id"] for trade in history] == [created["id"]]
+    assert history[0]["source"] == "manual"
+
+
+def test_alert_only_can_correct_manual_trade_pnl_and_export_reflects_it(tmp_path):
+    db_path = tmp_path / "manual.db"
+    created = create_trade(
+        symbol="GBPUSD",
+        direction="long",
+        entry_price=1.25,
+        exit_price=1.255,
+        entry_time="2026-05-05T10:00:00Z",
+        exit_time="2026-05-05T11:00:00Z",
+        bot_mode="alert_only",
+        db_path=db_path,
+    )
+
+    updated = update_trade_record(
+        created["id"],
+        {"pnl": "-12.5", "pnl_percent": "-1.0"},
+        bot_mode="alert_only",
+        db_path=db_path,
+    )
+    payload = export_agent_data(bot_mode="alert_only", db_path=db_path)
+    summary = get_summary_stats(bot_mode="alert_only", db_path=db_path)
+
+    assert updated["pnl"] == -12.5
+    assert updated["pnl_percent"] == -1.0
+    assert payload["records"][0]["pnl"] == -12.5
+    assert summary["total_pnl"] == -12.5
+
+
+def test_non_alert_modes_still_reject_pnl_edits(tmp_path):
+    db_path = tmp_path / "manual.db"
+
+    with pytest.raises(TradePermissionError):
+        update_trade_record(
+            "execution_history:src-1",
+            {"pnl": 99.0},
+            bot_mode="demo",
+            source_trades=[source_trade()],
+            db_path=db_path,
+        )

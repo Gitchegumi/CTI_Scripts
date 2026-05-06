@@ -26,8 +26,7 @@ def iso(days: int = 0) -> str:
 
 
 def temp_db(name: str = "metrics.db") -> Path:
-    workspace = Path(__file__).resolve().parents[3]
-    base = workspace / ".tmp" / "strategy_metrics_tests" / uuid.uuid4().hex
+    base = Path("C:/tmp/cti_strategy_metrics_tests") / uuid.uuid4().hex
     base.mkdir(parents=True, exist_ok=True)
     return base / name
 
@@ -138,6 +137,24 @@ def test_comparison_and_export():
 
     exported = export_summary(iso(-14), iso(1), include_opportunities=True, db_path=db)
     assert len(exported["opportunities"]) == 2
+
+
+def test_date_only_end_includes_selected_day_and_excludes_following_day():
+    db = temp_db()
+    selected_day = opportunity(1)
+    selected_day.evaluated_at = "2026-05-06T23:59:59+00:00"
+    following_day = opportunity(2)
+    following_day.evaluated_at = "2026-05-07T00:00:00+00:00"
+    record_opportunity(selected_day, db)
+    record_opportunity(following_day, db)
+
+    summary = get_summary("2026-05-06", "2026-05-06", db_path=db)
+    opportunities = get_opportunities("2026-05-06", "2026-05-06", db_path=db)
+    exported = export_summary("2026-05-06", "2026-05-06", include_opportunities=True, db_path=db)
+
+    assert summary["total_evaluated"] == 1
+    assert opportunities[0]["id"] == "opp-1"
+    assert [opp["id"] for opp in exported["opportunities"]] == ["opp-1"]
 
 
 def test_seeded_summary_performance():

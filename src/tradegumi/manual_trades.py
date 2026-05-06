@@ -819,7 +819,7 @@ def _update_manual_record(identity: str, updates: dict[str, Any], db_path: Path 
     direction = str(effective.get("direction") or "long").lower()
     entry_price = float(effective.get("entry_price") or 0)
     exit_price = effective.get("exit_price")
-    pnl, pnl_percent, status = _calculate_pnl(direction, entry_price, exit_price)
+    calculated_pnl, calculated_pnl_percent, status = _calculate_pnl(direction, entry_price, exit_price)
     allowed = {
         "symbol",
         "direction",
@@ -829,12 +829,14 @@ def _update_manual_record(identity: str, updates: dict[str, Any], db_path: Path 
         "exit_time",
         "volume",
         "fees",
+        "pnl",
+        "pnl_percent",
         "notes",
         "tags",
     }
     set_values = {key: updates[key] for key in allowed if key in updates}
-    set_values["pnl"] = pnl
-    set_values["pnl_percent"] = pnl_percent
+    set_values["pnl"] = updates.get("pnl", calculated_pnl)
+    set_values["pnl_percent"] = updates.get("pnl_percent", calculated_pnl_percent)
     set_values["status"] = updates.get("status") or status
     set_values["updated_at"] = _now_iso()
     if "tags" in set_values:

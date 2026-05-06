@@ -124,11 +124,12 @@ type SortKey = "close_time" | "pnl" | "symbol";
 interface TradeHistoryProps {
   trades: ClosedTrade[];
   correlations: TradeCorrelation[];
+  error?: string | null;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TradeHistory({ trades, correlations }: TradeHistoryProps) {
+export default function TradeHistory({ trades, correlations, error = null }: TradeHistoryProps) {
   const [showAll, setShowAll] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [filterSide, setFilterSide] = useState<FilterSide>("all");
@@ -206,7 +207,13 @@ export default function TradeHistory({ trades, correlations }: TradeHistoryProps
         style={{ maxHeight: collapsed ? "0" : "2000px" }}
       >
         {trades.length === 0 ? (
-          <div className="px-4 py-4 text-sm text-slate-500 text-center">No trade history</div>
+          <div className="px-4 py-4 text-sm text-center">
+            {error ? (
+              <span className="text-red-400">Trade history unavailable: {error}</span>
+            ) : (
+              <span className="text-slate-500">No trade history</span>
+            )}
+          </div>
         ) : (
           <>
             {/* Filters */}

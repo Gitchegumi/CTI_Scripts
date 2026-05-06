@@ -39,6 +39,23 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function readApiError(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data?.error === "string" && data.error.trim()) return data.error;
+  } catch {
+    // Fall through to status text below.
+  }
+  return res.statusText || `HTTP ${res.status}`;
+}
+
+export function modeDisplayLabel(mode: ApiStatus["mode"] | string | null | undefined): string {
+  if (mode === "alert_only") return "Developing";
+  if (mode === "demo") return "Demo";
+  if (mode === "live") return "Live";
+  return "Developing";
+}
+
 export async function getConfig(): Promise<ApiStatus> {
   return apiFetch<ApiStatus>("/api/status");
 }

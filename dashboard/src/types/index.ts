@@ -199,6 +199,11 @@ export interface AgentExport {
   records: AgentExportRecord[];
 }
 
+export interface SignalJournalExportScope {
+  grade?: "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+  format: "csv";
+}
+
 // Strategy Metrics
 
 export interface StrategyMetricCriterion {
