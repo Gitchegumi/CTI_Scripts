@@ -544,6 +544,45 @@ class SignalEngine:
             lr_5m=lr_5,
         ), criteria, "emitted", confidence
 
+    def _indeterminate_diagnostic(
+        self,
+        symbol: str,
+        reason: str,
+        note: str,
+        *,
+        trend: Optional[str] = None,
+        lr_1h: float = 0.0,
+        lr_15: float = 0.0,
+        lr_5: float = 0.0,
+        criteria: Optional[list[CriterionResult]] = None,
+        trend_decision: Optional[dict] = None,
+    ) -> SignalDiagnostic:
+        """Build an indeterminate diagnostic for incomplete data instead of raising."""
+        data_criterion = _criterion(
+            "signal_engine_data",
+            "data_quality",
+            note,
+            "complete candles and indicators",
+            None,
+            None,
+            quality="missing",
+        )
+        return SignalDiagnostic(
+            symbol=symbol,
+            evaluated_at=datetime.now().astimezone().isoformat(),
+            trend=trend,
+            lr_1h=lr_1h,
+            lr_15m=lr_15,
+            lr_5m=lr_5,
+            final_decision="indeterminate",
+            decision_reason=reason,
+            direction="BUY" if trend == "Uptrend" else ("SELL" if trend == "Downtrend" else "none"),
+            criteria=(criteria or []) + [data_criterion],
+            data_quality_notes=[note],
+            threshold_version=get_threshold_version(),
+            trend_decision=trend_decision,
+        )
+
     # ── Public API ───────────────────────────────────────────────────────────
 
     def check_symbol(self, symbol: str) -> tuple[Optional[Signal], Optional[str], float, float, float, SignalDiagnostic]:
@@ -569,7 +608,14 @@ class SignalEngine:
             )
             return None, None, 0.0, 0.0, 0.0, diag
 
-        trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+        try:
+            trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+        except (IndexError, KeyError, ValueError) as exc:
+            note = f"trend data incomplete: {exc}"
+            log.warning("%s signal engine data quality issue: %s", symbol, note)
+            diag = self._indeterminate_diagnostic(symbol, "missing_candle_data", note)
+            return None, None, 0.0, 0.0, 0.0, diag
+
         trend_decision = classify_trend_decision(
             lr_1h, lr_15, lr_5, self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD
         )
@@ -618,7 +664,25 @@ class SignalEngine:
             )
             return None, trend, lr_1h, lr_15, lr_5, diag
 
-        signal, criteria, reason, confidence = self._get_signal(symbol, trend)
+        try:
+            signal, criteria, reason, confidence = self._get_signal(symbol, trend)
+        except (IndexError, KeyError, ValueError) as exc:
+            note = f"signal stack data incomplete: {exc}"
+            log.warning("%s signal engine data quality issue: %s", symbol, note)
+            criteria = trend_criteria
+            diag = self._indeterminate_diagnostic(
+                symbol,
+                "missing_candle_data",
+                note,
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15=lr_15,
+                lr_5=lr_5,
+                criteria=criteria,
+                trend_decision=trend_decision,
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
+
         if signal:
             # Record signal timestamp for cooldown
             self._cooldown[cooldown_key] = time.time()
