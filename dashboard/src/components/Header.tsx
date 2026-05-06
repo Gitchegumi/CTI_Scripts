@@ -28,10 +28,14 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
   const mode: string = apiStatus?.mode ?? loopState?.mode ?? data?.account?.cti_program ?? "—";
   const provider = loopState?.provider ?? "—";
 
-  const [now, setNow] = useState<Date | null>(() => new Date());
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    const first = window.setTimeout(() => setNow(new Date()), 0);
     const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(first);
+      clearInterval(id);
+    };
   }, []);
 
   const modeColors: Record<string, string> = {
