@@ -216,9 +216,15 @@ export function useTradeHistory(count = 50, marketOpen: boolean = true, modeKey 
       try {
         const { getTradeHistory } = await import("@/lib/api");
         const data = await getTradeHistory(count);
-        if (!cancelled) setTrades(data);
-      } catch {
-        if (!cancelled) setTrades([]);
+        if (!cancelled) {
+          setTrades(data);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setTrades([]);
+          setError(e instanceof Error ? e.message : "Failed to load trade history");
+        }
       }
     };
 
@@ -238,7 +244,7 @@ export function useTradeCorrelations(): TradeCorrelation[] {
   useEffect(() => {
     const fetch_ = async () => {
       try {
-        const res = await fetch(`/data/trade_correlations.json?_=${Date.now()}`, { cache: "no-store" });
+        const res = await fetch(`/api/trade-correlations?_=${Date.now()}`, { cache: "no-store" });
         if (!res.ok) { setCorrelations([]); return; }
         const json = await res.json();
         setCorrelations(Array.isArray(json) ? json : []);

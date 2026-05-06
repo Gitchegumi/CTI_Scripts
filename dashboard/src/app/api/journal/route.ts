@@ -9,6 +9,11 @@ function isAuthed(req: NextRequest): boolean {
   return !!expected && token === expected;
 }
 
+function getApiHeaders(req: NextRequest): Record<string, string> {
+  const token = req.cookies.get(COOKIE)?.value;
+  return token ? { "X-API-Key": token } : {};
+}
+
 export async function GET(req: NextRequest) {
   if (!isAuthed(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -36,6 +41,24 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch {
+    return NextResponse.json({ error: "Could not reach API server" }, { status: 502 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!isAuthed(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    const grade = req.nextUrl.searchParams.get("grade");
+    const qs = grade ? `?grade=${encodeURIComponent(grade)}` : "";
+    const res = await fetch(`${API_BASE}/api/journal${qs}`, {
+      method: "DELETE",
+      headers: getApiHeaders(req),
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });

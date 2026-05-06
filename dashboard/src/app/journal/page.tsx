@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { readApiError } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -201,15 +202,17 @@ function TradeGroupCard({
   onToggle,
   onGrade,
   onNotes,
+  onReset,
 }: {
   group: TradeGroup;
   expanded: boolean;
   onToggle: () => void;
   onGrade: (group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) => Promise<void>;
   onNotes: (group: TradeGroup, notes: string, masterSignalId: string) => Promise<void>;
+  onReset: (group: TradeGroup, masterSignalId: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteBusy] = useState(false);
   const [noteText, setNoteText] = useState(
     group.entries.find(e => e.notes)?.notes ?? ""
   );
@@ -225,6 +228,12 @@ function TradeGroupCard({
   async function handleGrade(grade: JournalEntry["grade"]) {
     setBusy(grade);
     try { await onGrade(group, grade, masterSignalId); }
+    finally { setBusy(null); }
+  }
+
+  async function handleReset() {
+    setBusy("PENDING");
+    try { await onReset(group, masterSignalId); }
     finally { setBusy(null); }
   }
 
@@ -288,6 +297,15 @@ function TradeGroupCard({
             {busy === grade ? "…" : label}
           </button>
         ))}
+        {group.grade !== "PENDING" && (
+          <button
+            onClick={handleReset}
+            disabled={!!busy}
+            className="col-span-2 text-xs px-2 py-1 rounded border border-blue-700 text-blue-300 hover:bg-blue-900/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy === "PENDING" ? "..." : "Reset to Pending"}
+          </button>
+        )}
       </div>
 
       {/* ── Notes ── */}
@@ -428,6 +446,22 @@ export default function JournalPage() {
   const [error, setError]       = useState<string | null>(null);
   const [filter, setFilter]     = useState<GradeFilter>("ALL");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  const loadJournal = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setEntries(Array.isArray(data) ? data : []);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load journal");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
     // ── Notes update ─────────────────────────────────────────────────────────
   async function handleNotesGroup(group: TradeGroup, notes: string, masterSignalId: string) {
@@ -459,33 +493,36 @@ export default function JournalPage() {
     }
   }
 
+  async function handleResetGroup(group: TradeGroup, masterSignalId: string) {
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade: "PENDING", grade_timestamp: null } : e));
+    const res = await fetch("/api/journal/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: masterSignalId }),
+    });
+    if (!res.ok) {
+      await loadJournal();
+    }
+  }
+
   function toggleExpand(groupId: string) {
     setExpanded(prev => {
       const next = new Set(prev);
-      next.has(groupId) ? next.delete(groupId) : next.add(groupId);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
       return next;
     });
   }
 
   // ── Data loading ─────────────────────────────────────────────────────────
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/journal?_=${Date.now()}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setEntries(Array.isArray(data) ? data : []);
-        setError(null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load journal");
-      } finally {
-        setLoading(false);
-      }
+    const first = window.setTimeout(() => { void loadJournal(); }, 0);
+    const id = setInterval(loadJournal, 60_000);
+    return () => {
+      window.clearTimeout(first);
+      clearInterval(id);
     };
-    load();
-    const id = setInterval(load, 60_000);
-    return () => clearInterval(id);
-  }, []);
+  }, [loadJournal]);
 
   // ── Compute trade groups from raw entries ────────────────────────────────
   const allGroups = useMemo(() => groupIntoTrades(entries), [entries]);
@@ -515,6 +552,42 @@ export default function JournalPage() {
   const totalSignals = entries.length;
   const totalTrades  = allGroups.length;
 
+  async function exportJournal() {
+    setExporting(true);
+    try {
+      const qs = filter === "ALL" ? "" : `?grade=${encodeURIComponent(filter)}`;
+      const res = await fetch(`/api/journal/export${qs}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `signal-journal-${filter.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to export journal");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function purgeJournal() {
+    const scope = filter === "ALL" ? "all signal journal entries" : `${filter.toLowerCase()} signal journal entries`;
+    if (!window.confirm(`Purge ${scope}? This cannot be undone.`)) return;
+    setPurging(true);
+    try {
+      const qs = filter === "ALL" ? "" : `?grade=${encodeURIComponent(filter)}`;
+      const res = await fetch(`/api/journal${qs}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      await loadJournal();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to purge journal");
+    } finally {
+      setPurging(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
@@ -525,9 +598,25 @@ export default function JournalPage() {
           <span className="text-slate-700">|</span>
           <span className="text-white font-semibold text-sm">Signal Journal</span>
         </div>
-        <span className="text-xs text-slate-600">
-          {totalTrades} trades · {totalSignals} triggers (never purged)
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-600">
+            {totalTrades} trades · {totalSignals} triggers
+          </span>
+          <button
+            onClick={exportJournal}
+            disabled={exporting}
+            className="text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 transition-colors"
+          >
+            {exporting ? "Exporting..." : "Export CSV"}
+          </button>
+          <button
+            onClick={purgeJournal}
+            disabled={purging || entries.length === 0}
+            className="text-xs px-3 py-1 rounded bg-red-900/60 hover:bg-red-800 disabled:opacity-50 text-red-100 transition-colors"
+          >
+            {purging ? "Purging..." : "Purge"}
+          </button>
+        </div>
       </div>
 
       <main className="px-4 py-6 max-w-5xl mx-auto">
@@ -564,6 +653,7 @@ export default function JournalPage() {
                           onToggle={() => toggleExpand(g.groupId)}
                           onGrade={handleGradeGroup}
                           onNotes={handleNotesGroup}
+                          onReset={handleResetGroup}
                         />
                       ))}
                     </div>

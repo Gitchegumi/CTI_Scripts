@@ -65,6 +65,16 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_text(self, body: str, content_type: str = "text/plain; charset=utf-8", status: int = 200):
+        """Send a text response for non-JSON exports."""
+        encoded = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -101,8 +111,9 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         client = get_runtime_state().get("client")
         if not client:
             return []
+        safe_count = max(1, min(int(count or 50), 500))
         try:
-            return client.get_trade_history(count=count)
+            return client.get_trade_history(count=safe_count)
         except Exception as e:
             log.warning("API: could not load source trade history: %s", e)
             return []
@@ -239,18 +250,30 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/data/journal":
-            f = DATA_DIR / "signal_journal.jsonl"
+            from tradegumi.journal import read_journal
+            self._send_json(read_journal())
+            return
+
+        if path == "/api/journal/export":
+            if not self._require_auth():
+                return
+            try:
+                from tradegumi.journal import export_journal_csv
+                csv_body = export_journal_csv(self._get_query_param("grade"))
+                self._send_text(csv_body, "text/csv; charset=utf-8")
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        if path == "/api/data/trade_correlations":
+            f = DATA_DIR / "trade_correlations.json"
             if f.exists():
-                entries = []
-                for line in f.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if line:
-                        try:
-                            entries.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                # Newest first
-                self._send_json(list(reversed(entries)))
+                try:
+                    self._send_json(json.loads(f.read_text(encoding="utf-8")))
+                except json.JSONDecodeError:
+                    self._send_json([])
             else:
                 self._send_json([])
             return
@@ -436,6 +459,18 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = self._route_path()
+        if path == "/api/journal":
+            if not self._require_auth():
+                return
+            try:
+                from tradegumi.journal import purge_journal_entries
+                self._send_json(purge_journal_entries(self._get_query_param("grade")))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         if path.startswith("/api/trades/manual/"):
             # DELETE /api/trades/manual/:id — delete trade
             if not self._require_auth():
@@ -553,6 +588,18 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 return
             from tradegumi.journal import set_notes_by_signal_id
             ok = set_notes_by_signal_id(signal_id, notes)
+            if ok:
+                self._send_json({"ok": True})
+            else:
+                self._send_json({"error": "Signal not found"}, 404)
+
+        elif path == "/api/journal/reset":
+            signal_id = body.get("signal_id", "").strip()
+            if not signal_id:
+                self._send_json({"error": "signal_id is required"}, 400)
+                return
+            from tradegumi.journal import reset_signal_to_pending
+            ok = reset_signal_to_pending(signal_id)
             if ok:
                 self._send_json({"ok": True})
             else:

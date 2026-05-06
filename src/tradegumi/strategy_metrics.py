@@ -54,6 +54,25 @@ def _parse_dt(value: str | datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _is_date_only(value: str | datetime) -> bool:
+    """Return true when a user-supplied range boundary is a bare calendar date."""
+    return isinstance(value, str) and len(value.strip()) == 10 and value.strip()[4] == "-" and value.strip()[7] == "-"
+
+
+def _normalize_range_bounds(start: str | datetime, end: str | datetime) -> tuple[str, str]:
+    """Normalize metrics ranges to [start, end) while including a date-only end day.
+
+    The UI sends date-only values for calendar filters. SQLite queries remain
+    exclusive on the upper bound, so a selected end date like 2026-05-06 becomes
+    2026-05-07T00:00:00 internally.
+    """
+    start_dt = _parse_dt(start)
+    end_dt = _parse_dt(end)
+    if _is_date_only(end):
+        end_dt += timedelta(days=1)
+    return start_dt.isoformat(), end_dt.isoformat()
+
+
 def _safe_float(value: Any) -> Optional[float]:
     if value is None or value == "":
         return None
@@ -516,8 +535,9 @@ def get_opportunities(
 ) -> list[dict[str, Any]]:
     init_schema(db_path)
     limit = max(1, min(int(limit), config.STRATEGY_METRICS_MAX_OPPORTUNITIES))
+    start_iso, end_iso = _normalize_range_bounds(start, end)
     clauses = ["evaluated_at >= ?", "evaluated_at < ?"]
-    params: list[Any] = [_parse_dt(start).isoformat(), _parse_dt(end).isoformat()]
+    params: list[Any] = [start_iso, end_iso]
     if symbol:
         clauses.append("symbol = ?")
         params.append(symbol.upper())
@@ -685,8 +705,7 @@ def _blocker_summaries(conn: sqlite3.Connection, ids: list[str], blocked_opportu
 
 def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Path = DB_FILE) -> dict[str, Any]:
     init_schema(db_path)
-    start_iso = _parse_dt(start).isoformat()
-    end_iso = _parse_dt(end).isoformat()
+    start_iso, end_iso = _normalize_range_bounds(start, end)
     clauses = ["evaluated_at >= ?", "evaluated_at < ?"]
     params: list[Any] = [start_iso, end_iso]
     if symbol:

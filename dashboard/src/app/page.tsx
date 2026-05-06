@@ -22,7 +22,7 @@ export default function Home() {
   const { status: apiStatus } = useApiStatus(5000);
   const { positions } = usePositions(marketOpen);
   const mode = apiStatus?.mode ?? "alert_only";
-  const { trades } = useTradeHistory(50, marketOpen, mode);
+  const { trades, error: tradeHistoryError } = useTradeHistory(50, marketOpen, mode);
   const correlations = useTradeCorrelations();
 
   return (
@@ -69,7 +69,7 @@ export default function Home() {
             {/* Right column: Watchlist + Trade History */}
             <div className="lg:col-span-2 space-y-2">
               <WatchlistSection data={data} loopState={loopState?.symbols ?? []} />
-              <TradeHistory trades={trades} correlations={correlations} />
+              <TradeHistory trades={trades} correlations={correlations} error={tradeHistoryError} />
             </div>
           </div>
         ) : (

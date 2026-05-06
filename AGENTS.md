@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/003-manual-trade-permissions/plan.md
+specs/005-journal-dashboard-controls/plan.md
 <!-- SPECKIT END -->
