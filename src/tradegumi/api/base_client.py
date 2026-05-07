@@ -17,6 +17,7 @@ class Candle:
     l: float
     c: float
     s: Optional[int] = None   # volume
+    complete: bool = True     # provider marks whether the candle is closed
 
     @property
     def time(self) -> datetime:
@@ -24,6 +25,56 @@ class Candle:
         normalized = self.t[:-1] + "+00:00" if self.t.endswith("Z") else self.t
         parsed = datetime.fromisoformat(normalized)
         return parsed
+
+
+class ProviderRequestError(RuntimeError):
+    """Provider request failure with safe diagnostic context for signal metrics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        method: str,
+        path: str,
+        operation: str,
+        status_code: Optional[int] = None,
+        instrument: Optional[str] = None,
+        granularity: Optional[str] = None,
+        attempts: int = 1,
+        max_attempts: int = 1,
+        retryable: bool = False,
+        error_type: str = "provider_request_failed",
+    ):
+        super().__init__(message)
+        self.provider = provider
+        self.method = method
+        self.path = path
+        self.operation = operation
+        self.status_code = status_code
+        self.instrument = instrument
+        self.granularity = granularity
+        self.attempts = attempts
+        self.max_attempts = max_attempts
+        self.retryable = retryable
+        self.error_type = error_type
+
+    def to_diagnostic_context(self, *, stage: str) -> dict:
+        """Return a non-secret diagnostic payload for metrics and logs."""
+        return {
+            "stage": stage,
+            "provider": self.provider,
+            "error_type": self.error_type,
+            "method": self.method,
+            "path": self.path,
+            "status_code": self.status_code,
+            "instrument": self.instrument,
+            "granularity": self.granularity,
+            "attempts": self.attempts,
+            "max_attempts": self.max_attempts,
+            "retryable": self.retryable,
+            "message": str(self),
+        }
 
 
 @dataclass

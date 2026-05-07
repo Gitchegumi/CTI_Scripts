@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 import pandas as pd
 
 from tradegumi import config
-from tradegumi.api.base_client import ExecutionClient, Candle
+from tradegumi.api.base_client import ExecutionClient, Candle, ProviderRequestError
 from tradegumi.strategy_metrics import CriterionResult, EvaluatedOpportunity
 from tradegumi.indicators import (
     calculate_stoch_rsi,
@@ -249,6 +249,8 @@ def _closed_candle_index(
         now = now.replace(tzinfo=timezone.utc)
     latest_index: Optional[int] = None
     for index, candle in enumerate(candles):
+        if not getattr(candle, "complete", True):
+            continue
         candle_open = candle.time
         if candle_open.tzinfo is None:
             candle_open = candle_open.replace(tzinfo=timezone.utc)
@@ -393,6 +395,14 @@ def _compact_data_issue_context(exc: Exception, *, stage: str, timeframe: str = 
         "error_type": exc.__class__.__name__,
         "error_message": message,
     }
+
+
+def _provider_request_issue_context(exc: ProviderRequestError, *, stage: str) -> dict:
+    """Return signal diagnostic context for upstream provider request failures."""
+    context = exc.to_diagnostic_context(stage=stage)
+    context["timeframe"] = context.get("granularity") or "M5"
+    context["missing_input"] = "oanda_candle_data" if exc.operation == "candle_fetch" else "oanda_api_response"
+    return context
 
 
 def classify_trend_decision(
@@ -979,6 +989,12 @@ class SignalEngine:
 
         try:
             trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+        except ProviderRequestError as exc:
+            context = _provider_request_issue_context(exc, stage="trend_filter")
+            note = f"trend data incomplete: {context['error_type']}"
+            log.warning("%s provider data issue: %s", symbol, note)
+            diag = self._indeterminate_diagnostic(symbol, context["error_type"], note, context=context)
+            return None, None, 0.0, 0.0, 0.0, diag
         except (IndexError, KeyError, ValueError) as exc:
             context = _compact_data_issue_context(exc, stage="trend_filter", timeframe="mixed")
             note = f"trend data incomplete: {context['missing_input']}"
@@ -1036,6 +1052,24 @@ class SignalEngine:
 
         try:
             signal, criteria, reason, confidence = self._get_signal(symbol, trend)
+        except ProviderRequestError as exc:
+            context = _provider_request_issue_context(exc, stage="signal_stack")
+            note = f"signal stack provider data incomplete: {context['error_type']}"
+            log.warning("%s provider data issue: %s", symbol, note)
+            criteria = trend_criteria
+            diag = self._indeterminate_diagnostic(
+                symbol,
+                context["error_type"],
+                note,
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15=lr_15,
+                lr_5=lr_5,
+                criteria=criteria,
+                trend_decision=trend_decision,
+                context=context,
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
         except (IndexError, KeyError, ValueError) as exc:
             context = _compact_data_issue_context(exc, stage="signal_stack", timeframe="M5")
             note = f"signal stack data incomplete: {context['missing_input']}"

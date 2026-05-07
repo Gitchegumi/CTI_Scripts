@@ -1,12 +1,17 @@
 """Oanda v20 REST client implementation of ExecutionClient."""
+import logging as log
+import time
+
 import requests
 from typing import Optional
 from decimal import Decimal
 
 from tradegumi.api.base_client import (
-    ExecutionClient, Candle, Position, OrderRequest, PriceTick, TradeHistory
+    ExecutionClient, Candle, Position, OrderRequest, PriceTick, ProviderRequestError, TradeHistory
 )
 from tradegumi import config
+
+log = log.getLogger(__name__)
 
 
 class OandaClient(ExecutionClient):
@@ -14,6 +19,11 @@ class OandaClient(ExecutionClient):
 
     Handles instrument format conversion (EURUSD ↔ EUR_USD) internally.
     """
+
+    REQUEST_TIMEOUT_SECONDS = 10
+    MAX_REQUEST_ATTEMPTS = 3
+    RETRY_BACKOFF_SECONDS = 0.25
+    RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
     def __init__(
         self,
@@ -23,7 +33,8 @@ class OandaClient(ExecutionClient):
     ):
         self.api_key = api_key or config.OANDA_API_KEY
         self.account_id = account_id or config.OANDA_ACCOUNT_ID
-        self.base_url = base_url or config.OANDA_BASE_URL
+        self.base_url = (base_url or config.OANDA_BASE_URL).rstrip("/")
+        self.stream_url = config.OANDA_STREAM_URL.rstrip("/")
         self._session = requests.Session()
         self._session.headers.update({
             "Authorization": f"Bearer {self.api_key}",
@@ -40,12 +51,123 @@ class OandaClient(ExecutionClient):
         """EUR_USD → EURUSD, USD_SPX500 → US500"""
         return config.from_oanda_symbol(oanda_sym)
 
-    def _request(self, method: str, path: str, **kwargs):
-        """Make an authenticated request to Oanda v20."""
-        url = f"{self.base_url}{path}"
-        resp = self._session.request(method, url, **kwargs)
-        resp.raise_for_status()
-        return resp.json()
+    def _url_for_path(self, path: str) -> str:
+        """Build a normalized REST URL for an Oanda v20 path."""
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        return f"{self.base_url}{normalized_path}"
+
+    def _error_type_for_status(self, status_code: Optional[int], operation: str) -> str:
+        """Return a stable diagnostic category for an Oanda request failure."""
+        if status_code == 429:
+            return "oanda_rate_limited"
+        if status_code == 504:
+            return "oanda_gateway_timeout"
+        if operation == "candle_fetch":
+            return "oanda_candle_fetch_failed"
+        return "oanda_request_failed"
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        operation: str = "oanda_request",
+        instrument: Optional[str] = None,
+        granularity: Optional[str] = None,
+        **kwargs,
+    ):
+        """Make an authenticated Oanda v20 request with timeout and retry context."""
+        path = path if path.startswith("/") else f"/{path}"
+        url = self._url_for_path(path)
+        timeout = kwargs.pop("timeout", self.REQUEST_TIMEOUT_SECONDS)
+        max_attempts = self.MAX_REQUEST_ATTEMPTS
+        last_error: Optional[ProviderRequestError] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._session.request(method, url, timeout=timeout, **kwargs)
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = ProviderRequestError(
+                    f"Oanda {operation} failed: {exc.__class__.__name__}",
+                    provider="oanda",
+                    method=method,
+                    path=path,
+                    operation=operation,
+                    instrument=instrument,
+                    granularity=granularity,
+                    attempts=attempt,
+                    max_attempts=max_attempts,
+                    retryable=True,
+                    error_type=self._error_type_for_status(None, operation),
+                )
+            else:
+                if 200 <= resp.status_code < 300:
+                    try:
+                        return resp.json()
+                    except ValueError as exc:
+                        raise ProviderRequestError(
+                            f"Oanda {operation} response was not valid JSON",
+                            provider="oanda",
+                            method=method,
+                            path=path,
+                            operation=operation,
+                            status_code=resp.status_code,
+                            instrument=instrument,
+                            granularity=granularity,
+                            attempts=attempt,
+                            max_attempts=max_attempts,
+                            retryable=False,
+                            error_type="oanda_response_malformed",
+                        ) from exc
+
+                retryable = resp.status_code in self.RETRYABLE_STATUS_CODES
+                error = ProviderRequestError(
+                    f"Oanda {operation} failed with HTTP {resp.status_code}",
+                    provider="oanda",
+                    method=method,
+                    path=path,
+                    operation=operation,
+                    status_code=resp.status_code,
+                    instrument=instrument,
+                    granularity=granularity,
+                    attempts=attempt,
+                    max_attempts=max_attempts,
+                    retryable=retryable,
+                    error_type=self._error_type_for_status(resp.status_code, operation),
+                )
+                if not retryable:
+                    raise error
+                last_error = error
+
+            if attempt < max_attempts:
+                log.warning(
+                    "Oanda %s retryable failure: method=%s path=%s status=%s attempt=%s/%s instrument=%s granularity=%s",
+                    operation,
+                    method,
+                    path,
+                    last_error.status_code if last_error else None,
+                    attempt,
+                    max_attempts,
+                    instrument,
+                    granularity,
+                )
+                time.sleep(self.RETRY_BACKOFF_SECONDS * attempt)
+
+        if last_error:
+            raise last_error
+        raise ProviderRequestError(
+            f"Oanda {operation} failed before a request was completed",
+            provider="oanda",
+            method=method,
+            path=path,
+            operation=operation,
+            instrument=instrument,
+            granularity=granularity,
+            attempts=max_attempts,
+            max_attempts=max_attempts,
+            retryable=True,
+            error_type=self._error_type_for_status(None, operation),
+        )
 
     # ── Market Data ──────────────────────────────────────────────────────────
 
@@ -66,11 +188,47 @@ class OandaClient(ExecutionClient):
             list[Candle] ordered oldest-first
         """
         oanda_inst = self._to_oanda(instrument)
-        params = {"granularity": granularity, "count": count}
-        data = self._request("GET", f"/v3/instruments/{oanda_inst}/candles", params=params)
+        path = f"/v3/instruments/{oanda_inst}/candles"
+        params = {"granularity": granularity, "count": count, "price": "M"}
+        data = self._request(
+            "GET",
+            path,
+            operation="candle_fetch",
+            instrument=oanda_inst,
+            granularity=granularity,
+            params=params,
+        )
+        if not isinstance(data.get("candles"), list):
+            raise ProviderRequestError(
+                "Oanda candle response missing candles array",
+                provider="oanda",
+                method="GET",
+                path=path,
+                operation="candle_fetch",
+                instrument=oanda_inst,
+                granularity=granularity,
+                attempts=1,
+                max_attempts=self.MAX_REQUEST_ATTEMPTS,
+                retryable=False,
+                error_type="oanda_response_malformed",
+            )
         candles = []
         for c in data.get("candles", []):
             mid = c.get("mid", {})
+            if not all(key in mid for key in ("o", "h", "l", "c")):
+                raise ProviderRequestError(
+                    "Oanda candle response missing midpoint OHLC data",
+                    provider="oanda",
+                    method="GET",
+                    path=path,
+                    operation="candle_fetch",
+                    instrument=oanda_inst,
+                    granularity=granularity,
+                    attempts=1,
+                    max_attempts=self.MAX_REQUEST_ATTEMPTS,
+                    retryable=False,
+                    error_type="oanda_response_malformed",
+                )
             candles.append(Candle(
                 t=c["time"],
                 o=float(mid["o"]),
@@ -78,6 +236,7 @@ class OandaClient(ExecutionClient):
                 l=float(mid["l"]),
                 c=float(mid["c"]),
                 s=c.get("volume"),
+                complete=bool(c.get("complete", True)),
             ))
         return candles
 
@@ -107,6 +266,11 @@ class OandaClient(ExecutionClient):
         """Return account balance."""
         data = self._request("GET", f"/v3/accounts/{self.account_id}/summary")
         return float(data["account"]["balance"])
+
+    def get_account_instruments(self) -> list[dict]:
+        """Return instruments available to the configured Oanda account."""
+        data = self._request("GET", f"/v3/accounts/{self.account_id}/instruments")
+        return list(data.get("instruments", []))
 
     def get_open_positions(self) -> list[Position]:
         """Return list of open positions from Oanda with live pricing and SL/TP."""
@@ -184,14 +348,15 @@ class OandaClient(ExecutionClient):
 
     def get_position(self, position_id: str) -> Position:
         """Fetch a single position by ID."""
-        data = self._request("GET", f"/v3/accounts/{self.account_id}/openPositions/{position_id}")
+        oanda_inst = self._to_oanda(position_id)
+        data = self._request("GET", f"/v3/accounts/{self.account_id}/positions/{oanda_inst}")
         p = data["position"]
         return Position(
             id=position_id,
             symbol=self._from_oanda(p["instrument"]),
             side="BUY" if float(p.get("longValueUnits", 0)) > 0 else "SELL",
-            volume=float(p.get("longValueUnits", p["shortValueUnits"]) or 0),
-            open_price=float(p.get("averageLongPrice", p["averageShortPrice"]) or 0),
+            volume=float(p.get("longValueUnits") or p.get("shortValueUnits") or 0),
+            open_price=float(p.get("averageLongPrice") or p.get("averageShortPrice") or 0),
             current_price=0,
             stop_loss=None,
             take_profit=None,
@@ -238,7 +403,30 @@ class OandaClient(ExecutionClient):
             f"/v3/accounts/{self.account_id}/orders",
             json=body,
         )
-        return str(data["order"]["id"])
+        return self._parse_order_create_id(data)
+
+    def _parse_order_create_id(self, data: dict) -> str:
+        """Return the best available identifier from an Oanda order transaction response."""
+        for key in ("orderFillTransaction", "orderCreateTransaction", "orderCancelTransaction", "orderRejectTransaction"):
+            transaction = data.get(key)
+            if isinstance(transaction, dict) and transaction.get("id"):
+                return str(transaction["id"])
+        related = data.get("relatedTransactionIDs")
+        if related:
+            return str(related[0])
+        if data.get("lastTransactionID"):
+            return str(data["lastTransactionID"])
+        raise ProviderRequestError(
+            "Oanda order creation response missing transaction identifiers",
+            provider="oanda",
+            method="POST",
+            path=f"/v3/accounts/{self.account_id}/orders",
+            operation="order_create",
+            attempts=1,
+            max_attempts=self.MAX_REQUEST_ATTEMPTS,
+            retryable=False,
+            error_type="oanda_response_malformed",
+        )
 
     def close_position(self, position_id: str, units: Optional[float] = None):
         """Close a position (full close if units is None)."""
@@ -248,7 +436,7 @@ class OandaClient(ExecutionClient):
 
         self._request(
             "PUT",
-            f"/v3/accounts/{self.account_id}/positions/{position_id}/close",
+            f"/v3/accounts/{self.account_id}/positions/{self._to_oanda(position_id)}/close",
             json=body,
         )
 
@@ -264,6 +452,6 @@ class OandaClient(ExecutionClient):
 
         self._request(
             "PUT",
-            f"/v3/accounts/{self.account_id}/orders/{position_id}/orders",
+            f"/v3/accounts/{self.account_id}/trades/{position_id}/orders",
             json=body,
         )

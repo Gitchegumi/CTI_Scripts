@@ -513,6 +513,52 @@ class TestTopBlockers:
         assert exported["criteria"][0]["context"]["available_indicator_window"] == 0
         assert exported["criteria"][0]["context"]["missing_input"] == "last_closed_candle_or_indicator_window"
 
+    def test_oanda_failure_metrics_preserve_diagnostic_context(self):
+        db = temp_db()
+        context = {
+            "stage": "signal_stack",
+            "provider": "oanda",
+            "error_type": "oanda_gateway_timeout",
+            "method": "GET",
+            "path": "/v3/instruments/EUR_USD/candles",
+            "status_code": 504,
+            "instrument": "EUR_USD",
+            "granularity": "M5",
+            "attempts": 3,
+            "max_attempts": 3,
+            "retryable": True,
+            "message": "Oanda candle fetch failed with HTTP 504",
+        }
+        cr = CriterionResult(
+            criterion_name="signal_engine_data",
+            layer="data_quality",
+            measured_value=dict(context),
+            threshold_value="complete candles and indicators",
+            passed=None,
+            required=True,
+            data_quality="missing",
+            diagnostic_state="missing_data",
+            reason="signal_engine_data:missing",
+            context=dict(context),
+        )
+
+        recorded = record_opportunity(
+            EvaluatedOpportunity(
+                id="opp-oanda-timeout",
+                evaluated_at=iso(),
+                symbol="EURUSD",
+                final_decision="rejected",
+                decision_reason="oanda_gateway_timeout",
+                criteria=[cr],
+            ),
+            db,
+        )
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+
+        assert recorded.final_decision == "indeterminate"
+        assert recorded.blocking_layer == "data_quality"
+        assert exported["criteria"][0]["context"] == context
+
     def test_candle_close_waiting_is_not_near_miss_or_rejection(self):
         db = temp_db()
         cr = CriterionResult(

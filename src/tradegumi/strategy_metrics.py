@@ -32,6 +32,11 @@ INDETERMINATE_REASONS = {
     "missing_candle_time",
     "missing_signal_engine_data",
     "signal_stack_data_not_ready",
+    "oanda_candle_fetch_failed",
+    "oanda_gateway_timeout",
+    "oanda_rate_limited",
+    "oanda_request_failed",
+    "oanda_response_malformed",
 }
 _lock = threading.Lock()
 _initialized_db_paths: set[str] = set()
@@ -495,6 +500,8 @@ def _layer_from_reason(reason: str) -> str:
         return "trend"
     if reason in {"engine_error", "api_error", "api_timeout"}:
         return "engine"
+    if reason.startswith("oanda_"):
+        return "data_quality"
     if reason.startswith("signal_engine_data:"):
         return "data_quality"
     if reason in {"missing_candle_data", "missing_candle_time", "missing_signal_engine_data", "signal_stack_data_not_ready", "incomplete_diagnostics"}:
