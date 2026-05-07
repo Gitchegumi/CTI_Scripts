@@ -122,7 +122,7 @@
 - [x] T037 [P] Update signal journal notes in `docs/signal-journal.md` if provider diagnostics appear in journal-visible fields
 - [x] T038 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and useful docstrings in `src/tradegumi/api/oanda_client.py`, `src/tradegumi/api/base_client.py`, `src/tradegumi/signal_engine.py`, and `src/tradegumi/strategy_metrics.py`
 - [x] T039 Run focused validation from `specs/009-oanda-api-resilience/quickstart.md`
-- [ ] T040 Submit PR with DockeGumi as reviewer
+- [x] T040 Submit PR with DockeGumi as reviewer
 
 ---
 
