@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from tradegumi.api.base_client import Candle
+from tradegumi.api.base_client import Candle, ProviderRequestError
 from tradegumi.signal_engine import (
     SignalEngine,
     _last_closed_candle_window,
@@ -166,6 +166,64 @@ def test_m5_candle_close_boundary_at_and_after_close_passes():
     assert after_context["seconds_since_close"] == 1.0
 
 
+def test_last_closed_candle_selection_uses_provider_complete_flag():
+    base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+    closed = candle_at(base)
+    active = candle_at(base + timedelta(minutes=5))
+    active.complete = False
+
+    last_closed, window, context = _last_closed_candle_window(
+        [closed, active],
+        "M5",
+        current_time=base + timedelta(minutes=20),
+    )
+
+    assert last_closed == closed
+    assert window == [closed]
+    assert context["candle_open_time"] == closed.time.isoformat()
+
+
+class SignalFetchFailureClient(FakeClient):
+    """Fake client that fails only when the signal stack fetches M5 candles."""
+
+    def get_candles(self, instrument: str, granularity: str, count: int):
+        if granularity == "M5" and count == 100:
+            raise ProviderRequestError(
+                "Oanda candle fetch failed with HTTP 504",
+                provider="oanda",
+                method="GET",
+                path="/v3/instruments/EUR_USD/candles",
+                operation="candle_fetch",
+                status_code=504,
+                instrument="EUR_USD",
+                granularity="M5",
+                attempts=3,
+                max_attempts=3,
+                retryable=True,
+                error_type="oanda_gateway_timeout",
+            )
+        return super().get_candles(instrument, granularity, count)
+
+
+def test_failed_oanda_candle_fetch_is_indeterminate_not_rejected(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    engine = SignalEngine(SignalFetchFailureClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+    monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * len(df)))
+
+    signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+    assert signal is None
+    assert trend == "Uptrend"
+    assert diag.final_decision == "indeterminate"
+    assert diag.decision_reason == "oanda_gateway_timeout"
+    data_criterion = next(c for c in diag.criteria if c.criterion_name == "signal_engine_data")
+    assert data_criterion.context["provider"] == "oanda"
+    assert data_criterion.context["status_code"] == 504
+    assert data_criterion.context["attempts"] == 3
+
+
 def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     now = datetime.now(timezone.utc)
     candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
@@ -253,3 +311,31 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
     assert confidence is None
     assert reason == "criteria_failed"
     assert not any(c.criterion_name == "signal_engine_data" for c in criteria)
+
+
+def test_missing_macd_signal_column_is_indeterminate_not_strategy_rejection(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+    count = len(candles)
+
+    monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * len(df)))
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_stoch_rsi",
+        lambda df, length, k, d: pd.DataFrame({"k": [20.0] * (count - 1) + [40.0], "d": [30.0] * count}),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_macd",
+        lambda df, fast, slow, signal: pd.DataFrame({
+            "macd": [0.2] * count,
+            "histogram": [0.1] * (count - 1) + [0.2],
+        }),
+    )
+
+    signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+    assert signal is None
+    assert trend == "Uptrend"
+    assert diag.final_decision == "indeterminate"
+    assert diag.decision_reason == "missing_signal_engine_data"
+    assert not any(c.reason == "criteria_failed" for c in diag.criteria)

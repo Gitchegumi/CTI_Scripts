@@ -60,6 +60,8 @@ The criterion `context` should name the compact missing input category, such as 
 
 When a trend-valid M5 candidate cannot safely enter the signal stack because the last fully closed candle or required indicator window is unavailable, the decision reason is `signal_stack_data_not_ready`. The diagnostic uses `error_type: DataNotReady`, `missing_input: last_closed_candle_or_indicator_window`, and includes required/available counts for raw candles, closed candles, and usable indicator rows. This is a normal readiness state, not a strategy rejection and not a raw `IndexError`.
 
+OANDA provider failures are also reported as indeterminate data/API failures rather than strategy rejections. Stable provider reasons include `oanda_gateway_timeout`, `oanda_rate_limited`, `oanda_candle_fetch_failed`, `oanda_request_failed`, and `oanda_response_malformed`. Provider diagnostic context includes safe troubleshooting fields such as method, path, status code, instrument, granularity, retry attempts, and retryability; it must not include API tokens or authorization headers.
+
 ## Candle Close Gate
 
 `candle_close_gate` describes whether a candidate was evaluated at the intended candle timing. The gate rule is `pass_after_candle_close`: a candidate can proceed only when the relevant candle has closed. If evaluation occurs before close, the opportunity is treated as waiting for candle close rather than a strategy rejection.
