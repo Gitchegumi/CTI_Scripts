@@ -178,7 +178,7 @@ def _criterion(
         margin=margin,
         normalized_margin=normalized,
         required=required,
-        blocked_signal=required and passed is False,
+        blocked_signal=required and (passed is False or quality in {"missing", "malformed"}),
         data_quality=quality,
         diagnostic_state=diagnostic_state,
         reason=reason,
@@ -287,9 +287,93 @@ def _signal_window_issue(candles: Sequence[Candle], required_count: int) -> Opti
         "stage": "signal_stack",
         "timeframe": "M5",
         "missing_input": "last_closed_candle_or_indicator_window",
+        "error_type": "DataNotReady",
+        "required_candles": required_count,
+        "available_candles": available,
+        "required_closed_candles": required_count,
+        "available_closed_candles": available,
+        "required_indicator_window": 14,
+        "available_indicator_window": 0,
         "available_count": available,
         "required_count": required_count,
+        "message": "Signal stack skipped because the last closed candle or required indicator window is unavailable.",
     }
+
+
+def _signal_readiness_issue(
+    *,
+    raw_candles: Sequence[Candle],
+    closed_candles: Sequence[Candle],
+    required_candles: int,
+    required_indicator_window: int = 14,
+    available_indicator_window: int = 0,
+    selected_closed_candle: Optional[Candle] = None,
+) -> dict:
+    """Build a structured data-not-ready diagnostic for signal-stack inputs."""
+    context = {
+        "stage": "signal_stack",
+        "timeframe": "M5",
+        "missing_input": "last_closed_candle_or_indicator_window",
+        "error_type": "DataNotReady",
+        "required_candles": required_candles,
+        "available_candles": len(raw_candles),
+        "required_closed_candles": required_candles,
+        "available_closed_candles": len(closed_candles),
+        "required_indicator_window": required_indicator_window,
+        "available_indicator_window": available_indicator_window,
+        "available_count": len(closed_candles),
+        "required_count": required_candles,
+        "message": "Signal stack skipped because the last closed candle or required indicator window is unavailable.",
+    }
+    if selected_closed_candle is not None:
+        context["selected_closed_candle_time"] = selected_closed_candle.time.isoformat()
+    return context
+
+
+def _signal_data_not_ready_criterion(context: dict) -> CriterionResult:
+    """Return the blocking signal-engine criterion for readiness diagnostics."""
+    return _criterion(
+        "signal_engine_data",
+        "data_quality",
+        context,
+        "complete candles and indicators",
+        None,
+        quality="missing",
+        diagnostic_state="missing_data",
+        reason="signal_engine_data:missing",
+        context=context,
+    )
+
+
+def _first_matching_column(frame: pd.DataFrame, predicate, label: str) -> str:
+    """Return the first column matching a signal indicator role."""
+    matches = [column for column in frame.columns if predicate(str(column).lower())]
+    if not matches:
+        raise ValueError(f"Missing required indicator column: {label}")
+    return matches[0]
+
+
+def _usable_indicator_window(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    required_window: int,
+    selected_closed_candle: Candle,
+) -> tuple[pd.DataFrame, int, bool]:
+    """Return usable indicator rows and whether they align with the closed candle."""
+    if frame.empty:
+        return frame, 0, False
+    usable = frame.dropna(subset=list(columns))
+    available = len(usable)
+    if available == 0:
+        return usable, 0, False
+    index_value = usable.index[-1]
+    aligned = True
+    if isinstance(index_value, pd.Timestamp):
+        selected_time = selected_closed_candle.time
+        if selected_time.tzinfo is None:
+            selected_time = selected_time.replace(tzinfo=timezone.utc)
+        aligned = index_value.to_pydatetime() == selected_time
+    return usable, available, aligned and available >= required_window
 
 
 def _compact_data_issue_context(exc: Exception, *, stage: str, timeframe: str = "M5") -> dict:
@@ -409,6 +493,7 @@ class SignalEngine:
     SIGNAL_COOLDOWN_SECONDS = 300  # 5-minute cooldown per symbol/direction
     CANDLE_CLOSE_GATE = True    # Require candle close for fresh entries
     SIGNAL_WINDOW_MIN_CANDLES = 35
+    SIGNAL_INDICATOR_MIN_WINDOW = 14
 
     # Cooldown tracking: key = f"{symbol}:{trend}", value = last_signal_ts
     _cooldown: dict[str, float] = {}
@@ -463,20 +548,13 @@ class SignalEngine:
         """
         candles = self.client.get_candles(symbol, "M5", count=100)
         if not candles:
-            criteria = [
-                _criterion(
-                    "signal_engine_data",
-                    "data_quality",
-                    {"timeframe": "M5", "missing_input": "candles", "available_count": 0},
-                    "M5 candles",
-                    None,
-                    quality="missing",
-                    diagnostic_state="missing_data",
-                    reason="signal_engine_data:missing",
-                    context={"timeframe": "M5", "missing_input": "candles", "available_count": 0},
-                )
-            ]
-            return None, criteria, "missing_candle_data", None
+            context = _signal_readiness_issue(
+                raw_candles=[],
+                closed_candles=[],
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
+            )
+            return None, [_signal_data_not_ready_criterion(context)], "signal_stack_data_not_ready", None
         closed_candle, closed_window, close_context = _last_closed_candle_window(candles, "M5")
 
         # ── Candle-close gate ───────────────────────────────────────────────
@@ -573,25 +651,38 @@ class SignalEngine:
         # ── Layer 1: StochRSI ────────────────────────────────────────────────
         window_issue = _signal_window_issue(closed_window, self.SIGNAL_WINDOW_MIN_CANDLES)
         if window_issue:
-            criteria.append(
-                _criterion(
-                    "signal_engine_data",
-                    "data_quality",
-                    window_issue,
-                    "complete candles and indicators",
-                    None,
-                    quality="missing",
-                    diagnostic_state="missing_data",
-                    reason="signal_engine_data:missing",
-                    context=window_issue,
-                )
+            context = _signal_readiness_issue(
+                raw_candles=candles,
+                closed_candles=closed_window,
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
+                selected_closed_candle=closed_candle,
             )
-            return None, criteria, "missing_signal_engine_data", None
+            criteria.append(_signal_data_not_ready_criterion(context))
+            return None, criteria, "signal_stack_data_not_ready", None
 
         df = candles_to_df(closed_window)
+        df.index = pd.DatetimeIndex([candle.time for candle in closed_window])
         stoch = calculate_stoch_rsi(df, length=14, k=3, d=3)
-        k_col = [c for c in stoch.columns if "k" in c.lower()][0]
-        d_col = [c for c in stoch.columns if "d" in c.lower()][0]
+        k_col = _first_matching_column(stoch, lambda name: "k" in name, "stoch_rsi_k")
+        d_col = _first_matching_column(stoch, lambda name: "d" in name, "stoch_rsi_d")
+        stoch, stoch_available, stoch_ready = _usable_indicator_window(
+            stoch,
+            [k_col, d_col],
+            self.SIGNAL_INDICATOR_MIN_WINDOW,
+            closed_candle,
+        )
+        if not stoch_ready:
+            context = _signal_readiness_issue(
+                raw_candles=candles,
+                closed_candles=closed_window,
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
+                available_indicator_window=stoch_available,
+                selected_closed_candle=closed_candle,
+            )
+            criteria.append(_signal_data_not_ready_criterion(context))
+            return None, criteria, "signal_stack_data_not_ready", None
         k = stoch[k_col].iloc[-1]
         d = stoch[d_col].iloc[-1]
         k_prev3 = stoch[k_col].iloc[-4:]
@@ -609,9 +700,30 @@ class SignalEngine:
 
         # ── Layer 2: MACD histogram ───────────────────────────────────────────
         macd_df = calculate_macd(df, fast=12, slow=26, signal=9)
-        hist_col = [c for c in macd_df.columns if "h" in c.lower()][0]
-        macd_line_col = [c for c in macd_df.columns if "macd" in c.lower() and "h" not in c.lower() and "s" not in c.lower()][0]
-        macd_signal_col = [c for c in macd_df.columns if "signal" in c.lower()][0]
+        hist_col = _first_matching_column(macd_df, lambda name: "h" in name, "macd_histogram")
+        macd_line_col = _first_matching_column(
+            macd_df,
+            lambda name: "macd" in name and "h" not in name and "s" not in name,
+            "macd_line",
+        )
+        macd_signal_col = _first_matching_column(macd_df, lambda name: "signal" in name, "macd_signal")
+        macd_df, macd_available, macd_ready = _usable_indicator_window(
+            macd_df,
+            [hist_col, macd_line_col, macd_signal_col],
+            self.SIGNAL_INDICATOR_MIN_WINDOW,
+            closed_candle,
+        )
+        if not macd_ready or len(macd_df[hist_col].iloc[-6:-1]) < 5:
+            context = _signal_readiness_issue(
+                raw_candles=candles,
+                closed_candles=closed_window,
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
+                available_indicator_window=macd_available,
+                selected_closed_candle=closed_candle,
+            )
+            criteria.append(_signal_data_not_ready_criterion(context))
+            return None, criteria, "signal_stack_data_not_ready", None
         macd_current = macd_df[hist_col].iloc[-1]
         macd_prev5   = macd_df[hist_col].iloc[-6:-1]
         macd_line = macd_df[macd_line_col].iloc[-1]
@@ -633,9 +745,26 @@ class SignalEngine:
 
         # ── Layer 3: Keltner Channel — band breach (outer bands) ───────────
         kc = calculate_keltner_channels(df, length=20, multiplier=1.5, mamode="ema")
-        kc_upper_col = [c for c in kc.columns if "upper" in c.lower() or ("b" in c.lower() and "u" in c.lower())][0]
-        kc_lower_col = [c for c in kc.columns if "lower" in c.lower() or ("b" in c.lower() and "l" in c.lower())][0]
-        kc_mid_col   = [c for c in kc.columns if "mid" in c.lower() or "b" in c.lower()][0]
+        kc_upper_col = _first_matching_column(kc, lambda name: "upper" in name or ("b" in name and "u" in name), "keltner_upper")
+        kc_lower_col = _first_matching_column(kc, lambda name: "lower" in name or ("b" in name and "l" in name), "keltner_lower")
+        kc_mid_col = _first_matching_column(kc, lambda name: "mid" in name or "b" in name, "keltner_mid")
+        kc, kc_available, kc_ready = _usable_indicator_window(
+            kc,
+            [kc_upper_col, kc_lower_col, kc_mid_col],
+            self.SIGNAL_INDICATOR_MIN_WINDOW,
+            closed_candle,
+        )
+        if not kc_ready:
+            context = _signal_readiness_issue(
+                raw_candles=candles,
+                closed_candles=closed_window,
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
+                available_indicator_window=kc_available,
+                selected_closed_candle=closed_candle,
+            )
+            criteria.append(_signal_data_not_ready_criterion(context))
+            return None, criteria, "signal_stack_data_not_ready", None
         last5_low  = df["l"].iloc[-5:].min()
         last5_high = df["h"].iloc[-5:].max()
         kc_upper_last5 = kc[kc_upper_col].iloc[-5:]
@@ -656,6 +785,18 @@ class SignalEngine:
 
         # ── Layer 4: Candlestick (optional) ──────────────────────────────────
         patterns_df = calculate_candlestick_patterns(df)
+        usable_patterns = patterns_df.dropna(how="all")
+        if len(usable_patterns) < 5:
+            context = _signal_readiness_issue(
+                raw_candles=candles,
+                closed_candles=closed_window,
+                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
+                required_indicator_window=5,
+                available_indicator_window=len(usable_patterns),
+                selected_closed_candle=closed_candle,
+            )
+            criteria.append(_signal_data_not_ready_criterion(context))
+            return None, criteria, "signal_stack_data_not_ready", None
         recent = patterns_df.iloc[-5:].dropna(how="all")
         identified = recent.columns[(recent != 0).any(axis=0)].tolist()
 
@@ -930,7 +1071,16 @@ class SignalEngine:
                 else (
                     "skipped"
                     if str(reason).startswith("candle_close_gate:waiting_for_close")
-                    else ("indeterminate" if reason in {"missing_candle_time", "missing_candle_data"} else "rejected")
+                    else (
+                        "indeterminate"
+                        if reason in {
+                            "missing_candle_time",
+                            "missing_candle_data",
+                            "missing_signal_engine_data",
+                            "signal_stack_data_not_ready",
+                        }
+                        else "rejected"
+                    )
                 )
             ),
             decision_reason=reason,

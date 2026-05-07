@@ -31,6 +31,7 @@ INDETERMINATE_REASONS = {
     "missing_candle_data",
     "missing_candle_time",
     "missing_signal_engine_data",
+    "signal_stack_data_not_ready",
 }
 _lock = threading.Lock()
 _initialized_db_paths: set[str] = set()
@@ -496,7 +497,7 @@ def _layer_from_reason(reason: str) -> str:
         return "engine"
     if reason.startswith("signal_engine_data:"):
         return "data_quality"
-    if reason in {"missing_candle_data", "missing_candle_time", "missing_signal_engine_data", "incomplete_diagnostics"}:
+    if reason in {"missing_candle_data", "missing_candle_time", "missing_signal_engine_data", "signal_stack_data_not_ready", "incomplete_diagnostics"}:
         return "data_quality"
     if reason.startswith("candle_close_gate:"):
         return "timing"

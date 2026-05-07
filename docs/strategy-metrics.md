@@ -58,6 +58,8 @@ Required criteria that cannot evaluate because data is missing or malformed also
 
 The criterion `context` should name the compact missing input category, such as candles, last closed candle or indicator window, malformed price or indicator data, ATR, stochastic RSI, price data, or an indicator column. Raw candle arrays are not exported.
 
+When a trend-valid M5 candidate cannot safely enter the signal stack because the last fully closed candle or required indicator window is unavailable, the decision reason is `signal_stack_data_not_ready`. The diagnostic uses `error_type: DataNotReady`, `missing_input: last_closed_candle_or_indicator_window`, and includes required/available counts for raw candles, closed candles, and usable indicator rows. This is a normal readiness state, not a strategy rejection and not a raw `IndexError`.
+
 ## Candle Close Gate
 
 `candle_close_gate` describes whether a candidate was evaluated at the intended candle timing. The gate rule is `pass_after_candle_close`: a candidate can proceed only when the relevant candle has closed. If evaluation occurs before close, the opportunity is treated as waiting for candle close rather than a strategy rejection.
