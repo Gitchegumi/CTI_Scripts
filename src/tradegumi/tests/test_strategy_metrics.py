@@ -463,6 +463,56 @@ class TestTopBlockers:
         assert recorded.criteria[0].blocked_signal is True
         assert summary["top_blockers"][0]["criterion_name"] == "signal_engine_data:missing"
 
+    def test_signal_stack_data_not_ready_populates_readiness_fields(self):
+        db = temp_db()
+        context = {
+            "stage": "signal_stack",
+            "timeframe": "M5",
+            "missing_input": "last_closed_candle_or_indicator_window",
+            "error_type": "DataNotReady",
+            "required_candles": 35,
+            "available_candles": 17,
+            "required_closed_candles": 35,
+            "available_closed_candles": 17,
+            "required_indicator_window": 14,
+            "available_indicator_window": 0,
+            "message": "Signal stack skipped because the last closed candle or required indicator window is unavailable.",
+        }
+        cr = CriterionResult(
+            criterion_name="signal_engine_data",
+            layer="data_quality",
+            measured_value=context,
+            threshold_value="complete candles and indicators",
+            passed=None,
+            required=True,
+            data_quality="missing",
+            diagnostic_state="missing_data",
+            reason="signal_engine_data:missing",
+            context=context,
+        )
+        opp = EvaluatedOpportunity(
+            id="opp-signal-data-not-ready",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="rejected",
+            decision_reason="signal_stack_data_not_ready",
+            direction="BUY",
+            criteria=[cr],
+        )
+
+        recorded = record_opportunity(opp, db)
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+
+        assert recorded.final_decision == "indeterminate"
+        assert recorded.decision_reason == "signal_stack_data_not_ready"
+        assert recorded.first_blocker == "signal_engine_data:missing"
+        assert recorded.all_blockers == ["signal_engine_data:missing"]
+        assert recorded.blocking_layer == "data_quality"
+        assert recorded.criteria[0].blocked_signal is True
+        assert exported["criteria"][0]["context"]["error_type"] == "DataNotReady"
+        assert exported["criteria"][0]["context"]["available_indicator_window"] == 0
+        assert exported["criteria"][0]["context"]["missing_input"] == "last_closed_candle_or_indicator_window"
+
     def test_candle_close_waiting_is_not_near_miss_or_rejection(self):
         db = temp_db()
         cr = CriterionResult(

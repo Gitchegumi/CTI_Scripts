@@ -60,10 +60,59 @@ def test_signal_engine_data_with_insufficient_candles_reports_missing_window():
 
     assert signal is None
     assert confidence is None
-    assert reason == "missing_signal_engine_data"
+    assert reason == "signal_stack_data_not_ready"
     data_criterion = next(c for c in criteria if c.criterion_name == "signal_engine_data")
     assert data_criterion.context["missing_input"] == "last_closed_candle_or_indicator_window"
-    assert data_criterion.context["available_count"] == SignalEngine.SIGNAL_WINDOW_MIN_CANDLES - 1
+    assert data_criterion.context["error_type"] == "DataNotReady"
+    assert data_criterion.context["available_closed_candles"] == SignalEngine.SIGNAL_WINDOW_MIN_CANDLES - 1
+    assert data_criterion.blocked_signal is True
+
+
+def test_signal_engine_data_with_empty_candles_reports_data_not_ready():
+    engine = SignalEngine(FakeClient({"M5": []}))
+
+    signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+    assert signal is None
+    assert confidence is None
+    assert reason == "signal_stack_data_not_ready"
+    data_criterion = next(c for c in criteria if c.criterion_name == "signal_engine_data")
+    assert data_criterion.context["error_type"] == "DataNotReady"
+    assert data_criterion.context["available_candles"] == 0
+    assert data_criterion.context["available_indicator_window"] == 0
+
+
+def test_signal_engine_data_with_one_candle_reports_data_not_ready():
+    now = datetime.now(timezone.utc)
+    engine = SignalEngine(FakeClient({"M5": closed_candles(1, now)}))
+
+    signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+    assert signal is None
+    assert confidence is None
+    assert reason == "signal_stack_data_not_ready"
+    data_criterion = next(c for c in criteria if c.criterion_name == "signal_engine_data")
+    assert data_criterion.context["available_closed_candles"] == 1
+
+
+def test_signal_engine_data_with_short_indicator_output_reports_data_not_ready(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    engine = SignalEngine(FakeClient({"M5": candles}))
+
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_stoch_rsi",
+        lambda df, length, k, d: pd.DataFrame({"k": [], "d": []}),
+    )
+
+    signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+    assert signal is None
+    assert confidence is None
+    assert reason == "signal_stack_data_not_ready"
+    data_criterion = next(c for c in criteria if c.criterion_name == "signal_engine_data")
+    assert data_criterion.context["error_type"] == "DataNotReady"
+    assert data_criterion.context["available_indicator_window"] == 0
 
 
 def test_last_closed_candle_selection_ignores_current_open_candle():
@@ -161,3 +210,46 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     assert reason == "emitted"
     assert confidence == 1.0
     assert {"stoch_rsi", "macd", "keltner", "confidence"}.issubset({c.criterion_name for c in criteria})
+
+
+def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+    count = len(candles)
+
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_stoch_rsi",
+        lambda df, length, k, d: pd.DataFrame({"k": [40.0] * count, "d": [30.0] * count}),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_macd",
+        lambda df, fast, slow, signal: pd.DataFrame({
+            "macd": [0.2] * count,
+            "signal": [0.1] * count,
+            "histogram": [0.1] * (count - 1) + [0.2],
+        }),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_keltner_channels",
+        lambda df, length, multiplier, mamode: pd.DataFrame({
+            "upper": [1.2] * count,
+            "mid": [1.1] * count,
+            "lower": [1.11] * count,
+        }),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_candlestick_patterns",
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+    )
+    monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.2)
+    monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+
+    signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+    assert signal is None
+    assert confidence is None
+    assert reason == "criteria_failed"
+    assert not any(c.criterion_name == "signal_engine_data" for c in criteria)
