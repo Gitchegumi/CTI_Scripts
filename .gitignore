@@ -191,3 +191,4 @@ strategies/private/
 # Exception: dashboard lib directory contains source code
 !dashboard/src/lib/
 !dashboard/src/lib/**
+C:/tmp/cti_strategy_metrics_tests/*
