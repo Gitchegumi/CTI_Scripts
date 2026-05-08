@@ -716,7 +716,7 @@ class SignalEngine:
             lambda name: "macd" in name and "h" not in name and "s" not in name,
             "macd_line",
         )
-        macd_signal_col = _first_matching_column(macd_df, lambda name: "signal" in name, "macd_signal")
+        macd_signal_col = _first_matching_column(macd_df, lambda name: "s" in name and "h" not in name, "macd_signal")
         macd_df, macd_available, macd_ready = _usable_indicator_window(
             macd_df,
             [hist_col, macd_line_col, macd_signal_col],
@@ -755,9 +755,9 @@ class SignalEngine:
 
         # ── Layer 3: Keltner Channel — band breach (outer bands) ───────────
         kc = calculate_keltner_channels(df, length=20, multiplier=1.5, mamode="ema")
-        kc_upper_col = _first_matching_column(kc, lambda name: "upper" in name or ("b" in name and "u" in name), "keltner_upper")
-        kc_lower_col = _first_matching_column(kc, lambda name: "lower" in name or ("b" in name and "l" in name), "keltner_lower")
-        kc_mid_col = _first_matching_column(kc, lambda name: "mid" in name or "b" in name, "keltner_mid")
+        kc_upper_col = _first_matching_column(kc, lambda name: "u" in name and "l" not in name and "b" not in name, "keltner_upper")
+        kc_lower_col = _first_matching_column(kc, lambda name: "l" in name and "u" not in name and "b" not in name, "keltner_lower")
+        kc_mid_col = _first_matching_column(kc, lambda name: ("b" in name and "u" not in name and "l" not in name) or "m" in name, "keltner_mid")
         kc, kc_available, kc_ready = _usable_indicator_window(
             kc,
             [kc_upper_col, kc_lower_col, kc_mid_col],
