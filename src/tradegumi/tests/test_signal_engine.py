@@ -339,3 +339,43 @@ def test_missing_macd_signal_column_is_indeterminate_not_strategy_rejection(monk
     assert diag.final_decision == "indeterminate"
     assert diag.decision_reason == "missing_signal_engine_data"
     assert not any(c.reason == "criteria_failed" for c in diag.criteria)
+
+
+def test_actual_pandas_ta_macd_and_keltner_columns_match_signal_engine_predicates():
+    """Verify pandas-ta output columns are matched by the signal engine's predicates."""
+    from datetime import datetime, timezone
+    from tradegumi.indicators import calculate_macd, calculate_keltner_channels, candles_to_df
+    from tradegumi.signal_engine import _first_matching_column
+
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    df = candles_to_df(candles)
+    df.index = pd.DatetimeIndex([c.time for c in candles])
+
+    # MACD — verify the fixed predicate finds the right columns
+    macd_df = calculate_macd(df, fast=12, slow=26, signal=9)
+    assert "MACDs_" in macd_df.columns[2], "pandas-ta should produce MACDs column"
+
+    # The actual predicate used in signal_engine.py (after fix)
+    hist_col = _first_matching_column(macd_df, lambda name: "h" in name and "s" not in name, "macd_histogram")
+    line_col = _first_matching_column(macd_df, lambda name: "macd" in name and "h" not in name and "s" not in name, "macd_line")
+    signal_col = _first_matching_column(macd_df, lambda name: "s" in name and "h" not in name, "macd_signal")
+
+    assert "h" in hist_col.lower() and "s" not in hist_col.lower()
+    assert "macd" in line_col.lower() and "h" not in line_col.lower() and "s" not in line_col.lower()
+    assert "s" in signal_col.lower() and "h" not in signal_col.lower()
+
+    # Keltner — verify the fixed predicate finds the right columns
+    kc_df = calculate_keltner_channels(df, length=20, multiplier=1.5, mamode="ema")
+    assert "KCUe" in kc_df.columns[2], "pandas-ta should produce KCUe column"
+    assert "KCLe" in kc_df.columns[0], "pandas-ta should produce KCLe column"
+    assert "KCBe" in kc_df.columns[1], "pandas-ta should produce KCBe column"
+
+    # The actual predicates used in signal_engine.py (after fix)
+    upper_col = _first_matching_column(kc_df, lambda name: "u" in name and "l" not in name and "b" not in name, "keltner_upper")
+    lower_col = _first_matching_column(kc_df, lambda name: "l" in name and "u" not in name and "b" not in name, "keltner_lower")
+    mid_col = _first_matching_column(kc_df, lambda name: ("b" in name and "u" not in name and "l" not in name) or "m" in name, "keltner_mid")
+
+    assert upper_col == "KCUe_20_1.5", f"Expected KCUe, got {upper_col}"
+    assert lower_col == "KCLe_20_1.5", f"Expected KCLe, got {lower_col}"
+    assert mid_col == "KCBe_20_1.5", f"Expected KCBe, got {mid_col}"
