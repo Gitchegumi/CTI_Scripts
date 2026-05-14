@@ -1,4 +1,4 @@
-﻿# Tasks: Signal Setup Outcomes
+# Tasks: Signal Setup Outcomes
 
 **Input**: Design documents from `specs/011-signal-setup-outcomes/`  
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md  
@@ -167,7 +167,7 @@
 - [X] T067 Run full focused validation from `specs/011-signal-setup-outcomes/quickstart.md`
 - [X] T068 Run broader Python regression tests with `python -m pytest src/tradegumi/tests`
 - [X] T069 Run `npm run lint` and `npm run build` from `dashboard/` if dashboard files changed
-- [ ] T070 Submit PR with DockeGumi as reviewer from repository root `E:/GitHub/CTI_Scripts`
+- [X] T070 Submit PR with DockeGumi as reviewer from repository root `E:/GitHub/CTI_Scripts`
 
 ---
 
