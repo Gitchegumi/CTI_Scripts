@@ -36,7 +36,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     // Route to the correct backend endpoint based on payload
-    const endpoint = body.grade != null ? "/api/journal/grade" : "/api/journal/notes";
+    const endpoint = body.invalidate === true
+      ? "/api/journal/invalidate"
+      : body.grade != null
+        ? "/api/journal/grade"
+        : "/api/journal/notes";
     const res = await fetch(`${API_BASE}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

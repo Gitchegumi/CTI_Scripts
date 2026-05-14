@@ -31,7 +31,15 @@ def temp_db(name: str = "metrics.db") -> Path:
     return base / name
 
 
-def opportunity(idx: int, *, decision: str = "rejected", failed: int = 1, threshold_version: str = "v1") -> EvaluatedOpportunity:
+def opportunity(
+    idx: int,
+    *,
+    decision: str = "rejected",
+    failed: int = 1,
+    threshold_version: str = "v1",
+    usable_for_strategy_stats=None,
+    stats_exclusion_reason=None,
+) -> EvaluatedOpportunity:
     criteria = [
         CriterionResult(
             criterion_name="stoch_rsi",
@@ -71,6 +79,8 @@ def opportunity(idx: int, *, decision: str = "rejected", failed: int = 1, thresh
         final_decision=decision,
         decision_reason="criteria_failed" if decision == "rejected" else decision,
         threshold_version=threshold_version,
+        usable_for_strategy_stats=usable_for_strategy_stats,
+        stats_exclusion_reason=stats_exclusion_reason,
         criteria=criteria,
     )
 
@@ -201,6 +211,23 @@ def test_comparison_and_export():
 
     exported = export_summary(iso(-14), iso(1), include_opportunities=True, db_path=db)
     assert len(exported["opportunities"]) == 2
+
+
+def test_summary_counts_only_usable_emitted_signals_as_trade_opportunities():
+    db = temp_db()
+    record_opportunity(opportunity(1, decision="emitted", failed=0, usable_for_strategy_stats=True), db)
+    record_opportunity(opportunity(2, decision="emitted", failed=0, usable_for_strategy_stats=False, stats_exclusion_reason="duplicate_setup"), db)
+    record_opportunity(opportunity(3, decision="emitted", failed=0), db)
+
+    summary = get_summary(iso(-1), iso(1), db_path=db)
+    exported = get_opportunities(iso(-1), iso(1), db_path=db)
+
+    assert summary["emitted_count"] == 3
+    assert summary["trade_opportunity_count"] == 1
+    assert summary["stats_excluded_count"] == 1
+    assert summary["stats_unknown_eligibility_count"] == 1
+    assert summary["stats_exclusion_counts"] == {"duplicate_setup": 1}
+    assert {row["id"]: row["usable_for_strategy_stats"] for row in exported}["opp-1"] is True
 
 
 def test_date_only_end_includes_selected_day_and_excludes_following_day():

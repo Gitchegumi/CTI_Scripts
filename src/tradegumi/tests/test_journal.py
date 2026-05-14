@@ -7,6 +7,32 @@ import pytest
 from tradegumi import journal
 
 
+class FakeSignal:
+    def __init__(
+        self,
+        *,
+        symbol="EURUSD",
+        direction="BUY",
+        strategy="CTI-v1",
+        confidence=0.8,
+        entry_price=1.1000,
+        signal_price=None,
+        atr=0.0010,
+        setup_condition_first_true_at=None,
+    ):
+        self.symbol = symbol
+        self.direction = direction
+        self.strategy = strategy
+        self.confidence = confidence
+        self.entry_price = entry_price
+        self.signal_price = signal_price if signal_price is not None else entry_price
+        self.stop_loss = entry_price - 0.0020
+        self.take_profit = entry_price + 0.0040
+        self.lot_size = 1.0
+        self.atr = atr
+        self.setup_condition_first_true_at = setup_condition_first_true_at
+
+
 def write_entries(path, entries):
     path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
 
@@ -132,6 +158,137 @@ def test_export_journal_csv_has_required_columns_and_json_nested_values(journal_
     assert rows[0]["criteria"] == '{"risk":true,"trend":false}'
 
 
+def test_append_signal_creates_setup_group_and_trade_outcome_fields(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+
+    signal_id = journal.append_signal(FakeSignal(setup_condition_first_true_at="2026-05-14T13:50:00+00:00"), rr=2.0)
+    entry = journal.read_journal()[0]
+
+    assert entry["signal_id"] == signal_id
+    assert entry["setup_group_id"].startswith("EURUSD:BUY:CTI-v1:")
+    assert entry["is_duplicate_setup"] is False
+    assert entry["entry_valid_at_signal"] is True
+    assert entry["entry_miss_distance"] == {"absolute": 0.0, "atr_normalized": 0.0}
+    assert entry["signal_age_bars"] == 2
+    assert entry["late_signal"] is False
+    assert entry["usable_for_strategy_stats"] is True
+    assert entry["trade_grade"] == "PENDING"
+
+
+def test_append_signal_marks_duplicate_inside_group_window(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:09:59+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal())
+    newest, first = journal.read_journal()
+
+    assert newest["setup_group_id"] == first["setup_group_id"]
+    assert newest["is_duplicate_setup"] is True
+    assert newest["usable_for_strategy_stats"] is False
+    assert newest["trade_grade"] == "DUPLICATE"
+    assert newest["stats_exclusion_reason"] == "duplicate_setup"
+
+
+def test_append_signal_starts_new_group_at_window_boundary(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:10:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal())
+    newest, first = journal.read_journal()
+
+    assert newest["setup_group_id"] != first["setup_group_id"]
+    assert newest["is_duplicate_setup"] is False
+
+
+def test_append_signal_uses_strategy_identity_for_grouping(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(strategy="CTI-v1"))
+    journal.append_signal(FakeSignal(strategy="CTI-v2"))
+    newest, first = journal.read_journal()
+
+    assert newest["setup_group_id"] != first["setup_group_id"]
+    assert newest["is_duplicate_setup"] is False
+
+
+def test_append_signal_marks_late_signal_and_distance(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+
+    journal.append_signal(FakeSignal(entry_price=1.1000, signal_price=1.1010, atr=0.0010))
+    entry = journal.read_journal()[0]
+
+    assert entry["entry_valid_at_signal"] is False
+    assert entry["entry_miss_distance"]["absolute"] == pytest.approx(0.0010)
+    assert entry["entry_miss_distance"]["atr_normalized"] == pytest.approx(1.0)
+    assert entry["late_signal"] is True
+    assert entry["usable_for_strategy_stats"] is False
+    assert entry["trade_grade"] == "LATE_SIGNAL"
+
+
+def test_append_signal_keeps_boundary_price_valid(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+
+    journal.append_signal(FakeSignal(entry_price=1.1000, signal_price=1.10025, atr=0.0010))
+    entry = journal.read_journal()[0]
+
+    assert entry["entry_valid_at_signal"] is True
+    assert entry["late_signal"] is False
+    assert entry["usable_for_strategy_stats"] is True
+
+
+def test_append_signal_zero_atr_leaves_normalized_distance_blank(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+
+    journal.append_signal(FakeSignal(entry_price=1.1000, signal_price=1.1000, atr=0.0))
+    entry = journal.read_journal()[0]
+
+    assert entry["entry_miss_distance"]["absolute"] == 0.0
+    assert entry["entry_miss_distance"]["atr_normalized"] is None
+
+
+def test_append_signal_handles_missing_entry_context(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+    signal = FakeSignal()
+    signal.entry_price = None
+    signal.signal_price = None
+
+    journal.append_signal(signal)
+    entry = journal.read_journal()[0]
+
+    assert entry["entry_valid_at_signal"] is None
+    assert entry["usable_for_strategy_stats"] is False
+    assert entry["trade_grade"] == "INVALID"
+    assert entry["stats_exclusion_reason"] == "missing_entry_context"
+
+
+def test_append_signal_marks_stale_signal(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:20:00+00:00")
+
+    journal.append_signal(FakeSignal(setup_condition_first_true_at="2026-05-14T14:00:00+00:00"))
+    entry = journal.read_journal()[0]
+
+    assert entry["signal_age_bars"] == 4
+    assert entry["usable_for_strategy_stats"] is False
+    assert entry["trade_grade"] == "INVALID"
+    assert entry["stats_exclusion_reason"] == "stale_signal"
+
+
+def test_grade_and_invalidation_update_trade_grade_and_stats(journal_file):
+    write_entries(journal_file, [{"signal_id": "sig-1", "grade": "PENDING", "trade_grade": "PENDING", "usable_for_strategy_stats": True}])
+
+    assert journal.grade_by_signal_id("sig-1", "BE") is True
+    assert journal.read_journal()[0]["trade_grade"] == "BE"
+    assert journal.invalidate_signal("sig-1", "bad setup") is True
+    entry = journal.read_journal()[0]
+    assert entry["grade"] == "INVALID"
+    assert entry["trade_grade"] == "INVALID"
+    assert entry["usable_for_strategy_stats"] is False
+    assert entry["stats_exclusion_reason"] == "manual_invalidated"
+
+
 def test_purge_journal_entries_scopes_to_filter(journal_file):
     write_entries(
         journal_file,
@@ -158,6 +315,12 @@ def test_reset_signal_to_pending_preserves_signal_data_and_notes(journal_file):
                 "signal_id": "sig-1",
                 "symbol": "EURUSD",
                 "grade": "SL_HIT",
+                "trade_grade": "SL_HIT",
+                "entry_valid_at_signal": True,
+                "is_duplicate_setup": False,
+                "late_signal": False,
+                "signal_age_bars": 0,
+                "usable_for_strategy_stats": True,
                 "grade_timestamp": "2026-05-05T10:00:00Z",
                 "notes": "keep this",
                 "outcome": "loss",
@@ -170,6 +333,8 @@ def test_reset_signal_to_pending_preserves_signal_data_and_notes(journal_file):
     assert journal.reset_signal_to_pending("sig-1") is True
     entry = journal.read_journal()[0]
     assert entry["grade"] == "PENDING"
+    assert entry["trade_grade"] == "PENDING"
+    assert entry["usable_for_strategy_stats"] is True
     assert entry["grade_timestamp"] is None
     assert entry["notes"] == "keep this"
     assert entry["lr_1h"] == 0.003

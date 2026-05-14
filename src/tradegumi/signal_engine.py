@@ -90,6 +90,10 @@ class Signal:
     lr_1h: float = 0.0
     lr_15m: float = 0.0
     lr_5m: float = 0.0
+    signal_price: Optional[float] = None
+    suggested_entry: Optional[float] = None
+    entry_tolerance: Optional[float] = None
+    setup_condition_first_true_at: Optional[str] = None
 
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
@@ -881,6 +885,7 @@ class SignalEngine:
         atr_ser = calculate_atr(df)
         atr = atr_ser.iloc[-1]
         entry_price = df["c"].iloc[-1]
+        setup_condition_first_true_at = closed_candle.time.isoformat() if closed_candle else None
 
         if trend == "Uptrend":
             sl = entry_price - (atr * config.SL_ATR_MULTIPLIER)
@@ -917,6 +922,10 @@ class SignalEngine:
             lr_1h=lr_1h,
             lr_15m=lr_15,
             lr_5m=lr_5,
+            signal_price=round(entry_price, _price_decimals(entry_price)),
+            suggested_entry=round(entry_price, _price_decimals(entry_price)),
+            entry_tolerance=round(atr * config.SIGNAL_ENTRY_TOLERANCE_ATR, _price_decimals(entry_price)),
+            setup_condition_first_true_at=setup_condition_first_true_at,
         ), criteria, "emitted", confidence
 
     def _indeterminate_diagnostic(

@@ -19,7 +19,16 @@ interface JournalEntry {
   atr: number;
   rr: number | null;
   signal_timestamp: string;
-  grade: "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+  grade: TradeGrade | "MANUAL_CLOSE" | "EXPIRED";
+  trade_grade?: TradeGrade;
+  setup_group_id?: string;
+  is_duplicate_setup?: boolean;
+  entry_valid_at_signal?: boolean | null;
+  entry_miss_distance?: { absolute?: number | null; atr_normalized?: number | null };
+  signal_age_bars?: number;
+  late_signal?: boolean;
+  usable_for_strategy_stats?: boolean;
+  stats_exclusion_reason?: string | null;
   grade_timestamp: string | null;
   notes: string;
   discord_msg_id: string | null;
@@ -32,13 +41,24 @@ interface TradeGroup {
   strategy: string;
   entries: JournalEntry[];   // oldest → newest
   avgConfidence: number;
-  grade: JournalEntry["grade"];
+  grade: TradeGrade | "MANUAL_CLOSE" | "EXPIRED";
   firstTs: string;
   lastTs: string;
   rr: number | null;         // from the first entry
 }
 
-type GradeFilter = "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+type TradeGrade = "PENDING" | "TP_HIT" | "SL_HIT" | "BE" | "MISSED_ENTRY" | "LATE_SIGNAL" | "DUPLICATE" | "INVALID";
+type GradeFilter = "ALL" | TradeGrade | "MANUAL_CLOSE" | "EXPIRED";
+
+function displayGrade(entry: JournalEntry): TradeGroup["grade"] {
+  return entry.trade_grade ?? entry.grade ?? "PENDING";
+}
+
+function normalizedTradeGrade(grade: JournalEntry["grade"]): TradeGrade {
+  if (grade === "MANUAL_CLOSE") return "BE";
+  if (grade === "EXPIRED") return "MISSED_ENTRY";
+  return grade;
+}
 
 // ── Grouping logic ────────────────────────────────────────────────────────────
 
@@ -62,6 +82,18 @@ function groupIntoTrades(entries: JournalEntry[]): TradeGroup[] {
   const groups: TradeGroup[] = [];
 
   for (const entry of sorted) {
+    const explicitGroup = entry.setup_group_id
+      ? groups.find(g => g.groupId === entry.setup_group_id)
+      : undefined;
+    if (explicitGroup) {
+      explicitGroup.entries.push(entry);
+      explicitGroup.lastTs = entry.signal_timestamp;
+      explicitGroup.avgConfidence =
+        explicitGroup.entries.reduce((s, e) => s + e.confidence, 0) / explicitGroup.entries.length;
+      if (displayGrade(entry) !== "PENDING") explicitGroup.grade = displayGrade(entry);
+      continue;
+    }
+
     // Find the most recent open group for this symbol+direction
     const lastGroup = [...groups].reverse().find(
       g => g.symbol === entry.symbol && g.direction === entry.direction
@@ -75,19 +107,19 @@ function groupIntoTrades(entries: JournalEntry[]): TradeGroup[] {
         lastGroup.avgConfidence =
           lastGroup.entries.reduce((s, e) => s + e.confidence, 0) / lastGroup.entries.length;
         // Grade: most recent non-PENDING wins; otherwise keep what we have
-        if (entry.grade !== "PENDING") lastGroup.grade = entry.grade;
+        if (displayGrade(entry) !== "PENDING") lastGroup.grade = displayGrade(entry);
         continue;
       }
     }
 
     groups.push({
-      groupId: entry.signal_id,
+      groupId: entry.setup_group_id ?? entry.signal_id,
       symbol: entry.symbol,
       direction: entry.direction,
       strategy: entry.strategy ?? "CTI-v1",
       entries: [entry],
       avgConfidence: entry.confidence,
-      grade: entry.grade,
+      grade: displayGrade(entry),
       firstTs: entry.signal_timestamp,
       lastTs: entry.signal_timestamp,
       rr: entry.rr,
@@ -157,6 +189,11 @@ function fallbackExportFilename(filter: GradeFilter, start: string, end: string)
 // ── Grade badge ───────────────────────────────────────────────────────────────
 
 const GRADE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  BE:           { bg: "bg-blue-900/40 border-blue-700",     text: "text-blue-300",   label: "BE" },
+  MISSED_ENTRY: { bg: "bg-orange-900/40 border-orange-700", text: "text-orange-300", label: "Missed" },
+  LATE_SIGNAL:  { bg: "bg-orange-900/40 border-orange-700", text: "text-orange-300", label: "Late" },
+  DUPLICATE:    { bg: "bg-slate-800 border-slate-600",      text: "text-slate-300",  label: "Duplicate" },
+  INVALID:      { bg: "bg-zinc-900 border-zinc-600",        text: "text-zinc-300",   label: "Invalid" },
   TP_HIT:       { bg: "bg-green-900/40 border-green-700",   text: "text-green-400",  label: "✅ TP Hit" },
   SL_HIT:       { bg: "bg-red-900/40 border-red-700",       text: "text-red-400",    label: "❌ SL Hit" },
   MANUAL_CLOSE: { bg: "bg-yellow-900/40 border-yellow-700", text: "text-yellow-400", label: "⚠️ Manual" },
@@ -176,10 +213,10 @@ function GradeBadge({ grade }: { grade: string }) {
 // ── Stats bar — counts per trade group, not per raw entry ────────────────────
 
 function StatsBar({ groups }: { groups: TradeGroup[] }) {
-  const graded = groups.filter(g => g.grade !== "PENDING" && g.grade !== "EXPIRED");
+  const graded = groups.filter(g => !["PENDING", "EXPIRED", "DUPLICATE", "MISSED_ENTRY", "LATE_SIGNAL", "INVALID"].includes(g.grade));
   const tp = graded.filter(g => g.grade === "TP_HIT").length;
   const sl = graded.filter(g => g.grade === "SL_HIT").length;
-  const manual = graded.filter(g => g.grade === "MANUAL_CLOSE").length;
+  const manual = graded.filter(g => g.grade === "MANUAL_CLOSE" || g.grade === "BE").length;
   const winRate = graded.length > 0 ? Math.round((tp / graded.length) * 100) : null;
 
   const avgRR = (() => {
@@ -213,6 +250,7 @@ function StatsBar({ groups }: { groups: TradeGroup[] }) {
 // ── Grade buttons ─────────────────────────────────────────────────────────────
 
 const GRADE_BUTTONS: { grade: JournalEntry["grade"]; label: string; style: string }[] = [
+  { grade: "BE",           label: "BE",        style: "border-blue-700 text-blue-300 hover:bg-blue-900/30" },
   { grade: "TP_HIT",       label: "✅ TP",     style: "border-green-700 text-green-400 hover:bg-green-900/30" },
   { grade: "SL_HIT",       label: "❌ SL",     style: "border-red-700 text-red-400 hover:bg-red-900/30" },
   { grade: "MANUAL_CLOSE", label: "⚠️ Manual", style: "border-yellow-700 text-yellow-400 hover:bg-yellow-900/30" },
@@ -228,6 +266,7 @@ function TradeGroupCard({
   onGrade,
   onNotes,
   onReset,
+  onInvalidate,
 }: {
   group: TradeGroup;
   expanded: boolean;
@@ -235,6 +274,7 @@ function TradeGroupCard({
   onGrade: (group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) => Promise<void>;
   onNotes: (group: TradeGroup, notes: string, masterSignalId: string) => Promise<void>;
   onReset: (group: TradeGroup, masterSignalId: string) => Promise<void>;
+  onInvalidate: (group: TradeGroup, masterSignalId: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [noteBusy] = useState(false);
@@ -259,6 +299,12 @@ function TradeGroupCard({
   async function handleReset() {
     setBusy("PENDING");
     try { await onReset(group, masterSignalId); }
+    finally { setBusy(null); }
+  }
+
+  async function handleInvalidate() {
+    setBusy("INVALID");
+    try { await onInvalidate(group, masterSignalId); }
     finally { setBusy(null); }
   }
 
@@ -303,7 +349,21 @@ function TradeGroupCard({
               <span className="text-green-400">{fmtPrice(master.take_profit)}</span>
             </div>
             <div className="text-slate-400">R:R</div>
-            <div className="text-white text-right">{master.rr != null ? master.rr.toFixed(1) : "—"}</div>
+            <div className="text-white text-right">{master.rr != null ? master.rr.toFixed(1) : "N/A"}</div>
+            <div className="text-slate-400">Entry Valid</div>
+            <div className="text-white text-right">
+              {master.entry_valid_at_signal == null ? "Unknown" : master.entry_valid_at_signal ? "Yes" : "No"}
+            </div>
+            <div className="text-slate-400">Miss / ATR</div>
+            <div className="text-white text-right">
+              {master.entry_miss_distance?.absolute != null ? master.entry_miss_distance.absolute.toFixed(5) : "Unknown"}
+              {" / "}
+              {master.entry_miss_distance?.atr_normalized != null ? master.entry_miss_distance.atr_normalized.toFixed(2) : "Unknown"}
+            </div>
+            <div className="text-slate-400">Stats Use</div>
+            <div className={master.usable_for_strategy_stats ? "text-green-300 text-right" : "text-orange-300 text-right"}>
+              {master.usable_for_strategy_stats ? "Included" : (master.stats_exclusion_reason ?? "Excluded")}
+            </div>
           </div>
         );
       })()}
@@ -329,6 +389,15 @@ function TradeGroupCard({
             className="col-span-2 text-xs px-2 py-1 rounded border border-blue-700 text-blue-300 hover:bg-blue-900/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy === "PENDING" ? "..." : "Reset to Pending"}
+          </button>
+        )}
+        {group.grade !== "INVALID" && (
+          <button
+            onClick={handleInvalidate}
+            disabled={!!busy}
+            className="col-span-2 text-xs px-2 py-1 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-900/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy === "INVALID" ? "..." : "Mark Invalid"}
           </button>
         )}
       </div>
@@ -395,7 +464,7 @@ function TradeGroupCard({
                     </span>
                     {isMaster && <span className="text-blue-400 text-[10px] font-semibold uppercase">master</span>}
                   </label>
-                  <GradeBadge grade={e.grade} />
+                  <GradeBadge grade={displayGrade(e)} />
                 </div>
                 <div className="text-slate-500">Confidence</div>
                 <div className="text-white text-right">{Math.round(e.confidence * 100)}%</div>
@@ -432,6 +501,11 @@ function FilterBar({
     { value: "PENDING",      label: "Pending" },
     { value: "TP_HIT",       label: "TP Hit" },
     { value: "SL_HIT",       label: "SL Hit" },
+    { value: "BE",           label: "BE" },
+    { value: "DUPLICATE",    label: "Duplicate" },
+    { value: "MISSED_ENTRY", label: "Missed" },
+    { value: "LATE_SIGNAL",  label: "Late" },
+    { value: "INVALID",      label: "Invalid" },
     { value: "MANUAL_CLOSE", label: "Manual" },
     { value: "EXPIRED",      label: "Expired" },
   ];
@@ -506,7 +580,7 @@ export default function JournalPage() {
   }
   async function handleGradeGroup(group: TradeGroup, grade: JournalEntry["grade"], masterSignalId: string) {
     // Optimistic: update only the master entry
-    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade } : e));
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade, trade_grade: normalizedTradeGrade(grade) } : e));
     const res = await fetch("/api/journal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -519,8 +593,26 @@ export default function JournalPage() {
     }
   }
 
+  async function handleInvalidateGroup(group: TradeGroup, masterSignalId: string) {
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? {
+      ...e,
+      grade: "INVALID",
+      trade_grade: "INVALID",
+      usable_for_strategy_stats: false,
+      stats_exclusion_reason: "manual_invalidated",
+    } : e));
+    const res = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: masterSignalId, invalidate: true }),
+    });
+    if (!res.ok) {
+      await loadJournal();
+    }
+  }
+
   async function handleResetGroup(group: TradeGroup, masterSignalId: string) {
-    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade: "PENDING", grade_timestamp: null } : e));
+    setEntries(prev => prev.map(e => e.signal_id === masterSignalId ? { ...e, grade: "PENDING", trade_grade: "PENDING", grade_timestamp: null } : e));
     const res = await fetch("/api/journal/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -722,6 +814,7 @@ export default function JournalPage() {
                           onGrade={handleGradeGroup}
                           onNotes={handleNotesGroup}
                           onReset={handleResetGroup}
+                          onInvalidate={handleInvalidateGroup}
                         />
                       ))}
                     </div>

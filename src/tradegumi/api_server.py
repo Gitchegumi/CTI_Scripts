@@ -619,6 +619,19 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Signal not found or invalid grade"}, 404)
 
+        elif path == "/api/journal/invalidate":
+            signal_id = body.get("signal_id", "").strip()
+            notes = body.get("notes", "").strip()
+            if not signal_id:
+                self._send_json({"error": "signal_id is required"}, 400)
+                return
+            from tradegumi.journal import invalidate_signal
+            ok = invalidate_signal(signal_id, notes)
+            if ok:
+                self._send_json({"ok": True})
+            else:
+                self._send_json({"error": "Signal not found"}, 404)
+
         elif path == "/api/journal/notes":
             signal_id = body.get("signal_id", "").strip()
             notes = body.get("notes", "").strip()

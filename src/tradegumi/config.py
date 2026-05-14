@@ -42,6 +42,9 @@ JOURNAL_TOKEN = os.getenv("JOURNAL_TOKEN", "")
 STRATEGY_METRICS_RETENTION_DAYS = int(os.getenv("STRATEGY_METRICS_RETENTION_DAYS", "90"))
 STRATEGY_METRICS_DEFAULT_DAYS = int(os.getenv("STRATEGY_METRICS_DEFAULT_DAYS", "7"))
 STRATEGY_METRICS_MAX_OPPORTUNITIES = int(os.getenv("STRATEGY_METRICS_MAX_OPPORTUNITIES", "1000"))
+SIGNAL_SETUP_GROUP_WINDOW_MINUTES = int(os.getenv("SIGNAL_SETUP_GROUP_WINDOW_MINUTES", "10"))
+SIGNAL_ENTRY_TOLERANCE_ATR = float(os.getenv("SIGNAL_ENTRY_TOLERANCE_ATR", "0.25"))
+SIGNAL_STALE_BARS = int(os.getenv("SIGNAL_STALE_BARS", "3"))
 
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
