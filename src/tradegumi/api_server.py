@@ -69,7 +69,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             log.debug("API: client disconnected before JSON response completed")
             self.close_connection = True
 
-    def _send_text(self, body: str, content_type: str = "text/plain; charset=utf-8", status: int = 200):
+    def _send_text(
+        self,
+        body: str,
+        content_type: str = "text/plain; charset=utf-8",
+        status: int = 200,
+        extra_headers: Optional[dict[str, str]] = None,
+    ):
         """Send a text response for non-JSON exports."""
         encoded = body.encode("utf-8")
         try:
@@ -77,6 +83,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Access-Control-Allow-Origin", "*")
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(encoded)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
@@ -266,9 +274,27 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             try:
-                from tradegumi.journal import export_journal_csv
-                csv_body = export_journal_csv(self._get_query_param("grade"))
-                self._send_text(csv_body, "text/csv; charset=utf-8")
+                from tradegumi.journal import SignalJournalExportSelection, build_journal_export
+                selection = SignalJournalExportSelection(
+                    grade=self._get_query_param("grade"),
+                    start=self._get_query_param("start"),
+                    end=self._get_query_param("end"),
+                    symbol=self._get_query_param("symbol"),
+                    status=self._get_query_param("status"),
+                    final_decision=self._get_query_param("final_decision"),
+                    strategy=self._get_query_param("strategy"),
+                    mode=self._get_query_param("mode"),
+                    graded_state=self._get_query_param("graded_state"),
+                )
+                export = build_journal_export(selection)
+                if export.record_count == 0:
+                    self._send_json({"error": "No Signal Journal records match the selected export range."}, 404)
+                    return
+                self._send_text(
+                    export.csv_text,
+                    export.content_type,
+                    extra_headers={"Content-Disposition": export.content_disposition},
+                )
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
             except Exception as e:

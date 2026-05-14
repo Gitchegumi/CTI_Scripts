@@ -39,7 +39,8 @@ import io
 import json
 import logging
 import threading
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -55,7 +56,21 @@ EXPORT_FIELDS = [
     "symbol",
     "direction",
     "strategy",
+    "opportunity_id",
+    "timeframe",
+    "mode",
+    "trend",
+    "final_decision",
+    "decision_reason",
     "confidence",
+    "failed_criteria_count",
+    "near_miss",
+    "near_miss_reason",
+    "first_blocker",
+    "all_blockers",
+    "blocking_layer",
+    "evaluated_at",
+    "created_at",
     "entry_price",
     "stop_loss",
     "take_profit",
@@ -63,8 +78,17 @@ EXPORT_FIELDS = [
     "atr",
     "rr",
     "signal_timestamp",
+    "status",
     "grade",
+    "pending_state",
     "grade_timestamp",
+    "trade_result",
+    "outcome",
+    "outcome_status",
+    "pnl",
+    "pnl_percent",
+    "profit_loss",
+    "profit_loss_percent",
     "notes",
     "discord_msg_id",
     "stochrsi_k",
@@ -79,10 +103,53 @@ EXPORT_FIELDS = [
     "lr_15m",
     "lr_5m",
 ]
+OPTIONAL_EXPORT_FILTERS = {
+    "symbol": ("symbol",),
+    "status": ("status", "grade"),
+    "final_decision": ("final_decision",),
+    "strategy": ("strategy",),
+    "mode": ("mode",),
+}
 
 # Protects all reads and writes to JOURNAL_FILE across threads
 # (trading loop thread appends; Discord bot thread grades).
 _lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class SignalJournalExportSelection:
+    """Operator-selected scope used to filter Signal Journal CSV exports.
+
+    Date/time boundaries are inclusive and apply to `evaluated_at` when present,
+    then `created_at`, then legacy `signal_timestamp` without mutating records.
+    Optional string filters are reserved for visible dashboard filters and are
+    ignored when unset.
+    """
+
+    grade: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    symbol: Optional[str] = None
+    status: Optional[str] = None
+    final_decision: Optional[str] = None
+    strategy: Optional[str] = None
+    mode: Optional[str] = None
+    graded_state: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SignalJournalExportResult:
+    """CSV export payload plus route metadata for browser downloads."""
+
+    csv_text: str
+    filename: str
+    record_count: int
+    content_type: str = "text/csv; charset=utf-8"
+
+    @property
+    def content_disposition(self) -> str:
+        """Return the attachment header value for the generated CSV file."""
+        return f'attachment; filename="{self.filename}"'
 
 
 def _now_iso() -> str:
@@ -126,6 +193,110 @@ def _normalize_filter_grade(grade: Optional[str]) -> Optional[str]:
     if value not in FILTER_GRADES:
         raise ValueError(f"Invalid grade filter: {grade}")
     return value
+
+
+def _parse_export_datetime(value: Optional[str], field_name: str) -> Optional[datetime]:
+    """Parse an export date/time boundary into a comparable UTC-naive value."""
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"Invalid {field_name} timestamp: {value}") from exc
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _entry_analysis_datetime(entry: dict[str, Any]) -> Optional[datetime]:
+    """Return the timestamp used to decide whether a record is in export range."""
+    for key in ("evaluated_at", "created_at", "signal_timestamp"):
+        value = entry.get(key)
+        if value:
+            try:
+                return _parse_export_datetime(str(value), key)
+            except ValueError:
+                log.warning("Skipping malformed journal timestamp %s=%r", key, value)
+                return None
+    return None
+
+
+def _normalize_csv_value(value: Any) -> Any:
+    """Convert nested CSV values into deterministic scalar cells."""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    if value is None:
+        return ""
+    return value
+
+
+def _matches_optional_filter(entry: dict[str, Any], name: str, value: Optional[str]) -> bool:
+    """Return whether one optional export filter matches the journal entry."""
+    if value is None or not str(value).strip():
+        return True
+    expected = str(value).strip().lower()
+    if name == "graded_state":
+        grade = str(entry.get("grade") or PENDING_GRADE).upper()
+        if expected == "pending":
+            return grade == PENDING_GRADE
+        if expected == "graded":
+            return grade != PENDING_GRADE
+        raise ValueError(f"Invalid graded_state filter: {value}")
+    fields = OPTIONAL_EXPORT_FILTERS[name]
+    return any(str(entry.get(field) or "").strip().lower() == expected for field in fields)
+
+
+def _validate_export_selection(selection: SignalJournalExportSelection) -> None:
+    """Validate export filters even when the journal has no matching entries."""
+    _normalize_filter_grade(selection.grade)
+    start = _parse_export_datetime(selection.start, "start")
+    end = _parse_export_datetime(selection.end, "end")
+    if start and end and start > end:
+        raise ValueError("start must be before end")
+    if selection.graded_state and str(selection.graded_state).strip().lower() not in {"pending", "graded"}:
+        raise ValueError(f"Invalid graded_state filter: {selection.graded_state}")
+
+
+def _entry_matches_selection(entry: dict[str, Any], selection: SignalJournalExportSelection) -> bool:
+    """Return whether an entry belongs in the selected export scope."""
+    if not _entry_matches_grade(entry, selection.grade):
+        return False
+    for name in OPTIONAL_EXPORT_FILTERS:
+        if not _matches_optional_filter(entry, name, getattr(selection, name)):
+            return False
+    if not _matches_optional_filter(entry, "graded_state", selection.graded_state):
+        return False
+
+    start = _parse_export_datetime(selection.start, "start")
+    end = _parse_export_datetime(selection.end, "end")
+    if start and end and start > end:
+        raise ValueError("start must be before end")
+    if not start and not end:
+        return True
+
+    timestamp = _entry_analysis_datetime(entry)
+    if timestamp is None:
+        return False
+    if start and timestamp < start:
+        return False
+    if end and timestamp > end:
+        return False
+    return True
+
+
+def _export_filename(selection: SignalJournalExportSelection) -> str:
+    """Build a deterministic Signal Journal export filename for the selection."""
+    start = _parse_export_datetime(selection.start, "start")
+    end = _parse_export_datetime(selection.end, "end")
+    if start and end:
+        return f"signal-journal-{start.date().isoformat()}-to-{end.date().isoformat()}.csv"
+    if start or end:
+        return "signal-journal-selected-range.csv"
+    grade = _normalize_filter_grade(selection.grade)
+    suffix = (grade or "all").lower().replace("_", "-")
+    today = datetime.now(timezone.utc).date().isoformat()
+    return f"signal-journal-{suffix}-{today}.csv"
 
 
 def _entry_matches_grade(entry: dict[str, Any], grade: Optional[str]) -> bool:
@@ -283,10 +454,12 @@ def read_journal() -> list:
     return list(reversed(entries))
 
 
-def export_journal_csv(grade: Optional[str] = None) -> str:
-    """Export journal entries as optimization-ready CSV, optionally scoped by grade."""
+def build_journal_export(selection: Optional[SignalJournalExportSelection] = None) -> SignalJournalExportResult:
+    """Build a deterministic Signal Journal CSV export for a selected scope."""
+    selection = selection or SignalJournalExportSelection()
+    _validate_export_selection(selection)
     with _lock:
-        entries = [entry for entry in _read_entries_oldest_first() if _entry_matches_grade(entry, grade)]
+        entries = [entry for entry in _read_entries_oldest_first() if _entry_matches_selection(entry, selection)]
 
     extras = sorted({key for entry in entries for key in entry.keys()} - set(EXPORT_FIELDS))
     fields = EXPORT_FIELDS + extras
@@ -294,8 +467,14 @@ def export_journal_csv(grade: Optional[str] = None) -> str:
     writer = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for entry in entries:
-        writer.writerow({key: entry.get(key) for key in fields})
-    return out.getvalue()
+        writer.writerow({key: _normalize_csv_value(entry.get(key)) for key in fields})
+    return SignalJournalExportResult(out.getvalue(), _export_filename(selection), len(entries))
+
+
+def export_journal_csv(grade: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None) -> str:
+    """Export journal entries as optimization-ready CSV, scoped by grade/range."""
+    selection = SignalJournalExportSelection(grade=grade, start=start, end=end)
+    return build_journal_export(selection).csv_text
 
 
 def purge_journal_entries(grade: Optional[str] = None) -> dict[str, int]:

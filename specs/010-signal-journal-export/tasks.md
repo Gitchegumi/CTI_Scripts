@@ -11,9 +11,9 @@
 
 **Purpose**: Confirm current export surface and validation commands before changing behavior.
 
-- [ ] T001 Inspect current Signal Journal export implementation in `src/tradegumi/journal.py`, `src/tradegumi/api_server.py`, `dashboard/src/app/api/journal/export/route.ts`, and `dashboard/src/app/journal/page.tsx`
-- [ ] T002 [P] Confirm existing dashboard export patterns in `dashboard/src/app/manual-trades/page.tsx` and `dashboard/src/app/strategy-metrics/page.tsx`
-- [ ] T003 [P] Confirm focused backend test conventions in `src/tradegumi/tests/test_journal.py`
+- [X] T001 Inspect current Signal Journal export implementation in `src/tradegumi/journal.py`, `src/tradegumi/api_server.py`, `dashboard/src/app/api/journal/export/route.ts`, and `dashboard/src/app/journal/page.tsx`
+- [X] T002 [P] Confirm existing dashboard export patterns in `dashboard/src/app/manual-trades/page.tsx` and `dashboard/src/app/strategy-metrics/page.tsx`
+- [X] T003 [P] Confirm focused backend test conventions in `src/tradegumi/tests/test_journal.py`
 
 ---
 
@@ -23,10 +23,10 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Add `SignalJournalExportSelection` and `SignalJournalExportResult` helpers with useful docstrings in `src/tradegumi/journal.py`
-- [ ] T005 Add timestamp parsing and per-record analysis timestamp selection helpers with useful docstrings in `src/tradegumi/journal.py`
-- [ ] T006 Add deterministic CSV cell normalization for nested/list/dict values in `src/tradegumi/journal.py`
-- [ ] T007 [P] Update Signal Journal export scope type definitions in `dashboard/src/types/index.ts`
+- [X] T004 Add `SignalJournalExportSelection` and `SignalJournalExportResult` helpers with useful docstrings in `src/tradegumi/journal.py`
+- [X] T005 Add timestamp parsing and per-record analysis timestamp selection helpers with useful docstrings in `src/tradegumi/journal.py`
+- [X] T006 Add deterministic CSV cell normalization for nested/list/dict values in `src/tradegumi/journal.py`
+- [X] T007 [P] Update Signal Journal export scope type definitions in `dashboard/src/types/index.ts`
 
 **Checkpoint**: Export helper can represent scope, timestamps, and deterministic CSV values.
 
@@ -40,15 +40,15 @@
 
 ### Tests for User Story 1
 
-- [ ] T008 [P] [US1] Add backend export result/header-focused unit tests in `src/tradegumi/tests/test_journal.py`
-- [ ] T009 [P] [US1] Add dashboard export handler checks for Blob download and filename parsing in `dashboard/src/app/journal/page.tsx` if local test infrastructure exists; otherwise document manual coverage in `specs/010-signal-journal-export/quickstart.md`
+- [X] T008 [P] [US1] Add backend export result/header-focused unit tests in `src/tradegumi/tests/test_journal.py`
+- [X] T009 [P] [US1] Add dashboard export handler checks for Blob download and filename parsing in `dashboard/src/app/journal/page.tsx` if local test infrastructure exists; otherwise document manual coverage in `specs/010-signal-journal-export/quickstart.md`
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Update `export_journal_csv` or equivalent helper in `src/tradegumi/journal.py` to return CSV plus matching-record count and filename metadata
-- [ ] T011 [US1] Update `/api/journal/export` in `src/tradegumi/api_server.py` to return `Content-Type`, `Content-Disposition`, and `Content-Length` for CSV attachments
-- [ ] T012 [US1] Update `dashboard/src/app/api/journal/export/route.ts` to forward upstream file status, body, `Content-Type`, and `Content-Disposition`
-- [ ] T013 [US1] Update `exportJournal` in `dashboard/src/app/journal/page.tsx` to prefer the `Content-Disposition` filename, create a Blob download, and revoke the object URL after click
+- [X] T010 [US1] Update `export_journal_csv` or equivalent helper in `src/tradegumi/journal.py` to return CSV plus matching-record count and filename metadata
+- [X] T011 [US1] Update `/api/journal/export` in `src/tradegumi/api_server.py` to return `Content-Type`, `Content-Disposition`, and `Content-Length` for CSV attachments
+- [X] T012 [US1] Update `dashboard/src/app/api/journal/export/route.ts` to forward upstream file status, body, `Content-Type`, and `Content-Disposition`
+- [X] T013 [US1] Update `exportJournal` in `dashboard/src/app/journal/page.tsx` to prefer the `Content-Disposition` filename, create a Blob download, and revoke the object URL after click
 
 **Checkpoint**: User Story 1 is functional and testable independently.
 
@@ -62,16 +62,16 @@
 
 ### Tests for User Story 2
 
-- [ ] T014 [P] [US2] Add backend range-filter tests for `evaluated_at`, `created_at`, and legacy `signal_timestamp` fallback in `src/tradegumi/tests/test_journal.py`
-- [ ] T015 [P] [US2] Add invalid-range and no-records tests in `src/tradegumi/tests/test_journal.py`
+- [X] T014 [P] [US2] Add backend range-filter tests for `evaluated_at`, `created_at`, and legacy `signal_timestamp` fallback in `src/tradegumi/tests/test_journal.py`
+- [X] T015 [P] [US2] Add invalid-range and no-records tests in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 2
 
-- [ ] T016 [US2] Implement inclusive `start`/`end` filtering in `src/tradegumi/journal.py`
-- [ ] T017 [US2] Update `/api/journal/export` query handling in `src/tradegumi/api_server.py` for `start` and `end`, including invalid-range errors and no-records JSON response
-- [ ] T018 [US2] Add date/time export controls and local invalid-range guard in `dashboard/src/app/journal/page.tsx`
-- [ ] T019 [US2] Send selected `start` and `end` parameters from `dashboard/src/app/journal/page.tsx` through `dashboard/src/app/api/journal/export/route.ts`
-- [ ] T020 [US2] Ensure empty export results display a clear message and do not create a download link in `dashboard/src/app/journal/page.tsx`
+- [X] T016 [US2] Implement inclusive `start`/`end` filtering in `src/tradegumi/journal.py`
+- [X] T017 [US2] Update `/api/journal/export` query handling in `src/tradegumi/api_server.py` for `start` and `end`, including invalid-range errors and no-records JSON response
+- [X] T018 [US2] Add date/time export controls and local invalid-range guard in `dashboard/src/app/journal/page.tsx`
+- [X] T019 [US2] Send selected `start` and `end` parameters from `dashboard/src/app/journal/page.tsx` through `dashboard/src/app/api/journal/export/route.ts`
+- [X] T020 [US2] Ensure empty export results display a clear message and do not create a download link in `dashboard/src/app/journal/page.tsx`
 
 **Checkpoint**: User Stories 1 and 2 both work independently.
 
@@ -85,14 +85,14 @@
 
 ### Tests for User Story 3
 
-- [ ] T021 [P] [US3] Add combined grade-plus-range export tests in `src/tradegumi/tests/test_journal.py`
-- [ ] T022 [P] [US3] Add deterministic field-order and required optimization-column tests in `src/tradegumi/tests/test_journal.py`
+- [X] T021 [P] [US3] Add combined grade-plus-range export tests in `src/tradegumi/tests/test_journal.py`
+- [X] T022 [P] [US3] Add deterministic field-order and required optimization-column tests in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] Extend `src/tradegumi/journal.py` export fields to include required optimization-analysis columns while preserving deterministic extra fields
-- [ ] T024 [US3] Ensure `dashboard/src/app/journal/page.tsx` sends the existing grade filter with range parameters and does not alter grading, reset, purge, grouping, or pagination behavior
-- [ ] T025 [US3] Ensure `dashboard/src/app/api/journal/export/route.ts` forwards all current and reserved export filter query parameters without dropping file headers
+- [X] T023 [US3] Extend `src/tradegumi/journal.py` export fields to include required optimization-analysis columns while preserving deterministic extra fields
+- [X] T024 [US3] Ensure `dashboard/src/app/journal/page.tsx` sends the existing grade filter with range parameters and does not alter grading, reset, purge, grouping, or pagination behavior
+- [X] T025 [US3] Ensure `dashboard/src/app/api/journal/export/route.ts` forwards all current and reserved export filter query parameters without dropping file headers
 
 **Checkpoint**: All user stories are independently functional.
 
@@ -102,12 +102,12 @@
 
 **Purpose**: Documentation, validation, and final quality checks.
 
-- [ ] T026 [P] Update Signal Journal export documentation in `docs/signal-journal.md`
-- [ ] T027 Review changed Python code for intention-revealing names, simple control flow, and useful docstrings in `src/tradegumi/journal.py` and `src/tradegumi/api_server.py`
-- [ ] T028 Review changed dashboard UI for responsive controls, non-overlapping text, and preservation of existing Signal Journal workflows in `dashboard/src/app/journal/page.tsx`
-- [ ] T029 Run focused backend tests with `python -m pytest src/tradegumi/tests/test_journal.py`
-- [ ] T030 Run dashboard lint with `npm run lint` from `dashboard/`
-- [ ] T031 Run dashboard build with `npm run build` from `dashboard/`
+- [X] T026 [P] Update Signal Journal export documentation in `docs/signal-journal.md`
+- [X] T027 Review changed Python code for intention-revealing names, simple control flow, and useful docstrings in `src/tradegumi/journal.py` and `src/tradegumi/api_server.py`
+- [X] T028 Review changed dashboard UI for responsive controls, non-overlapping text, and preservation of existing Signal Journal workflows in `dashboard/src/app/journal/page.tsx`
+- [X] T029 Run focused backend tests with `python -m pytest src/tradegumi/tests/test_journal.py`
+- [X] T030 Run dashboard lint with `npm run lint` from `dashboard/`
+- [X] T031 Run dashboard build with `npm run build` from `dashboard/`
 - [ ] T032 Run manual quickstart validation from `specs/010-signal-journal-export/quickstart.md`
 - [ ] T033 Submit PR with DockeGumi as reviewer
 

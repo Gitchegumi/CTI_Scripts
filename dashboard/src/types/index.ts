@@ -201,6 +201,14 @@ export interface AgentExport {
 
 export interface SignalJournalExportScope {
   grade?: "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+  start?: string;
+  end?: string;
+  symbol?: string;
+  status?: string;
+  final_decision?: string;
+  strategy?: string;
+  mode?: string;
+  graded_state?: "pending" | "graded";
   format: "csv";
 }
 
