@@ -38,6 +38,8 @@ interface TradeGroup {
   rr: number | null;         // from the first entry
 }
 
+type GradeFilter = "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+
 // ── Grouping logic ────────────────────────────────────────────────────────────
 
 function isSameTrade(prev: JournalEntry, curr: JournalEntry): boolean {
@@ -127,6 +129,29 @@ function dateGroupKey(ts: string): string {
       timeZone: "America/Chicago",
     });
   } catch { return ts.slice(0, 10); }
+}
+
+function toExportTimestamp(value: string): string | null {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) throw new Error("Choose a valid export date/time range.");
+  return timestamp.toISOString();
+}
+
+function filenameFromDisposition(disposition: string | null): string | null {
+  if (!disposition) return null;
+  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1].replace(/"/g, ""));
+  const quoted = disposition.match(/filename="([^"]+)"/i);
+  if (quoted?.[1]) return quoted[1];
+  const plain = disposition.match(/filename=([^;]+)/i);
+  return plain?.[1]?.trim().replace(/^"|"$/g, "") ?? null;
+}
+
+function fallbackExportFilename(filter: GradeFilter, start: string, end: string): string {
+  if (start && end) return `signal-journal-${start.slice(0, 10)}-to-${end.slice(0, 10)}.csv`;
+  if (start || end) return "signal-journal-selected-range.csv";
+  return `signal-journal-${filter.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
 }
 
 // ── Grade badge ───────────────────────────────────────────────────────────────
@@ -393,8 +418,6 @@ function TradeGroupCard({
 
 // ── Filter bar ────────────────────────────────────────────────────────────────
 
-type GradeFilter = "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
-
 function FilterBar({
   active,
   onChange,
@@ -444,10 +467,13 @@ export default function JournalPage() {
   const [entries, setEntries]   = useState<JournalEntry[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
+  const [exportMessage, setExportMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [filter, setFilter]     = useState<GradeFilter>("ALL");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [purging, setPurging] = useState(false);
+  const [exportStart, setExportStart] = useState("");
+  const [exportEnd, setExportEnd] = useState("");
 
   const loadJournal = useCallback(async () => {
     try {
@@ -554,19 +580,34 @@ export default function JournalPage() {
 
   async function exportJournal() {
     setExporting(true);
+    setExportMessage(null);
     try {
-      const qs = filter === "ALL" ? "" : `?grade=${encodeURIComponent(filter)}`;
+      if (exportStart && exportEnd && new Date(exportStart) > new Date(exportEnd)) {
+        throw new Error("Export start must be before export end.");
+      }
+      const params = new URLSearchParams();
+      if (filter !== "ALL") params.set("grade", filter);
+      const start = toExportTimestamp(exportStart);
+      const end = toExportTimestamp(exportEnd);
+      if (start) params.set("start", start);
+      if (end) params.set("end", end);
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`/api/journal/export${qs}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await readApiError(res));
       const blob = await res.blob();
+      if (blob.size === 0) throw new Error("No Signal Journal records match the selected export range.");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `signal-journal-${filter.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = filenameFromDisposition(res.headers.get("Content-Disposition"))
+        ?? fallbackExportFilename(filter, exportStart, exportEnd);
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setExportMessage({ tone: "info", text: `Downloaded ${link.download}.` });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to export journal");
+      setExportMessage({ tone: "error", text: e instanceof Error ? e.message : "Failed to export journal" });
     } finally {
       setExporting(false);
     }
@@ -590,7 +631,7 @@ export default function JournalPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+      <div className="border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
             ← Dashboard
@@ -598,10 +639,28 @@ export default function JournalPage() {
           <span className="text-slate-700">|</span>
           <span className="text-white font-semibold text-sm">Signal Journal</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="text-xs text-slate-600">
             {totalTrades} trades · {totalSignals} triggers
           </span>
+          <label className="flex items-center gap-1 text-xs text-slate-500">
+            <span>Start</span>
+            <input
+              type="datetime-local"
+              value={exportStart}
+              onChange={(event) => setExportStart(event.target.value)}
+              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-slate-500">
+            <span>End</span>
+            <input
+              type="datetime-local"
+              value={exportEnd}
+              onChange={(event) => setExportEnd(event.target.value)}
+              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
+            />
+          </label>
           <button
             onClick={exportJournal}
             disabled={exporting}
@@ -626,6 +685,15 @@ export default function JournalPage() {
         {error && (
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm mb-6">
             {error}
+          </div>
+        )}
+        {exportMessage && (
+          <div className={`border rounded-lg p-4 text-sm mb-6 ${
+            exportMessage.tone === "error"
+              ? "bg-amber-900/20 border-amber-800 text-amber-300"
+              : "bg-blue-900/20 border-blue-800 text-blue-300"
+          }`}>
+            {exportMessage.text}
           </div>
         )}
         {!loading && !error && (
