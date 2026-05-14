@@ -17,6 +17,7 @@ import pandas as pd
 from tradegumi import config
 from tradegumi.api.base_client import ExecutionClient, Candle, ProviderRequestError
 from tradegumi.strategy_metrics import CriterionResult, EvaluatedOpportunity
+from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 from tradegumi.indicators import (
     calculate_stoch_rsi,
     calculate_macd,
@@ -33,6 +34,38 @@ from tradegumi.indicators import (
 )
 
 log = log.getLogger(__name__)
+
+
+def _shock_diagnostic_criterion(shock: ShockDetectionResult) -> CriterionResult:
+    """Build the blocking criterion for a volatility-shock suppression."""
+    return _criterion(
+        "volatility_shock",
+        "data_quality",
+        shock.to_dict(),
+        "no_shock",
+        False,
+        None,
+        "boolean",
+        reason="market_invalid:volatility_shock",
+        context=shock.to_dict(),
+    )
+
+
+def _market_validity_criterion(
+    valid: bool, reason: str, context: dict
+) -> CriterionResult:
+    """Build a market-validity criterion for diagnostics."""
+    return _criterion(
+        "market_validity",
+        "data_quality",
+        context,
+        "valid",
+        valid,
+        None,
+        "boolean",
+        reason=reason,
+        context=context,
+    )
 
 
 def evaluate_threshold(measured: float, threshold: float, operator: str) -> bool:
@@ -90,6 +123,25 @@ class Signal:
     lr_1h: float = 0.0
     lr_15m: float = 0.0
     lr_5m: float = 0.0
+    raw_lr_1h: float = 0.0
+    raw_lr_15m: float = 0.0
+    raw_lr_5m: float = 0.0
+    filtered_lr_1h: float = 0.0
+    filtered_lr_15m: float = 0.0
+    filtered_lr_5m: float = 0.0
+    trend_changed_after_filter: bool = False
+    volatility_shock_detected: bool = False
+    shock_timeframe: Optional[str] = None
+    shock_candle_time: Optional[str] = None
+    shock_true_range: Optional[float] = None
+    shock_atr: Optional[float] = None
+    shock_atr_multiple: Optional[float] = None
+    shock_lookback_bars: int = 0
+    shock_direction: str = "none"
+    shock_suppression_until: Optional[str] = None
+    shock_suppression_candles_remaining: int = 0
+    market_validity_state: str = "valid"
+    market_validity_reason: Optional[str] = None
     signal_price: Optional[float] = None
     suggested_entry: Optional[float] = None
     entry_tolerance: Optional[float] = None
@@ -110,6 +162,25 @@ class SignalDiagnostic:
     lr_5m: float
     final_decision: str
     decision_reason: str
+    raw_lr_1h: float = 0.0
+    raw_lr_15m: float = 0.0
+    raw_lr_5m: float = 0.0
+    filtered_lr_1h: float = 0.0
+    filtered_lr_15m: float = 0.0
+    filtered_lr_5m: float = 0.0
+    trend_changed_after_filter: bool = False
+    volatility_shock_detected: bool = False
+    shock_timeframe: Optional[str] = None
+    shock_candle_time: Optional[str] = None
+    shock_true_range: Optional[float] = None
+    shock_atr: Optional[float] = None
+    shock_atr_multiple: Optional[float] = None
+    shock_lookback_bars: int = 0
+    shock_direction: str = "none"
+    shock_suppression_until: Optional[str] = None
+    shock_suppression_candles_remaining: int = 0
+    market_validity_state: str = "valid"
+    market_validity_reason: Optional[str] = None
     direction: str = "none"
     confidence: Optional[float] = None
     criteria: list[CriterionResult] = None
@@ -132,6 +203,26 @@ class SignalDiagnostic:
             threshold_version=self.threshold_version,
             criteria=self.criteria or [],
             trend_decision=self.trend_decision,
+            # Volatility shock + filtered LR fields
+            volatility_shock_detected=self.volatility_shock_detected,
+            shock_timeframe=self.shock_timeframe,
+            shock_candle_time=self.shock_candle_time,
+            shock_true_range=self.shock_true_range,
+            shock_atr=self.shock_atr,
+            shock_atr_multiple=self.shock_atr_multiple,
+            shock_lookback_bars=self.shock_lookback_bars,
+            shock_direction=self.shock_direction,
+            shock_suppression_until=self.shock_suppression_until,
+            shock_suppression_candles_remaining=self.shock_suppression_candles_remaining,
+            raw_lr_1h=self.raw_lr_1h,
+            raw_lr_15m=self.raw_lr_15m,
+            raw_lr_5m=self.raw_lr_5m,
+            filtered_lr_1h=self.filtered_lr_1h,
+            filtered_lr_15m=self.filtered_lr_15m,
+            filtered_lr_5m=self.filtered_lr_5m,
+            trend_changed_after_filter=self.trend_changed_after_filter,
+            market_validity_state=self.market_validity_state,
+            market_validity_reason=self.market_validity_reason,
         )
 
 
@@ -512,45 +603,113 @@ class SignalEngine:
     # Cooldown tracking: key = f"{symbol}:{trend}", value = last_signal_ts
     _cooldown: dict[str, float] = {}
 
-    def __init__(self, client: ExecutionClient, watchlist: Optional[set[str]] = None):
+    def __init__(self, client: ExecutionClient, watchlist: Optional[set[str]] = None, shock_filter: Optional[VolatilityShockFilter] = None):
         self.client = client
         self.watchlist = watchlist or set(config.EXECUTION_SYMBOLS)
+        self.shock_filter = shock_filter or VolatilityShockFilter()
 
     # ── Trend Filter ─────────────────────────────────────────────────────────
 
-    def _get_trend(self, symbol: str) -> tuple[Optional[str], float, float, float]:
-        """Linear Regression trend filter.
+    def _get_trend(
+        self,
+        symbol: str,
+        candles_by_tf: Optional[dict[str, list[Candle]]] = None,
+    ) -> tuple[Optional[str], float, float, float, float, float, float, list[int], list[int], list[int]]:
+        """Linear Regression trend filter with raw + filtered LR.
 
         All 3 TFs must agree: 1H (count=30, length=20), 15m (length=25), 5m (length=14).
-        Returns (trend, lr_1h, lr_15m, lr_5) where trend is "Uptrend",
-        "Downtrend", or None.
+        Returns (trend, raw_lr_1h, raw_lr_15m, raw_lr_5m, filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
+                 excluded_1h, excluded_15m, excluded_5m).
         """
-        candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-        candles_15m = self.client.get_candles(symbol, "M15", count=60)
-        candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+        if candles_by_tf is None:
+            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
+            candles_15m = self.client.get_candles(symbol, "M15", count=60)
+            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+        else:
+            candles_1h  = candles_by_tf.get("H1", [])
+            candles_15m = candles_by_tf.get("M15", [])
+            candles_5m  = candles_by_tf.get("M5", [])
 
-        df_1h = candles_to_df(candles_1h)
-        df_15 = candles_to_df(candles_15m)
-        df_5  = candles_to_df(candles_5m)
+        # Filtered LR: exclude abnormal candles
+        clean_1h, excluded_1h = self.shock_filter.filter_candles_for_lr(candles_1h)
+        clean_15m, excluded_15m = self.shock_filter.filter_candles_for_lr(candles_15m)
+        clean_5m, excluded_5m = self.shock_filter.filter_candles_for_lr(candles_5m)
 
-        lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
-        lr_15 = calculate_linear_regression(df_15, length=25).iloc[-1]
-        lr_5  = calculate_linear_regression(df_5,  length=14).iloc[-1]
+        df_1h_raw = candles_to_df(candles_1h)
+        df_15_raw = candles_to_df(candles_15m)
+        df_5_raw  = candles_to_df(candles_5m)
 
-        log.debug("%s LR_1h=%.4f%% LR_15m=%.4f%% LR_5m=%.4f%%", symbol, lr_1h, lr_15, lr_5)
+        df_1h_clean = candles_to_df(clean_1h) if clean_1h else df_1h_raw
+        df_15_clean = candles_to_df(clean_15m) if clean_15m else df_15_raw
+        df_5_clean  = candles_to_df(clean_5m) if clean_5m else df_5_raw
 
-        trend_decision = classify_trend_decision(
-            lr_1h, lr_15, lr_5, self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD
-        )
+        raw_lr_1h = calculate_linear_regression(df_1h_raw, length=20).iloc[-1] if len(df_1h_raw) >= 20 else 0.0
+        raw_lr_15 = calculate_linear_regression(df_15_raw, length=25).iloc[-1] if len(df_15_raw) >= 25 else 0.0
+        raw_lr_5  = calculate_linear_regression(df_5_raw,  length=14).iloc[-1] if len(df_5_raw) >= 14 else 0.0
+
+        # If too many excluded → insufficient clean data → flat
+        MIN_CLEAN_RATIO = 0.5
+        filtered_lr_1h = raw_lr_1h
+        filtered_lr_15 = raw_lr_15
+        filtered_lr_5 = raw_lr_5
+        trend = None
+
+        def _usable(candles, excluded, min_needed, length):
+            if len(candles) < min_needed:
+                return False
+            return (len(candles) - len(excluded)) / len(candles) >= MIN_CLEAN_RATIO
+
+        usable_1h = _usable(candles_1h, excluded_1h, 20, 20)
+        usable_15m = _usable(candles_15m, excluded_15m, 25, 25)
+        usable_5m = _usable(candles_5m, excluded_5m, 14, 14)
+
+        if usable_1h:
+            filtered_lr_1h = calculate_linear_regression(df_1h_clean, length=20).iloc[-1]
+        if usable_15m:
+            filtered_lr_15 = calculate_linear_regression(df_15_clean, length=25).iloc[-1]
+        if usable_5m:
+            filtered_lr_5 = calculate_linear_regression(df_5_clean, length=14).iloc[-1]
+
+        # Use filtered LRs for trend classification when enabled
+        if self.shock_filter.enabled and (usable_1h and usable_15m and usable_5m):
+            trend_decision = classify_trend_decision(
+                filtered_lr_1h, filtered_lr_15, filtered_lr_5,
+                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
+            )
+        else:
+            trend_decision = classify_trend_decision(
+                raw_lr_1h, raw_lr_15, raw_lr_5,
+                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
+            )
+
+        log.debug("%s raw_LR_1h=%.4f%% raw_LR_15m=%.4f%% raw_LR_5m=%.4f%% | filtered_LR_1h=%.4f%% filtered_LR_15m=%.4f%% filtered_LR_5m=%.4f%%",
+                  symbol, raw_lr_1h, raw_lr_15, raw_lr_5, filtered_lr_1h, filtered_lr_15, filtered_lr_5)
+
         if trend_decision["trend_result"] == "up":
-            return "Uptrend", lr_1h, lr_15, lr_5
-        if trend_decision["trend_result"] == "down":
-            return "Downtrend", lr_1h, lr_15, lr_5
-        return None, lr_1h, lr_15, lr_5
+            trend = "Uptrend"
+        elif trend_decision["trend_result"] == "down":
+            trend = "Downtrend"
+        else:
+            trend = None
+
+        return trend, raw_lr_1h, raw_lr_15, raw_lr_5, filtered_lr_1h, filtered_lr_15, filtered_lr_5, excluded_1h, excluded_15m, excluded_5m
 
     # ── 4-Layer Signal Stack ─────────────────────────────────────────────────
 
-    def _get_signal(self, symbol: str, trend: str) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
+    def _get_signal(
+        self,
+        symbol: str,
+        trend: str,
+        *,
+        raw_lr_1h: float = 0.0,
+        raw_lr_15m: float = 0.0,
+        raw_lr_5m: float = 0.0,
+        filtered_lr_1h: float = 0.0,
+        filtered_lr_15m: float = 0.0,
+        filtered_lr_5m: float = 0.0,
+        trend_changed_after_filter: bool = False,
+        shock_result: Optional[ShockDetectionResult] = None,
+    ) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
         """Run the 4-layer signal stack on 5m candles.
 
         Args:
@@ -846,16 +1005,10 @@ class SignalEngine:
             "candlestick": candle_strength,
         }
 
-        # Trend strength component
-        candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-        candles_15m = self.client.get_candles(symbol, "M15", count=60)
-        candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
-        df_1h = candles_to_df(candles_1h)
-        df_15 = candles_to_df(candles_15m)
-        df_5  = candles_to_df(candles_5m)
-        lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
-        lr_15 = calculate_linear_regression(df_15, length=25).iloc[-1]
-        lr_5  = calculate_linear_regression(df_5,  length=14).iloc[-1]
+        # Trend strength component (use precomputed LR values)
+        lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
+        lr_15 = filtered_lr_15m if self.shock_filter.enabled else raw_lr_15m
+        lr_5 = filtered_lr_5m if self.shock_filter.enabled else raw_lr_5m
         trend_str = trend_score(lr_15, lr_5, trend,
                                 self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD)
         breakdown["trend"] = trend_str
@@ -919,6 +1072,26 @@ class SignalEngine:
             kc_upper=float(kc_upper_last5.iloc[-1]),
             kc_mid=float(kc[kc_mid_col].iloc[-1]),
             kc_lower=float(kc_lower_last5.iloc[-1]),
+            # Shock diagnostics
+            raw_lr_1h=raw_lr_1h,
+            raw_lr_15m=raw_lr_15m,
+            raw_lr_5m=raw_lr_5m,
+            filtered_lr_1h=filtered_lr_1h,
+            filtered_lr_15m=filtered_lr_15m,
+            filtered_lr_5m=filtered_lr_5m,
+            trend_changed_after_filter=trend_changed_after_filter,
+            volatility_shock_detected=shock_result.detected if shock_result else False,
+            shock_timeframe=shock_result.timeframe if shock_result else None,
+            shock_candle_time=shock_result.candle_time if shock_result else None,
+            shock_true_range=shock_result.true_range if shock_result else None,
+            shock_atr=shock_result.atr if shock_result else None,
+            shock_atr_multiple=shock_result.atr_multiple if shock_result else None,
+            shock_lookback_bars=shock_result.lookback_bars if shock_result else 0,
+            shock_direction=shock_result.direction if shock_result else "none",
+            shock_suppression_until=shock_result.suppression_until if shock_result else None,
+            shock_suppression_candles_remaining=shock_result.suppression_candles_remaining if shock_result else 0,
+            market_validity_state="invalid" if (shock_result and shock_result.detected) else "valid",
+            market_validity_reason="market_invalid:volatility_shock" if (shock_result and shock_result.detected) else None,
             lr_1h=lr_1h,
             lr_15m=lr_15,
             lr_5m=lr_5,
@@ -974,11 +1147,11 @@ class SignalEngine:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def check_symbol(self, symbol: str) -> tuple[Optional[Signal], Optional[str], float, float, float, SignalDiagnostic]:
-        """Full pipeline: Layer 1 watchlist → trend filter → signal stack.
+        """Full pipeline: watchlist → shock detection → trend filter → signal stack.
 
-        Returns (signal, trend, lr_1h, lr_15, lr_5).
+        Returns (signal, trend, lr_1h, lr_15, lr_5, diagnostic).
         signal is None if symbol fails any filter.
-        trend is None if no clear trend (flat).
+        trend is None if no clear trend (flat) or suppressed by shock.
         """
         if symbol not in self.watchlist:
             log.debug("%s not on watchlist, skipping", symbol)
@@ -996,8 +1169,11 @@ class SignalEngine:
             )
             return None, None, 0.0, 0.0, 0.0, diag
 
+        # ── Fetch candles ────────────────────────────────────────────────────
         try:
-            trend, lr_1h, lr_15, lr_5 = self._get_trend(symbol)
+            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
+            candles_15m = self.client.get_candles(symbol, "M15", count=60)
+            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="trend_filter")
             note = f"trend data incomplete: {context['error_type']}"
@@ -1011,14 +1187,111 @@ class SignalEngine:
             diag = self._indeterminate_diagnostic(symbol, "missing_signal_engine_data", note, context=context)
             return None, None, 0.0, 0.0, 0.0, diag
 
+        # ── Volatility Shock Detection (after data, before trend) ────────────
+        shock_suppressed = False
+        active_shock: Optional[ShockDetectionResult] = None
+        shock_criteria: list[CriterionResult] = []
+        if self.shock_filter.enabled:
+            is_suppressed, active_shock, _ = self.shock_filter.check_symbol(
+                symbol,
+                {"H1": candles_1h, "M15": candles_15m, "M5": candles_5m},
+            )
+            if is_suppressed:
+                shock_suppressed = True
+                shock_criteria.append(_shock_diagnostic_criterion(active_shock))
+                shock_criteria.append(_market_validity_criterion(
+                    False, "market_invalid:volatility_shock", active_shock.to_dict()
+                ))
+                log.warning("%s suppressed by volatility shock (%s %s) until %s",
+                            symbol, active_shock.rule, active_shock.timeframe,
+                            active_shock.suppression_until)
+
+        # ── Trend Filter (with raw + filtered LR) ───────────────────────────
+        try:
+            (
+                trend,
+                raw_lr_1h, raw_lr_15, raw_lr_5,
+                filtered_lr_1h, filtered_lr_15, filtered_lr_5,
+                excluded_1h, excluded_15m, excluded_5m,
+            ) = self._get_trend(symbol, candles_by_tf={"H1": candles_1h, "M15": candles_15m, "M5": candles_5m})
+        except ProviderRequestError as exc:
+            context = _provider_request_issue_context(exc, stage="trend_filter")
+            note = f"trend data incomplete: {context['error_type']}"
+            log.warning("%s provider data issue: %s", symbol, note)
+            diag = self._indeterminate_diagnostic(symbol, context["error_type"], note, context=context)
+            return None, None, 0.0, 0.0, 0.0, diag
+        except (IndexError, KeyError, ValueError) as exc:
+            context = _compact_data_issue_context(exc, stage="trend_filter", timeframe="mixed")
+            note = f"trend data incomplete: {context['missing_input']}"
+            log.warning("%s signal engine data quality issue: %s", symbol, note)
+            diag = self._indeterminate_diagnostic(symbol, "missing_signal_engine_data", note, context=context)
+            return None, None, 0.0, 0.0, 0.0, diag
+
+        trend_changed_after_filter = False
+        if self.shock_filter.enabled:
+            raw_trend = classify_trend_decision(
+                raw_lr_1h, raw_lr_15, raw_lr_5,
+                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
+            )
+            trend_changed_after_filter = raw_trend["trend_result"] != classify_trend_decision(
+                filtered_lr_1h, filtered_lr_15, filtered_lr_5,
+                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
+            )["trend_result"]
+
         trend_decision = classify_trend_decision(
-            lr_1h, lr_15, lr_5, self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD
+            filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h,
+            filtered_lr_15 if self.shock_filter.enabled else raw_lr_15,
+            filtered_lr_5 if self.shock_filter.enabled else raw_lr_5,
+            self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
         )
+
+        lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
+        lr_15 = filtered_lr_15 if self.shock_filter.enabled else raw_lr_15
+        lr_5 = filtered_lr_5 if self.shock_filter.enabled else raw_lr_5
+
         trend_criteria = [
             _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, abs(lr_1h) >= self.LR_1H_THRESHOLD, abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
             _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, abs(lr_15) >= self.LR_15M_THRESHOLD, abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
             _criterion("trend_5m", "trend", lr_5, self.LR_5M_THRESHOLD, abs(lr_5) >= self.LR_5M_THRESHOLD, abs(lr_5) - self.LR_5M_THRESHOLD, "abs_gte"),
         ]
+
+        if shock_suppressed:
+            log.debug("%s suppressed by volatility shock, skipping signal stack", symbol)
+            diag = SignalDiagnostic(
+                symbol=symbol,
+                evaluated_at=datetime.now().astimezone().isoformat(),
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15m=lr_15,
+                lr_5m=lr_5,
+                raw_lr_1h=raw_lr_1h,
+                raw_lr_15m=raw_lr_15,
+                raw_lr_5m=raw_lr_5,
+                filtered_lr_1h=filtered_lr_1h,
+                filtered_lr_15m=filtered_lr_15,
+                filtered_lr_5m=filtered_lr_5,
+                trend_changed_after_filter=trend_changed_after_filter,
+                volatility_shock_detected=True,
+                shock_timeframe=active_shock.timeframe if active_shock else None,
+                shock_candle_time=active_shock.candle_time if active_shock else None,
+                shock_true_range=active_shock.true_range if active_shock else None,
+                shock_atr=active_shock.atr if active_shock else None,
+                shock_atr_multiple=active_shock.atr_multiple if active_shock else None,
+                shock_lookback_bars=active_shock.lookback_bars if active_shock else 0,
+                shock_direction=active_shock.direction if active_shock else "none",
+                shock_suppression_until=active_shock.suppression_until if active_shock else None,
+                shock_suppression_candles_remaining=active_shock.suppression_candles_remaining if active_shock else 0,
+                market_validity_state="invalid",
+                market_validity_reason="market_invalid:volatility_shock",
+                final_decision="skipped",
+                decision_reason="market_invalid:volatility_shock",
+                direction="BUY" if trend == "Uptrend" else ("SELL" if trend == "Downtrend" else "none"),
+                criteria=trend_criteria + shock_criteria,
+                threshold_version=get_threshold_version(),
+                trend_decision=trend_decision,
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
+
         if trend is None:
             log.debug("%s no trend, skipping", symbol)
             diag = SignalDiagnostic(
@@ -1028,6 +1301,13 @@ class SignalEngine:
                 lr_1h=lr_1h,
                 lr_15m=lr_15,
                 lr_5m=lr_5,
+                raw_lr_1h=raw_lr_1h,
+                raw_lr_15m=raw_lr_15,
+                raw_lr_5m=raw_lr_5,
+                filtered_lr_1h=filtered_lr_1h,
+                filtered_lr_15m=filtered_lr_15,
+                filtered_lr_5m=filtered_lr_5,
+                trend_changed_after_filter=trend_changed_after_filter,
                 final_decision="skipped",
                 decision_reason="no_trend",
                 criteria=trend_criteria,
@@ -1050,6 +1330,13 @@ class SignalEngine:
                 lr_1h=lr_1h,
                 lr_15m=lr_15,
                 lr_5m=lr_5,
+                raw_lr_1h=raw_lr_1h,
+                raw_lr_15m=raw_lr_15,
+                raw_lr_5m=raw_lr_5,
+                filtered_lr_1h=filtered_lr_1h,
+                filtered_lr_15m=filtered_lr_15,
+                filtered_lr_5m=filtered_lr_5,
+                trend_changed_after_filter=trend_changed_after_filter,
                 final_decision="skipped",
                 decision_reason="cooldown",
                 direction="BUY" if trend == "Uptrend" else "SELL",
@@ -1060,7 +1347,13 @@ class SignalEngine:
             return None, trend, lr_1h, lr_15, lr_5, diag
 
         try:
-            signal, criteria, reason, confidence = self._get_signal(symbol, trend)
+            signal, criteria, reason, confidence = self._get_signal(
+                symbol, trend,
+                raw_lr_1h=raw_lr_1h, raw_lr_15m=raw_lr_15, raw_lr_5m=raw_lr_5,
+                filtered_lr_1h=filtered_lr_1h, filtered_lr_15m=filtered_lr_15, filtered_lr_5m=filtered_lr_5,
+                trend_changed_after_filter=trend_changed_after_filter,
+                shock_result=active_shock,
+            )
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="signal_stack")
             note = f"signal stack provider data incomplete: {context['error_type']}"
@@ -1101,6 +1394,7 @@ class SignalEngine:
         if signal:
             # Record signal timestamp for cooldown
             self._cooldown[cooldown_key] = time.time()
+
         diag = SignalDiagnostic(
             symbol=symbol,
             evaluated_at=datetime.now().astimezone().isoformat(),
@@ -1108,6 +1402,25 @@ class SignalEngine:
             lr_1h=lr_1h,
             lr_15m=lr_15,
             lr_5m=lr_5,
+            raw_lr_1h=raw_lr_1h,
+            raw_lr_15m=raw_lr_15,
+            raw_lr_5m=raw_lr_5,
+            filtered_lr_1h=filtered_lr_1h,
+            filtered_lr_15m=filtered_lr_15,
+            filtered_lr_5m=filtered_lr_5,
+            trend_changed_after_filter=trend_changed_after_filter,
+            volatility_shock_detected=active_shock.detected if active_shock else False,
+            shock_timeframe=active_shock.timeframe if active_shock else None,
+            shock_candle_time=active_shock.candle_time if active_shock else None,
+            shock_true_range=active_shock.true_range if active_shock else None,
+            shock_atr=active_shock.atr if active_shock else None,
+            shock_atr_multiple=active_shock.atr_multiple if active_shock else None,
+            shock_lookback_bars=active_shock.lookback_bars if active_shock else 0,
+            shock_direction=active_shock.direction if active_shock else "none",
+            shock_suppression_until=active_shock.suppression_until if active_shock else None,
+            shock_suppression_candles_remaining=active_shock.suppression_candles_remaining if active_shock else 0,
+            market_validity_state="invalid" if (active_shock and active_shock.detected) else "valid",
+            market_validity_reason="market_invalid:volatility_shock" if (active_shock and active_shock.detected) else None,
             final_decision=(
                 "emitted"
                 if signal

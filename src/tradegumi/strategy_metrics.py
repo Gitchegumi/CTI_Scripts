@@ -152,6 +152,26 @@ class EvaluatedOpportunity:
     threshold_version_unknown_reason: Optional[str] = None
     usable_for_strategy_stats: Optional[bool] = None
     stats_exclusion_reason: Optional[str] = None
+    # Volatility shock + filtered LR fields
+    volatility_shock_detected: bool = False
+    shock_timeframe: Optional[str] = None
+    shock_candle_time: Optional[str] = None
+    shock_true_range: Optional[float] = None
+    shock_atr: Optional[float] = None
+    shock_atr_multiple: Optional[float] = None
+    shock_lookback_bars: int = 0
+    shock_direction: str = "none"
+    shock_suppression_until: Optional[str] = None
+    shock_suppression_candles_remaining: int = 0
+    raw_lr_1h: Optional[float] = None
+    raw_lr_15m: Optional[float] = None
+    raw_lr_5m: Optional[float] = None
+    filtered_lr_1h: Optional[float] = None
+    filtered_lr_15m: Optional[float] = None
+    filtered_lr_5m: Optional[float] = None
+    trend_changed_after_filter: bool = False
+    market_validity_state: str = "valid"
+    market_validity_reason: Optional[str] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -316,6 +336,26 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
         _ensure_column(conn, "criterion_results", "reason", "TEXT")
         _ensure_column(conn, "criterion_results", "context", "TEXT NOT NULL DEFAULT '{}'")
+        # ── Volatility shock + filtered LR columns ────────────────────────────
+        _ensure_column(conn, "evaluated_opportunities", "volatility_shock_detected", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "shock_timeframe", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_candle_time", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_true_range", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_atr", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_atr_multiple", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_lookback_bars", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "shock_direction", "TEXT NOT NULL DEFAULT 'none'")
+        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_until", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_candles_remaining", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_1h", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_15m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_5m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_1h", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_15m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_5m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "trend_changed_after_filter", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "market_validity_state", "TEXT NOT NULL DEFAULT 'valid'")
+        _ensure_column(conn, "evaluated_opportunities", "market_validity_reason", "TEXT")
     _initialized_db_paths.add(db_key)
 
 
