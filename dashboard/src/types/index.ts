@@ -48,6 +48,16 @@ export interface SignalEntry {
   timestamp: string;
 }
 
+export type TradeGrade =
+  | "TP_HIT"
+  | "SL_HIT"
+  | "BE"
+  | "MISSED_ENTRY"
+  | "LATE_SIGNAL"
+  | "DUPLICATE"
+  | "INVALID"
+  | "PENDING";
+
 export interface ActiveSignal {
   latest: SignalEntry;
   count: number;
@@ -200,7 +210,7 @@ export interface AgentExport {
 }
 
 export interface SignalJournalExportScope {
-  grade?: "ALL" | "PENDING" | "TP_HIT" | "SL_HIT" | "MANUAL_CLOSE" | "EXPIRED";
+  grade?: "ALL" | TradeGrade | "MANUAL_CLOSE" | "EXPIRED";
   start?: string;
   end?: string;
   symbol?: string;
@@ -245,6 +255,8 @@ export interface StrategyMetricOpportunity {
   data_complete: boolean;
   data_quality_notes: string[];
   threshold_version: string;
+  usable_for_strategy_stats?: boolean | null;
+  stats_exclusion_reason?: string | null;
   criteria: StrategyMetricCriterion[];
 }
 
@@ -275,6 +287,10 @@ export interface StrategyMetricsSummary {
   end: string;
   total_evaluated: number;
   emitted_count: number;
+  trade_opportunity_count: number;
+  stats_excluded_count: number;
+  stats_unknown_eligibility_count: number;
+  stats_exclusion_counts: Record<string, number>;
   rejected_count: number;
   skipped_count: number;
   indeterminate_count: number;

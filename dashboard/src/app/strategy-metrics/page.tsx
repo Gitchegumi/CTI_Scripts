@@ -206,9 +206,10 @@ export default function StrategyMetricsPage() {
           </section>
         ) : (
           <section className="space-y-5">
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
               <Stat label="Evaluated" value={summary?.total_evaluated ?? 0} />
               <Stat label="Emitted" value={summary?.emitted_count ?? 0} />
+              <Stat label="Tradable" value={summary?.trade_opportunity_count ?? 0} sub={`${summary?.stats_excluded_count ?? 0} excluded`} />
               <Stat label="Rejected" value={summary?.rejected_count ?? 0} />
               <Stat label="Skipped" value={summary?.skipped_count ?? 0} />
               <Stat label="Near-miss" value={summary?.near_miss_count ?? 0} />

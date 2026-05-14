@@ -38,18 +38,23 @@ import csv
 import io
 import json
 import logging
+import math
+import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from tradegumi import config
 
 log = logging.getLogger(__name__)
 
 JOURNAL_FILE = Path(__file__).parent / "data" / "signal_journal.jsonl"
 
 PENDING_GRADE = "PENDING"
-VALID_GRADES = {"TP_HIT", "SL_HIT", "MANUAL_CLOSE", "EXPIRED"}
+TRADE_GRADES = {"TP_HIT", "SL_HIT", "BE", "MISSED_ENTRY", "LATE_SIGNAL", "DUPLICATE", "INVALID", PENDING_GRADE}
+VALID_GRADES = {"TP_HIT", "SL_HIT", "BE", "INVALID", "MANUAL_CLOSE", "EXPIRED"}
 FILTER_GRADES = VALID_GRADES | {PENDING_GRADE}
 EXPORT_FIELDS = [
     "signal_id",
@@ -82,6 +87,15 @@ EXPORT_FIELDS = [
     "grade",
     "pending_state",
     "grade_timestamp",
+    "setup_group_id",
+    "is_duplicate_setup",
+    "entry_valid_at_signal",
+    "entry_miss_distance",
+    "signal_age_bars",
+    "late_signal",
+    "usable_for_strategy_stats",
+    "trade_grade",
+    "stats_exclusion_reason",
     "trade_result",
     "outcome",
     "outcome_status",
@@ -302,7 +316,161 @@ def _export_filename(selection: SignalJournalExportSelection) -> str:
 def _entry_matches_grade(entry: dict[str, Any], grade: Optional[str]) -> bool:
     """Return whether a journal entry is in the requested grade scope."""
     normalized = _normalize_filter_grade(grade)
-    return normalized is None or str(entry.get("grade") or PENDING_GRADE).upper() == normalized
+    return normalized is None or str(entry.get("trade_grade") or entry.get("grade") or PENDING_GRADE).upper() == normalized
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _parse_journal_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _normal_key(value: Any, default: str = "unknown") -> str:
+    raw = str(value or default).strip()
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("-") or default
+
+
+def _setup_key(entry: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(entry.get("symbol") or "").upper(),
+        str(entry.get("direction") or "").upper(),
+        str(entry.get("strategy") or "CTI-v1"),
+    )
+
+
+def _setup_group_id(symbol: Any, direction: Any, strategy: Any, timestamp: datetime) -> str:
+    stamp = timestamp.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    parts = (_normal_key(symbol), _normal_key(direction), _normal_key(strategy))
+    return ":".join((*parts, stamp))
+
+
+def _active_setup_group(
+    existing_entries: list[dict[str, Any]],
+    new_entry: dict[str, Any],
+    signal_ts: datetime,
+    window_minutes: int,
+) -> Optional[str]:
+    window = timedelta(minutes=max(0, window_minutes))
+    for entry in reversed(existing_entries):
+        if _setup_key(entry) != _setup_key(new_entry):
+            continue
+        existing_ts = _parse_journal_datetime(entry.get("signal_timestamp"))
+        if existing_ts is None:
+            continue
+        delta = signal_ts - existing_ts
+        if timedelta(0) <= delta < window:
+            return str(entry.get("setup_group_id") or _setup_group_id(entry.get("symbol"), entry.get("direction"), entry.get("strategy"), existing_ts))
+    return None
+
+
+def _signal_attr(signal: Any, names: tuple[str, ...], fallback: Any = None) -> Any:
+    for name in names:
+        value = getattr(signal, name, None)
+        if value is not None:
+            return value
+    return fallback
+
+
+def _entry_miss_distance(signal_price: Optional[float], suggested_entry: Optional[float], atr: Optional[float]) -> dict[str, Any]:
+    if signal_price is None or suggested_entry is None:
+        return {"absolute": None, "atr_normalized": None}
+    absolute = abs(signal_price - suggested_entry)
+    normalized = absolute / atr if atr and atr > 0 else None
+    return {"absolute": absolute, "atr_normalized": normalized}
+
+
+def _calculate_signal_age_bars(signal_ts: datetime, first_true_at: Any) -> int:
+    started = _parse_journal_datetime(first_true_at)
+    if started is None:
+        return 0
+    return max(0, int((signal_ts - started).total_seconds() // 300))
+
+
+def _grade_for_completion(grade: str) -> str:
+    normalized = str(grade or PENDING_GRADE).upper()
+    if normalized in {"TP_HIT", "SL_HIT", "BE", "INVALID"}:
+        return normalized
+    if normalized == "MANUAL_CLOSE":
+        return "BE"
+    if normalized == "EXPIRED":
+        return "MISSED_ENTRY"
+    return PENDING_GRADE
+
+
+def _strategy_usable_for_entry(entry: dict[str, Any]) -> bool:
+    return (
+        not bool(entry.get("is_duplicate_setup"))
+        and entry.get("entry_valid_at_signal") is True
+        and not bool(entry.get("late_signal"))
+        and int(entry.get("signal_age_bars") or 0) <= int(config.SIGNAL_STALE_BARS)
+    )
+
+
+def _setup_outcome_fields(signal: Any, base_entry: dict[str, Any], existing_entries: list[dict[str, Any]], ts: str) -> dict[str, Any]:
+    signal_ts = _parse_journal_datetime(ts) or datetime.now(timezone.utc)
+    group_id = _active_setup_group(existing_entries, base_entry, signal_ts, config.SIGNAL_SETUP_GROUP_WINDOW_MINUTES)
+    is_duplicate = group_id is not None
+    if group_id is None:
+        group_id = _setup_group_id(base_entry.get("symbol"), base_entry.get("direction"), base_entry.get("strategy"), signal_ts)
+
+    suggested_entry = _coerce_float(_signal_attr(signal, ("suggested_entry", "recommended_entry", "entry_price"), base_entry.get("entry_price")))
+    signal_price = _coerce_float(_signal_attr(signal, ("signal_price", "current_price", "market_price"), suggested_entry))
+    atr = _coerce_float(base_entry.get("atr"))
+    distance = _entry_miss_distance(signal_price, suggested_entry, atr)
+    explicit_tolerance = _coerce_float(_signal_attr(signal, ("entry_tolerance", "valid_entry_tolerance"), None))
+    tolerance = explicit_tolerance if explicit_tolerance is not None else ((atr or 0.0) * float(config.SIGNAL_ENTRY_TOLERANCE_ATR))
+    signal_age_bars = _calculate_signal_age_bars(signal_ts, _signal_attr(signal, ("setup_condition_first_true_at", "condition_first_true_at"), None))
+
+    if suggested_entry is None or signal_price is None:
+        entry_valid: Optional[bool] = None
+    else:
+        entry_valid = bool(distance["absolute"] is not None and distance["absolute"] <= tolerance)
+    late_signal = entry_valid is False
+    stale_signal = signal_age_bars > int(config.SIGNAL_STALE_BARS)
+
+    usable = False
+    exclusion_reason = None
+    trade_grade = PENDING_GRADE
+    if is_duplicate:
+        exclusion_reason = "duplicate_setup"
+        trade_grade = "DUPLICATE"
+    elif entry_valid is None:
+        exclusion_reason = "missing_entry_context"
+        trade_grade = "INVALID"
+    elif late_signal:
+        exclusion_reason = "late_signal"
+        trade_grade = "LATE_SIGNAL"
+    elif stale_signal:
+        exclusion_reason = "stale_signal"
+        trade_grade = "INVALID"
+    else:
+        usable = True
+
+    return {
+        "setup_group_id": group_id,
+        "is_duplicate_setup": is_duplicate,
+        "entry_valid_at_signal": entry_valid,
+        "entry_miss_distance": distance,
+        "signal_age_bars": signal_age_bars,
+        "late_signal": late_signal,
+        "usable_for_strategy_stats": usable,
+        "trade_grade": trade_grade,
+        "stats_exclusion_reason": exclusion_reason,
+    }
 
 
 def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> str:
@@ -344,8 +512,10 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
     }
 
     with _lock:
+        existing_entries = _read_entries_oldest_first()
+        entry.update(_setup_outcome_fields(signal, entry, existing_entries, ts))
         with open(JOURNAL_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
 
     return signal_id
 
@@ -370,6 +540,10 @@ def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> 
             entry = json.loads(stripped)
             if not updated and entry.get(lookup_field) == lookup_key:
                 entry["grade"] = grade
+                entry["trade_grade"] = _grade_for_completion(grade)
+                if entry["trade_grade"] == "INVALID":
+                    entry["usable_for_strategy_stats"] = False
+                    entry["stats_exclusion_reason"] = "manual_invalidated"
                 entry["grade_timestamp"] = _now_iso()
                 entry["notes"] = notes
                 stripped = json.dumps(entry)
@@ -427,6 +601,7 @@ def set_notes_by_signal_id(signal_id: str, notes: str) -> bool:
 
 def grade_signal(discord_msg_id: str, grade: str, notes: str = "") -> bool:
     """Grade by Discord message ID (called from bot button interactions)."""
+    grade = str(grade or "").upper()
     if grade not in VALID_GRADES:
         log.warning("Invalid grade %r — must be one of %s", grade, VALID_GRADES)
         return False
@@ -439,6 +614,7 @@ def grade_by_signal_id(signal_id: str, grade: str, notes: str = "") -> bool:
 
     Works for all signals including migrated ones that have no discord_msg_id.
     """
+    grade = str(grade or "").upper()
     if grade not in VALID_GRADES:
         log.warning("Invalid grade %r — must be one of %s", grade, VALID_GRADES)
         return False
@@ -487,6 +663,14 @@ def purge_journal_entries(grade: Optional[str] = None) -> dict[str, int]:
     return {"removed_count": removed, "remaining_count": len(remaining)}
 
 
+def invalidate_signal(signal_id: str, notes: str = "") -> bool:
+    """Manually invalidate one signal for strategy stats without deleting evidence."""
+    if not signal_id:
+        return False
+    with _lock:
+        return _apply_grade(signal_id, "signal_id", "INVALID", notes)
+
+
 def reset_signal_to_pending(signal_id: str) -> bool:
     """Reset one signal to PENDING while preserving signal evidence and notes."""
     if not signal_id:
@@ -498,6 +682,13 @@ def reset_signal_to_pending(signal_id: str) -> bool:
         for entry in entries:
             if not updated and entry.get("signal_id") == signal_id:
                 entry["grade"] = PENDING_GRADE
+                entry["trade_grade"] = PENDING_GRADE
+                usable = _strategy_usable_for_entry(entry)
+                entry["usable_for_strategy_stats"] = usable
+                if usable:
+                    entry.pop("stats_exclusion_reason", None)
+                elif entry.get("stats_exclusion_reason") == "manual_invalidated":
+                    entry["stats_exclusion_reason"] = "invalidated_reset_requires_review"
                 entry["grade_timestamp"] = None
                 for field in reset_fields:
                     entry.pop(field, None)

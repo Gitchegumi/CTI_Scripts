@@ -150,6 +150,8 @@ class EvaluatedOpportunity:
     pipeline_state: Optional[str] = None
     near_miss_reason: Optional[str] = None
     threshold_version_unknown_reason: Optional[str] = None
+    usable_for_strategy_stats: Optional[bool] = None
+    stats_exclusion_reason: Optional[str] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -194,6 +196,10 @@ class DiagnosticSummary:
     skipped_count: int
     indeterminate_count: int
     near_miss_count: int
+    trade_opportunity_count: int = 0
+    stats_excluded_count: int = 0
+    stats_unknown_eligibility_count: int = 0
+    stats_exclusion_counts: dict[str, int] = field(default_factory=dict)
     criterion_summaries: list[CriterionSummary] = field(default_factory=list)
     top_blockers: list[BlockerSummary] = field(default_factory=list)
     first_blocker: Optional[str] = None   # criterion_name of the first blocker
@@ -258,7 +264,9 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 trend_decision TEXT,
                 pipeline_state TEXT,
                 near_miss_reason TEXT,
-                threshold_version_unknown_reason TEXT
+                threshold_version_unknown_reason TEXT,
+                usable_for_strategy_stats INTEGER,
+                stats_exclusion_reason TEXT
             )
             """
         )
@@ -301,6 +309,8 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         _ensure_column(conn, "evaluated_opportunities", "pipeline_state", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "near_miss_reason", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "threshold_version_unknown_reason", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "usable_for_strategy_stats", "INTEGER")
+        _ensure_column(conn, "evaluated_opportunities", "stats_exclusion_reason", "TEXT")
         _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
         _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
@@ -527,8 +537,9 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 final_decision, decision_reason, confidence, failed_criteria_count,
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at,
                 first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
-                near_miss_reason, threshold_version_unknown_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
+                stats_exclusion_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -555,6 +566,8 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 opportunity.pipeline_state,
                 opportunity.near_miss_reason,
                 opportunity.threshold_version_unknown_reason,
+                None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
+                opportunity.stats_exclusion_reason,
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
@@ -646,6 +659,10 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
         threshold_version_unknown_reason=(
             row["threshold_version_unknown_reason"] if "threshold_version_unknown_reason" in row.keys() else None
         ),
+        usable_for_strategy_stats=(
+            None if "usable_for_strategy_stats" not in row.keys() or row["usable_for_strategy_stats"] is None else bool(row["usable_for_strategy_stats"])
+        ),
+        stats_exclusion_reason=row["stats_exclusion_reason"] if "stats_exclusion_reason" in row.keys() else None,
     )
 
 
@@ -896,7 +913,8 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             f"""
             SELECT id, final_decision, decision_reason, near_miss, near_miss_reason,
                    data_complete, threshold_version, threshold_version_unknown_reason,
-                   first_blocker, all_blockers, blocking_layer, pipeline_state
+                   first_blocker, all_blockers, blocking_layer, pipeline_state,
+                   usable_for_strategy_stats, stats_exclusion_reason
             FROM evaluated_opportunities
             WHERE {' AND '.join(clauses)}
             """,
@@ -909,6 +927,15 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
         skipped = sum(1 for r in rows if r["final_decision"] == "skipped")
         indeterminate = sum(1 for r in rows if r["final_decision"] == "indeterminate")
         near_miss_count = sum(1 for r in rows if r["near_miss"])
+        emitted_rows = [r for r in rows if r["final_decision"] == "emitted"]
+        trade_opportunity_count = sum(1 for r in emitted_rows if r["usable_for_strategy_stats"] == 1)
+        stats_excluded_count = sum(1 for r in emitted_rows if r["usable_for_strategy_stats"] == 0)
+        stats_unknown_eligibility_count = sum(1 for r in emitted_rows if r["usable_for_strategy_stats"] is None)
+        stats_exclusion_counts: dict[str, int] = {}
+        for row in emitted_rows:
+            if row["usable_for_strategy_stats"] == 0:
+                reason = row["stats_exclusion_reason"] or "unknown"
+                stats_exclusion_counts[reason] = stats_exclusion_counts.get(reason, 0) + 1
         threshold_version_counts: dict[str, int] = {}
         threshold_version_unknown_reasons: dict[str, int] = {}
         near_miss_reason_counts: dict[str, int] = {}
@@ -952,6 +979,10 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             skipped_count=skipped,
             indeterminate_count=indeterminate,
             near_miss_count=near_miss_count,
+            trade_opportunity_count=trade_opportunity_count,
+            stats_excluded_count=stats_excluded_count,
+            stats_unknown_eligibility_count=stats_unknown_eligibility_count,
+            stats_exclusion_counts=stats_exclusion_counts,
             criterion_summaries=_criterion_summaries(conn, ids),
             top_blockers=_blocker_summaries(conn, ids, sum(1 for r in rows if json.loads(r["all_blockers"] or "[]"))),
             first_blocker=first_blocker,

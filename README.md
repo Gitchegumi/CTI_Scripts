@@ -18,6 +18,8 @@ TradeGumi records diagnostics for every evaluated opportunity so no-signal perio
 
 Diagnostic history is stored locally in `src/tradegumi/data/strategy_metrics.db`, with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
 
+Signal journal exports separate emitted signal outcomes from tradable setup outcomes. A signal only counts as a strategy-stat trade opportunity when `usable_for_strategy_stats` is true; duplicates, missed entries, late signals, stale signals, and manual invalidations are excluded. Tune setup grouping and entry validity with `SIGNAL_SETUP_GROUP_WINDOW_MINUTES`, `SIGNAL_ENTRY_TOLERANCE_ATR`, and `SIGNAL_STALE_BARS`.
+
 ## Quick Start
 
 ### 1. Install dependencies
