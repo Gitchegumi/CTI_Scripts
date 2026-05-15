@@ -1,6 +1,6 @@
 pandas>=3.0.2
 pandas_ta>=0.3
-requests>=2.33.1
+requests>=2.34.2
 python-dotenv>=1.2.2
 pytz>=2026.2
 discord.py>=2.7.1
