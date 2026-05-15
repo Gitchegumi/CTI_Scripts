@@ -89,14 +89,18 @@ class VolatilityShockFilter:
         df: pd.DataFrame,
         atr_series: pd.Series,
     ) -> Optional[ShockDetectionResult]:
-        """Rule 1: single candle TR >= N x ATR."""
+        """Rule 1: single candle TR >= N x ATR.
+
+        ATR is shifted by 1 so the shock candle does not influence its own baseline.
+        """
+        shifted_atr = atr_series.shift(1)
         for i in range(-self.lookback_candles, 0):
             if i < -len(df) + 1:
                 continue
             high = df["h"].iloc[i]
             low = df["l"].iloc[i]
             prev_close = df["c"].iloc[i - 1]
-            atr = atr_series.iloc[i]
+            atr = shifted_atr.iloc[i]
             if pd.isna(atr) or atr <= 0:
                 continue
             tr = self._true_range(high, low, prev_close)
@@ -121,13 +125,17 @@ class VolatilityShockFilter:
         df: pd.DataFrame,
         atr_series: pd.Series,
     ) -> Optional[ShockDetectionResult]:
-        """Rule 2: abs(close - close_2) >= N x ATR."""
+        """Rule 2: abs(close - close_2) >= N x ATR.
+
+        ATR is shifted by 1 so the shock candle does not influence its own baseline.
+        """
+        shifted_atr = atr_series.shift(1)
         for i in range(-self.lookback_candles, 0):
             if i < -len(df) + 2:
                 continue
             close = df["c"].iloc[i]
             close_2 = df["c"].iloc[i - 2]
-            atr = atr_series.iloc[i]
+            atr = shifted_atr.iloc[i]
             if pd.isna(atr) or atr <= 0:
                 continue
             diff = abs(close - close_2)
@@ -152,13 +160,17 @@ class VolatilityShockFilter:
         df: pd.DataFrame,
         atr_series: pd.Series,
     ) -> Optional[ShockDetectionResult]:
-        """Rule 3: abs(close - close_3) >= N x ATR."""
+        """Rule 3: abs(close - close_3) >= N x ATR.
+
+        ATR is shifted by 1 so the shock candle does not influence its own baseline.
+        """
+        shifted_atr = atr_series.shift(1)
         for i in range(-self.lookback_candles, 0):
             if i < -len(df) + 3:
                 continue
             close = df["c"].iloc[i]
             close_3 = df["c"].iloc[i - 3]
-            atr = atr_series.iloc[i]
+            atr = shifted_atr.iloc[i]
             if pd.isna(atr) or atr <= 0:
                 continue
             diff = abs(close - close_3)
@@ -306,6 +318,8 @@ class VolatilityShockFilter:
         Uses a simple heuristic: any candle whose TR > 2.5x ATR is excluded.
         This is intentionally stricter than the shock threshold so we filter
         borderline abnormal candles too.
+
+        ATR is shifted by 1 so the judged candle does not influence its own baseline.
         """
         if not self.enabled or len(candles) < 15:
             return candles, []
@@ -313,6 +327,7 @@ class VolatilityShockFilter:
         df = candles_to_df(candles)
         df.index = pd.DatetimeIndex([c.time for c in candles])
         atr_series = calculate_atr(df, length=14)
+        shifted_atr = atr_series.shift(1)
 
         excluded: list[int] = []
         clean: list[Candle] = []
@@ -320,7 +335,7 @@ class VolatilityShockFilter:
             if i == 0:
                 clean.append(candle)
                 continue
-            atr = atr_series.iloc[i]
+            atr = shifted_atr.iloc[i]
             if pd.isna(atr) or atr <= 0:
                 clean.append(candle)
                 continue

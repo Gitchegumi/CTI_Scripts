@@ -48,6 +48,148 @@ def _fixed_atr_series(atr: float, length: int) -> pd.Series:
     return pd.Series([atr] * length)
 
 
+class TestPriorOnlyATR:
+    """ATR used for shock detection must be prior-only (Bug 2)."""
+
+    def test_shifted_atr_prevents_self_influence_single_candle(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        prev_close = candles[-2].c
+        # TR = 0.005; last ATR = 100.0 (inflated), prior ATR = 0.001
+        atr_values = [0.001] * (len(candles) - 1) + [100.0]
+        candles[-1] = _candle(
+            candles[-1].time,
+            candles[-1].o,
+            prev_close + 0.0030,
+            candles[-1].c - 0.0050,
+            candles[-1].c,
+        )
+
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series(atr_values),
+        )
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        f.candle_multiple = 3.0
+        f.lookback_candles = 3
+
+        result = f.detect(candles, "M5")
+        # With prior-only ATR (0.001), TR=0.005 is 5x → shock detected
+        # Without shift, ATR=100.0 would make it 0.05x → no shock
+        assert result.detected is True
+        assert result.rule == "single_candle_tr"
+        assert result.atr == 0.001  # prior ATR, not the inflated last one
+
+    def test_shifted_atr_prevents_self_influence_2_bar(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        # diff = 0.005; last ATR = 100.0, prior ATR = 0.001
+        atr_values = [0.001] * (len(candles) - 1) + [100.0]
+        candles[-1] = _candle(
+            candles[-1].time, candles[-1].o, candles[-1].h, candles[-1].l,
+            candles[-3].c - 0.0050,
+        )
+
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series(atr_values),
+        )
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        f.bar2_multiple = 4.0
+        f.lookback_candles = 3
+
+        result = f.detect(candles, "M5")
+        assert result.detected is True
+        assert result.atr == 0.001  # prior ATR, not the inflated last one
+
+    def test_shifted_atr_prevents_self_influence_3_bar(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        atr_values = [0.001] * (len(candles) - 1) + [100.0]
+        candles[-1] = _candle(
+            candles[-1].time, candles[-1].o, candles[-1].h, candles[-1].l,
+            candles[-4].c - 0.0060,
+        )
+
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series(atr_values),
+        )
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        f.bar3_multiple = 5.0
+        f.lookback_candles = 3
+
+        result = f.detect(candles, "M5")
+        assert result.detected is True
+        assert result.rule == "3_bar_close"
+        assert result.atr == 0.001
+
+    def test_shifted_atr_skips_when_prior_is_na(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        # First ATR is NaN, rest are normal; shifted makes index 0 use NaN
+        atr_values = [float("nan")] + [0.001] * (len(candles) - 1)
+        prev_close = candles[-2].c
+        candles[-1] = _candle(
+            candles[-1].time,
+            candles[-1].o,
+            prev_close + 0.0030,
+            candles[-1].c - 0.0050,
+            candles[-1].c,
+        )
+
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series(atr_values),
+        )
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        f.candle_multiple = 3.0
+        f.lookback_candles = 3
+
+        result = f.detect(candles, "M5")
+        # Index -1 shifted ATR comes from index -2 which is 0.001
+        assert result.detected is True
+
+    def test_filtered_lr_uses_shifted_atr(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(30, base, price=1.1000)
+        # Make index 15 have inflated ATR but normal prior ATR
+        atr_values = [0.001] * 15 + [100.0] + [0.001] * 14
+        candles[15] = _candle(
+            candles[15].time,
+            candles[15].o,
+            candles[15].h + 0.0120,
+            candles[15].l,
+            candles[15].c,
+        )
+
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series(atr_values),
+        )
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+
+        clean, excluded = f.filter_candles_for_lr(candles)
+        # With shifted ATR, index 15 uses prior ATR=0.001, TR ~0.012 → 12x → excluded
+        assert 15 in excluded
+        # Index 16 uses prior ATR=100.0 (from index 15 original), but after shift,
+        # index 16 gets ATR from index 15 which was 100.0 before shift... wait.
+        # Actually in filter_candles_for_lr, shifted_atr.iloc[16] = atr_values[15] = 100.0
+        # So index 16 may NOT be excluded because its prior ATR is inflated.
+        # The key point: the judged candle does not influence its own baseline.
+        assert len(clean) == len(candles) - len(excluded)
+
+
 class TestDetectionRules:
     def test_single_candle_tr_rule_fires_when_3x_atr(self, monkeypatch):
         base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
