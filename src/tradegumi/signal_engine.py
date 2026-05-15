@@ -37,15 +37,21 @@ log = log.getLogger(__name__)
 
 
 def _shock_diagnostic_criterion(shock: ShockDetectionResult) -> CriterionResult:
-    """Build the blocking criterion for a volatility-shock suppression."""
+    """Build an informational criterion that records a volatility-shock event.
+
+    A detected shock is a triggered safety condition, NOT a failed calculation.
+    The criterion is non-blocking (required=False) and carries no pass/fail verdict
+    so the dashboard does not present "volatility_shock failed".
+    """
     return _criterion(
         "volatility_shock",
         "data_quality",
         shock.to_dict(),
         "no_shock",
-        False,
+        None,
         None,
         "boolean",
+        required=False,
         reason="market_invalid:volatility_shock",
         context=shock.to_dict(),
     )
@@ -614,12 +620,12 @@ class SignalEngine:
         self,
         symbol: str,
         candles_by_tf: Optional[dict[str, list[Candle]]] = None,
-    ) -> tuple[Optional[str], float, float, float, float, float, float, list[int], list[int], list[int]]:
+    ) -> tuple[Optional[str], float, float, float, float, float, float, list[int], list[int], list[int], dict]:
         """Linear Regression trend filter with raw + filtered LR.
 
         All 3 TFs must agree: 1H (count=30, length=20), 15m (length=25), 5m (length=14).
         Returns (trend, raw_lr_1h, raw_lr_15m, raw_lr_5m, filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
-                 excluded_1h, excluded_15m, excluded_5m).
+                 excluded_1h, excluded_15m, excluded_5m, trend_decision).
         """
         if candles_by_tf is None:
             candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
@@ -671,11 +677,41 @@ class SignalEngine:
             filtered_lr_5 = calculate_linear_regression(df_5_clean, length=14).iloc[-1]
 
         # Use filtered LRs for trend classification when enabled
-        if self.shock_filter.enabled and (usable_1h and usable_15m and usable_5m):
-            trend_decision = classify_trend_decision(
-                filtered_lr_1h, filtered_lr_15, filtered_lr_5,
-                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
-            )
+        if self.shock_filter.enabled:
+            if usable_1h and usable_15m and usable_5m:
+                trend_decision = classify_trend_decision(
+                    filtered_lr_1h, filtered_lr_15, filtered_lr_5,
+                    self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
+                )
+            else:
+                # Shock filter enabled but insufficient clean data → no trend, do NOT fall back to raw LR
+                trend_decision = {
+                    "strength_passed_1h": usable_1h and abs(filtered_lr_1h) >= self.LR_1H_THRESHOLD,
+                    "strength_passed_15m": usable_15m and abs(filtered_lr_15) >= self.LR_15M_THRESHOLD,
+                    "strength_passed_5m": usable_5m and abs(filtered_lr_5) >= self.LR_5M_THRESHOLD,
+                    "direction_1h": _lr_direction(filtered_lr_1h),
+                    "direction_15m": _lr_direction(filtered_lr_15),
+                    "direction_5m": _lr_direction(filtered_lr_5),
+                    "directions_agree": False,
+                    "strengths_all_passed": False,
+                    "trend_classification_input": {
+                        "lr_1h": filtered_lr_1h,
+                        "lr_15m": filtered_lr_15,
+                        "lr_5m": filtered_lr_5,
+                        "threshold_1h": self.LR_1H_THRESHOLD,
+                        "threshold_15m": self.LR_15M_THRESHOLD,
+                        "threshold_5m": self.LR_5M_THRESHOLD,
+                    },
+                    "trend_classification_output": {
+                        "trend_result": "flat",
+                        "final_direction": "none",
+                        "no_trend_reason": "insufficient_clean_data",
+                    },
+                    "trend_result": "flat",
+                    "final_direction": "none",
+                    "no_trend_reason": "insufficient_clean_data",
+                }
+                return trend, raw_lr_1h, raw_lr_15, raw_lr_5, filtered_lr_1h, filtered_lr_15, filtered_lr_5, excluded_1h, excluded_15m, excluded_5m, trend_decision
         else:
             trend_decision = classify_trend_decision(
                 raw_lr_1h, raw_lr_15, raw_lr_5,
@@ -692,7 +728,7 @@ class SignalEngine:
         else:
             trend = None
 
-        return trend, raw_lr_1h, raw_lr_15, raw_lr_5, filtered_lr_1h, filtered_lr_15, filtered_lr_5, excluded_1h, excluded_15m, excluded_5m
+        return trend, raw_lr_1h, raw_lr_15, raw_lr_5, filtered_lr_1h, filtered_lr_15, filtered_lr_5, excluded_1h, excluded_15m, excluded_5m, trend_decision
 
     # ── 4-Layer Signal Stack ─────────────────────────────────────────────────
 
@@ -1213,6 +1249,7 @@ class SignalEngine:
                 raw_lr_1h, raw_lr_15, raw_lr_5,
                 filtered_lr_1h, filtered_lr_15, filtered_lr_5,
                 excluded_1h, excluded_15m, excluded_5m,
+                trend_decision,
             ) = self._get_trend(symbol, candles_by_tf={"H1": candles_1h, "M15": candles_15m, "M5": candles_5m})
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="trend_filter")
@@ -1233,17 +1270,7 @@ class SignalEngine:
                 raw_lr_1h, raw_lr_15, raw_lr_5,
                 self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
             )
-            trend_changed_after_filter = raw_trend["trend_result"] != classify_trend_decision(
-                filtered_lr_1h, filtered_lr_15, filtered_lr_5,
-                self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
-            )["trend_result"]
-
-        trend_decision = classify_trend_decision(
-            filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h,
-            filtered_lr_15 if self.shock_filter.enabled else raw_lr_15,
-            filtered_lr_5 if self.shock_filter.enabled else raw_lr_5,
-            self.LR_1H_THRESHOLD, self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD,
-        )
+            trend_changed_after_filter = raw_trend["trend_result"] != trend_decision["trend_result"]
 
         lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
         lr_15 = filtered_lr_15 if self.shock_filter.enabled else raw_lr_15

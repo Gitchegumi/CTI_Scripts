@@ -578,8 +578,14 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at,
                 first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
                 near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
-                stats_exclusion_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                stats_exclusion_reason,
+                volatility_shock_detected, shock_timeframe, shock_candle_time, shock_true_range,
+                shock_atr, shock_atr_multiple, shock_lookback_bars, shock_direction,
+                shock_suppression_until, shock_suppression_candles_remaining,
+                raw_lr_1h, raw_lr_15m, raw_lr_5m,
+                filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
+                trend_changed_after_filter, market_validity_state, market_validity_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -608,6 +614,25 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 opportunity.threshold_version_unknown_reason,
                 None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
                 opportunity.stats_exclusion_reason,
+                int(opportunity.volatility_shock_detected),
+                opportunity.shock_timeframe,
+                opportunity.shock_candle_time,
+                opportunity.shock_true_range,
+                opportunity.shock_atr,
+                opportunity.shock_atr_multiple,
+                opportunity.shock_lookback_bars,
+                opportunity.shock_direction,
+                opportunity.shock_suppression_until,
+                opportunity.shock_suppression_candles_remaining,
+                opportunity.raw_lr_1h,
+                opportunity.raw_lr_15m,
+                opportunity.raw_lr_5m,
+                opportunity.filtered_lr_1h,
+                opportunity.filtered_lr_15m,
+                opportunity.filtered_lr_5m,
+                int(opportunity.trend_changed_after_filter),
+                opportunity.market_validity_state,
+                opportunity.market_validity_reason,
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
@@ -703,6 +728,26 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
             None if "usable_for_strategy_stats" not in row.keys() or row["usable_for_strategy_stats"] is None else bool(row["usable_for_strategy_stats"])
         ),
         stats_exclusion_reason=row["stats_exclusion_reason"] if "stats_exclusion_reason" in row.keys() else None,
+        # Volatility shock + filtered LR fields
+        volatility_shock_detected=bool(row["volatility_shock_detected"]) if "volatility_shock_detected" in row.keys() else False,
+        shock_timeframe=row["shock_timeframe"] if "shock_timeframe" in row.keys() else None,
+        shock_candle_time=row["shock_candle_time"] if "shock_candle_time" in row.keys() else None,
+        shock_true_range=row["shock_true_range"] if "shock_true_range" in row.keys() else None,
+        shock_atr=row["shock_atr"] if "shock_atr" in row.keys() else None,
+        shock_atr_multiple=row["shock_atr_multiple"] if "shock_atr_multiple" in row.keys() else None,
+        shock_lookback_bars=row["shock_lookback_bars"] if "shock_lookback_bars" in row.keys() else 0,
+        shock_direction=row["shock_direction"] if "shock_direction" in row.keys() else "none",
+        shock_suppression_until=row["shock_suppression_until"] if "shock_suppression_until" in row.keys() else None,
+        shock_suppression_candles_remaining=row["shock_suppression_candles_remaining"] if "shock_suppression_candles_remaining" in row.keys() else 0,
+        raw_lr_1h=row["raw_lr_1h"] if "raw_lr_1h" in row.keys() else None,
+        raw_lr_15m=row["raw_lr_15m"] if "raw_lr_15m" in row.keys() else None,
+        raw_lr_5m=row["raw_lr_5m"] if "raw_lr_5m" in row.keys() else None,
+        filtered_lr_1h=row["filtered_lr_1h"] if "filtered_lr_1h" in row.keys() else None,
+        filtered_lr_15m=row["filtered_lr_15m"] if "filtered_lr_15m" in row.keys() else None,
+        filtered_lr_5m=row["filtered_lr_5m"] if "filtered_lr_5m" in row.keys() else None,
+        trend_changed_after_filter=bool(row["trend_changed_after_filter"]) if "trend_changed_after_filter" in row.keys() else False,
+        market_validity_state=row["market_validity_state"] if "market_validity_state" in row.keys() else "valid",
+        market_validity_reason=row["market_validity_reason"] if "market_validity_reason" in row.keys() else None,
     )
 
 

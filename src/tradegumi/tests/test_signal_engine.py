@@ -6,7 +6,9 @@ from tradegumi.api.base_client import Candle, ProviderRequestError
 from tradegumi.signal_engine import (
     SignalEngine,
     _last_closed_candle_window,
+    classify_trend_decision,
 )
+from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 
 
 class FakeClient:
@@ -379,3 +381,120 @@ def test_actual_pandas_ta_macd_and_keltner_columns_match_signal_engine_predicate
     assert upper_col == "KCUe_20_1.5", f"Expected KCUe, got {upper_col}"
     assert lower_col == "KCLe_20_1.5", f"Expected KCLe, got {lower_col}"
     assert mid_col == "KCBe_20_1.5", f"Expected KCBe, got {mid_col}"
+
+
+class TestShockDiagnosticSemantics:
+    """Bug 1: Shock diagnostic semantics."""
+
+    def test_no_shock_does_not_add_volatility_shock_criterion(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+            shock_filter=VolatilityShockFilter(),
+        )
+        # Force no shock on any timeframe
+        def _no_shock_detect(self, candles_list, tf):
+            return ShockDetectionResult(detected=False, timeframe=tf)
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.VolatilityShockFilter.detect",
+            _no_shock_detect,
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        shock_criteria = [c for c in diag.criteria if c.criterion_name == "volatility_shock"]
+        assert len(shock_criteria) == 0
+        assert diag.market_validity_state == "valid"
+        assert diag.market_validity_reason is None
+
+    def test_shock_rows_categorized_market_invalid_volatility_shock(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+        )
+        # Inject a shock into the last candle of M5
+        prev_close = candles[-2].c
+        candles[-1] = Candle(
+            t=candles[-1].time.isoformat(),
+            o=candles[-1].o,
+            h=prev_close + 0.0050,
+            l=candles[-1].l,
+            c=candles[-1].c,
+            s=100,
+        )
+        monkeypatch.setattr(
+            "tradegumi.volatility_shock.calculate_atr",
+            lambda df, length=14: pd.Series([0.0010] * len(df)),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        assert diag.volatility_shock_detected is True
+        assert diag.market_validity_state == "invalid"
+        assert diag.market_validity_reason == "market_invalid:volatility_shock"
+        # volatility_shock criterion should be present and informational (not a hard fail)
+        shock_criteria = [c for c in diag.criteria if c.criterion_name == "volatility_shock"]
+        assert len(shock_criteria) >= 1
+        assert shock_criteria[0].required is False
+        assert shock_criteria[0].passed is None
+
+
+class TestFilteredLRNoFallback:
+    """Bug 3: Filtered LR must NOT fall back to raw LR."""
+
+    def test_insufficient_clean_data_returns_no_trend(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+            shock_filter=VolatilityShockFilter(),
+        )
+        # Make shock filter strip out most candles (simulate >50% excluded)
+        def strip_most(candles_list):
+            # Keep only first and last candle
+            return [candles_list[0], candles_list[-1]], list(range(1, len(candles_list) - 1))
+        engine.shock_filter.filter_candles_for_lr = strip_most
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        # Insufficient clean data → trend should be None (flat), not derived from raw LR
+        assert trend is None
+        assert diag.decision_reason == "no_trend"
+        assert diag.trend_decision is not None
+        assert diag.trend_decision["trend_classification_output"]["no_trend_reason"] == "insufficient_clean_data"
+
+    def test_shock_disabled_uses_raw_lr(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+            shock_filter=VolatilityShockFilter(),
+        )
+        engine.shock_filter.enabled = False
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        assert trend == "Uptrend"
+        assert diag.trend_decision["trend_classification_output"]["no_trend_reason"] is None
