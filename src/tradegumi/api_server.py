@@ -728,6 +728,22 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             log.info("API: Restart requested via API")
             self._send_json({"status": "restart_requested"})
 
+        elif path == "/api/purge":
+            if not self._require_auth():
+                return
+            targets = body.get("targets")
+            if targets is not None and not isinstance(targets, list):
+                self._send_json({"error": "targets must be a list or omitted"}, 400)
+                return
+            from tradegumi.purge import purge_all
+            try:
+                results = purge_all(targets=targets)
+                log.info("API: Purge executed — targets=%s, results=%s", targets, results)
+                self._send_json({"ok": True, "results": results})
+            except Exception as e:
+                log.error("API: Purge failed: %s", e)
+                self._send_json({"error": str(e)}, 500)
+
         else:
             self._send_json({"error": "not found"}, 404)
 
