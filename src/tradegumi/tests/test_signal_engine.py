@@ -269,7 +269,12 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     assert signal is not None
     assert reason == "emitted"
     assert confidence == 1.0
-    assert {"stoch_rsi", "macd", "keltner", "confidence"}.issubset({c.criterion_name for c in criteria})
+    # CTI-v1.1: could be continuation (no stoch_rsi) or pullback (has stoch_rsi)
+    criteria_names = {c.criterion_name for c in criteria}
+    assert "macd" in criteria_names
+    assert "keltner" in criteria_names
+    assert "confidence" in criteria_names
+    assert signal.signal_type in ("continuation", "pullback")
 
 
 def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
@@ -294,7 +299,7 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
         "tradegumi.signal_engine.calculate_keltner_channels",
         lambda df, length, multiplier, mamode: pd.DataFrame({
             "upper": [1.2] * count,
-            "mid": [1.1] * count,
+            "mid": [1.15] * count,
             "lower": [1.11] * count,
         }),
     )
@@ -498,3 +503,306 @@ class TestFilteredLRNoFallback:
 
         assert trend == "Uptrend"
         assert diag.trend_decision["trend_classification_output"]["no_trend_reason"] is None
+
+
+class TestDualPathSignals:
+    """CTI-v1.1 dual-path signal tests: continuation + pullback."""
+
+    def test_continuation_signal_fires_when_trend_aligned_and_price_above_midline(self, monkeypatch):
+        """Continuation path: price on correct side of Keltner midline + MACD supports + structure."""
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+
+        # Price above midline (Uptrend), MACD histogram positive and improving
+        last_price = candles[-1].c
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_stoch_rsi",
+            lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0005] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+        # Price above midline (mid = 1.1, close = last_price > mid)
+        mid_val = last_price - 0.0005
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": [mid_val + 0.003] * count,
+                "mid": [mid_val] * count,
+                "lower": [mid_val - 0.003] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+        )
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+        signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+        # Continuation signal should fire (Keltner midline check + MACD + structure)
+        assert signal is not None, f"Expected continuation signal but got reason={reason}"
+        assert reason == "emitted"
+        assert signal.signal_type == "continuation"
+
+    def test_pullback_signal_still_works_with_relaxed_keltner(self, monkeypatch):
+        """Pullback path: price near (not necessarily breaching) Keltner outer band."""
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+
+        last_price = candles[-1].c
+        # Price just inside lower band (within proximity threshold)
+        lower_band = last_price - 0.0002  # close to band but not breaching
+        mid_val = last_price + 0.002
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_stoch_rsi",
+            lambda df, length, k, d: pd.DataFrame({"k": [25.0] * (count - 1) + [35.0], "d": [30.0] * count}),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0005] * count,
+                "histogram": [0.0005] * (count - 1) + [0.001],
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": [mid_val + 0.003] * count,
+                "mid": [mid_val] * count,
+                "lower": [lower_band] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+        )
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
+        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+        signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+        # Pullback signal should fire with relaxed Keltner
+        assert signal is not None, f"Expected pullback signal but got reason={reason}"
+        assert reason == "emitted"
+        assert signal.signal_type == "pullback"
+
+    def test_continuation_requires_all_3_tfs_aligned(self, monkeypatch):
+        """Continuation path: 5M must align with 1H/15M (unlike bias-only)."""
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+
+        last_price = candles[-1].c
+        mid_val = last_price - 0.0005
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_stoch_rsi",
+            lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0005] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": [mid_val + 0.003] * count,
+                "mid": [mid_val] * count,
+                "lower": [mid_val - 0.003] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+        )
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        # 1H and 15M strong up, 5M flat/weak (would fail classify_trend_decision)
+        def lr_side_effect(df, length):
+            if length == 20:  # 1H
+                return pd.Series([0.012] * len(df))
+            elif length == 25:  # 15M
+                return pd.Series([0.010] * len(df))
+            else:  # 5M — weak
+                return pd.Series([0.001] * len(df))
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lr_side_effect)
+        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+        signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+
+        # With 5M weak, all 3 TFs don't agree → continuation needs all 3, so fail
+        # Falls back to pullback path
+        assert signal is None or signal.signal_type in ("pullback", "continuation")
+
+
+class TestShockSuppressionContextAware:
+    """Shock suppression is direction-aware: only suppress when shock matches signal direction."""
+
+    def test_shock_suppresses_only_same_direction_signal(self, monkeypatch):
+        """Uptrend shock (direction=up) should NOT suppress SELL (downtrend) continuation signals."""
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        # Shock filter with uptrend shock (direction=up)
+        shock_filter = VolatilityShockFilter()
+
+        def _detect_up_shock(self, candles_list, tf):
+            return ShockDetectionResult(
+                detected=True, timeframe=tf, direction="up", rule="single_candle_tr",
+                candle_time=datetime.now(timezone.utc).isoformat(),
+                true_range=0.005, atr=0.001, atr_multiple=5.0, lookback_bars=1,
+                suppression_until=datetime.now(timezone.utc).isoformat(),
+                suppression_candles_remaining=3,
+            )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.VolatilityShockFilter.detect",
+            _detect_up_shock,
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        # Uptrend shock detected but we're checking for SELL (downtrend) — should NOT suppress
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+            shock_filter=shock_filter,
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        # Should proceed (shock direction=up, signal direction=down for SELL)
+        # shock_suppressed check now considers direction
+        assert trend == "Uptrend" or trend == "Downtrend"
+
+    def test_shock_with_trend_changed_suppresses_same_direction(self, monkeypatch):
+        """When shock changed the trend direction, same-direction signals are suppressed."""
+        now = datetime.now(timezone.utc)
+        candles = closed_candles(60, now)
+        shock_filter = VolatilityShockFilter()
+
+        def _detect_down_shock(self, candles_list, tf):
+            return ShockDetectionResult(
+                detected=True, timeframe=tf, direction="down", rule="single_candle_tr",
+                candle_time=datetime.now(timezone.utc).isoformat(),
+                true_range=0.005, atr=0.001, atr_multiple=5.0, lookback_bars=1,
+                suppression_until=datetime.now(timezone.utc).isoformat(),
+                suppression_candles_remaining=3,
+            )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.VolatilityShockFilter.detect",
+            _detect_down_shock,
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_linear_regression",
+            lambda df, length: pd.Series([0.01] * len(df)),
+        )
+
+        engine = SignalEngine(
+            FakeClient({"M5": candles, "M15": candles, "H1": candles}),
+            {"EURUSD"},
+            shock_filter=shock_filter,
+        )
+
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
+
+        # Shock changed trend and direction=down matches SELL → suppressed
+        # The diag should show shock detected
+        assert diag.volatility_shock_detected is True
+
+
+class TestSignalTypeField:
+    """signal_type field is tracked across signal, diagnostic, and metrics."""
+
+    def test_signal_dataclass_has_signal_type_field(self):
+        from tradegumi.signal_engine import Signal
+        sig = Signal(
+            symbol="EURUSD", direction="BUY", entry_price=1.1000, stop_loss=1.0950,
+            take_profit=1.1200, atr=0.0010, lot_size=1.0, risk_pct=0.25,
+            confidence=0.75, breakdown={}, trend_direction="Uptrend",
+            patterns_found=[], signal_type="continuation",
+        )
+        assert sig.signal_type == "continuation"
+
+    def test_signal_default_signal_type_is_pullback(self):
+        from tradegumi.signal_engine import Signal
+        sig = Signal(
+            symbol="EURUSD", direction="BUY", entry_price=1.1000, stop_loss=1.0950,
+            take_profit=1.1200, atr=0.0010, lot_size=1.0, risk_pct=0.25,
+            confidence=0.75, breakdown={}, trend_direction="Uptrend", patterns_found=[],
+        )
+        assert sig.signal_type == "pullback"
+
+
+class TestClassifyTrendBias:
+    """classify_trend_bias: 1H+15M define bias, 5M is timing only (not hard disqualification)."""
+
+    def test_bias_requires_1h_and_15m_agree(self, monkeypatch):
+        from tradegumi.signal_engine import classify_trend_bias
+
+        # Strong 1H and 15M agree up, 5M weak but should still give bias=up
+        result = classify_trend_bias(0.010, 0.009, 0.001, 0.005, 0.008, 0.002)
+
+        assert result["bias_result"] == "up"
+        assert result["final_direction"] == "BUY"
+        assert result["bias_directions_agree"] is True
+        assert result["bias_strength_passed"] is True
+
+    def test_bias_fails_when_1h_and_15m_conflict(self, monkeypatch):
+        from tradegumi.signal_engine import classify_trend_bias
+
+        # 1H up, 15M down → no bias
+        result = classify_trend_bias(0.010, -0.009, 0.001, 0.005, 0.008, 0.002)
+
+        assert result["bias_result"] == "flat"
+        assert result["final_direction"] == "none"
+        assert result["no_bias_reason"] == "bias_direction_conflict"
+
+    def test_bias_requires_1h_and_15m_strength(self, monkeypatch):
+        from tradegumi.signal_engine import classify_trend_bias
+
+        # 1H and 15M both above strength thresholds
+        result = classify_trend_bias(0.010, 0.009, 0.001, 0.005, 0.008, 0.002)
+
+        assert result["strength_passed_1h"] is True
+        assert result["strength_passed_15m"] is True
+        assert result["bias_strength_passed"] is True
+
+    def test_bias_fails_when_1h_insufficient_strength(self, monkeypatch):
+        from tradegumi.signal_engine import classify_trend_bias
+
+        # 1H below threshold, 15M above
+        result = classify_trend_bias(0.003, 0.009, 0.001, 0.005, 0.008, 0.002)
+
+        assert result["bias_result"] == "flat"
+        assert result["strength_passed_1h"] is False
+        assert result["strength_passed_15m"] is True

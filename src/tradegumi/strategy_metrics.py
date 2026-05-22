@@ -131,6 +131,7 @@ class EvaluatedOpportunity:
     timeframe: str = "M5"
     mode: str = "alert_only"
     strategy: str = "CTI-v1"
+    signal_type: str = "pullback"  # "pullback" or "continuation"
     direction: str = "none"
     trend: str = "unknown"
     final_decision: str = "indeterminate"
@@ -267,6 +268,7 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 timeframe TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 strategy TEXT NOT NULL,
+                signal_type TEXT NOT NULL DEFAULT 'pullback',
                 direction TEXT NOT NULL,
                 trend TEXT NOT NULL,
                 final_decision TEXT NOT NULL,
@@ -331,6 +333,7 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         _ensure_column(conn, "evaluated_opportunities", "threshold_version_unknown_reason", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "usable_for_strategy_stats", "INTEGER")
         _ensure_column(conn, "evaluated_opportunities", "stats_exclusion_reason", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "signal_type", "TEXT NOT NULL DEFAULT 'pullback'")
         _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
         _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
@@ -573,7 +576,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
         conn.execute(
             """
             INSERT OR REPLACE INTO evaluated_opportunities (
-                id, evaluated_at, symbol, timeframe, mode, strategy, direction, trend,
+                id, evaluated_at, symbol, timeframe, mode, strategy, signal_type, direction, trend,
                 final_decision, decision_reason, confidence, failed_criteria_count,
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at,
                 first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
@@ -585,7 +588,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 raw_lr_1h, raw_lr_15m, raw_lr_5m,
                 filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
                 trend_changed_after_filter, market_validity_state, market_validity_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -594,6 +597,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 opportunity.timeframe,
                 opportunity.mode,
                 opportunity.strategy,
+                opportunity.signal_type,
                 opportunity.direction,
                 opportunity.trend,
                 opportunity.final_decision,
