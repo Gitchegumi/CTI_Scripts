@@ -187,3 +187,16 @@ export async function exportManualTrades(params: {
 } = {}): Promise<AgentExport> {
   return apiFetch<AgentExport>(`/api/manual-trades/export?${query(params)}`);
 }
+
+export interface PurgeResult {
+  ok: boolean;
+  results?: Record<string, boolean>;
+  error?: string;
+}
+
+export async function purgeData(targets?: string[]): Promise<PurgeResult> {
+  return apiFetch<PurgeResult>("/api/purge", {
+    method: "POST",
+    body: JSON.stringify(targets ? { targets } : {}),
+  });
+}
