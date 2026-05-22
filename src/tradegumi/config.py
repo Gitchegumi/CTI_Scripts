@@ -71,6 +71,16 @@ RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.0025"))  # 0.25%
 SL_ATR_MULTIPLIER = float(os.getenv("SL_ATR_MULTIPLIER", "3"))
 TP_ATR_MULTIPLIER = float(os.getenv("TP_ATR_MULTIPLIER", "12"))
 
+# ── CTI-v1.1 Dual-Path Thresholds ──────────────────────────────────────────
+# Continuation path (CTI-v1.1-continuation-test)
+CONTINUATION_KC_PROXIMITY_ATR = float(os.getenv("CONTINUATION_KC_PROXIMITY_ATR", "0.25"))
+CONTINUATION_STRUCTURE_BARS = int(os.getenv("CONTINUATION_STRUCTURE_BARS", "5"))
+# Pullback path relaxed thresholds
+PULLBACK_KC_PROXIMITY_ATR = float(os.getenv("PULLBACK_KC_PROXIMITY_ATR", "0.25"))
+PULLBACK_STOCH_RSI_RELAXED = os.getenv("PULLBACK_STOCH_RSI_RELAXED", "true").lower() in ("true", "1", "yes")
+# Trend bias: 1H+15M agreement only (continuation) vs full 3-TF (pullback)
+CONTINUATION_TREND_REQUIRE_5M = os.getenv("CONTINUATION_TREND_REQUIRE_5M", "false").lower() in ("true", "1", "yes")
+
 # ── Symbols ─────────────────────────────────────────────────────────────────
 FOREX_MAJORS = ["EURUSD", "GBPUSD", "NZDUSD", "AUDUSD", "USDCHF", "USDCAD", "USDJPY"]
 FOREX_MINORS = [
