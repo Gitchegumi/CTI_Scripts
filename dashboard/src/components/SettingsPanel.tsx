@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ApiStatus, modeDisplayLabel, setMode, setChallengeType, setPhase, triggerRescan } from "@/lib/api";
+import { ApiStatus, modeDisplayLabel, setMode, setChallengeType, setPhase, triggerRescan, purgeData } from "@/lib/api";
 
 interface SettingsPanelProps {
   status: ApiStatus | null;
@@ -54,6 +54,20 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
   const [pendingMode, setPendingMode] = useState<ApiStatus["mode"] | null>(null);
   const [pendingChallengeType, setPendingChallengeType] = useState<ApiStatus["challenge_type"] | null>(null);
   const [pendingPhase, setPendingPhase] = useState<ApiStatus["phase"] | null>(null);
+
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+  const [purgeTargets, setPurgeTargets] = useState<Record<string, boolean>>({
+    journal: true,
+    strategy_metrics: true,
+    manual_trades: true,
+    signals: true,
+    loop_state: false,
+    session_state: false,
+    trade_correlations: false,
+  });
+  const [purgeConfirmText, setPurgeConfirmText] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<{ ok: boolean; results?: Record<string, boolean>; error?: string } | null>(null);
 
   const mode = status?.mode ?? pendingMode ?? "alert_only";
   const challenge_type = status?.challenge_type ?? pendingChallengeType ?? "1-step";
@@ -119,9 +133,45 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
     }
   }
 
+  async function handlePurge() {
+    setPurging(true);
+    setPurgeResult(null);
+    try {
+      const targets = Object.entries(purgeTargets)
+        .filter(([, checked]) => checked)
+        .map(([name]) => name);
+      const result = await purgeData(targets.length > 0 ? targets : undefined);
+      setPurgeResult(result);
+      if (result.ok) {
+        setTimeout(() => {
+          setPurgeDialogOpen(false);
+          setPurgeResult(null);
+          setPurgeConfirmText("");
+        }, 2000);
+      }
+    } catch (e) {
+      setPurgeResult({ ok: false, error: String(e) });
+    } finally {
+      setPurging(false);
+    }
+  }
+
+  const purgeTargetLabels: Record<string, string> = {
+    journal: "Signal Journal",
+    strategy_metrics: "Strategy Metrics",
+    manual_trades: "Manual Trades",
+    signals: "Current Signals",
+    loop_state: "Loop State",
+    session_state: "Session State",
+    trade_correlations: "Trade Correlations",
+  };
+
+  const canPurge = purgeConfirmText.trim().toLowerCase() === "purge";
+
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
-      {/* Panel header */}
+    <>
+      <div className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+        {/* Panel header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
@@ -237,7 +287,93 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
               {rescanning ? "Rescanning..." : "Re-scan Watchlist"}
             </button>
           </div>
+
+          {/* Purge */}
+          <div className="pt-1 border-t border-slate-800">
+            <button
+              onClick={() => setPurgeDialogOpen(true)}
+              disabled={!authed}
+              className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded border border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-950/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <span>🗑️</span>
+              Purge Data...
+            </button>
+          </div>
         </div>
+
+        {/* Purge confirmation dialog */}
+        {purgeDialogOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => !purging && setPurgeDialogOpen(false)}>
+            <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl max-w-sm w-full mx-4 p-5 space-y-4" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2 text-red-400">
+                <span className="text-xl">⚠️</span>
+                <h3 className="font-semibold text-sm">Purge Data</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                This will permanently delete selected data. Backups are created automatically in <code className="text-slate-300">data/backups/</code>.
+              </p>
+              <div className="space-y-2">
+                {Object.entries(purgeTargetLabels).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={purgeTargets[key] ?? false}
+                      onChange={e => setPurgeTargets(prev => ({ ...prev, [key]: e.target.checked }))}
+                      disabled={purging}
+                      className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">Type "purge" to confirm</label>
+                <input
+                  type="text"
+                  value={purgeConfirmText}
+                  onChange={e => setPurgeConfirmText(e.target.value)}
+                  disabled={purging}
+                  placeholder="purge"
+                  className="w-full px-3 py-1.5 text-xs bg-slate-800 border border-slate-600 rounded text-slate-200 placeholder-slate-600 focus:outline-none focus:border-red-500"
+                />
+              </div>
+              {purgeResult && (
+                <div className={`text-xs rounded px-3 py-2 ${purgeResult.ok ? "bg-green-900/30 text-green-400" : "bg-red-900/30 text-red-400"}`}>
+                  {purgeResult.ok ? (
+                    <div>
+                      <div className="font-medium mb-1">Purge complete ✅</div>
+                      {purgeResult.results && Object.entries(purgeResult.results).map(([name, ok]) => (
+                        <div key={name} className="flex items-center gap-1">
+                          <span>{ok ? "✅" : "❌"}</span>
+                          <span>{purgeTargetLabels[name] || name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>Error: {purgeResult.error || "Unknown error"}</div>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePurge}
+                  disabled={!canPurge || purging}
+                  className="flex-1 px-3 py-2 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {purging ? "Purging..." : "Purge"}
+                </button>
+                <button
+                  onClick={() => { setPurgeDialogOpen(false); setPurgeResult(null); setPurgeConfirmText(""); }}
+                  disabled={purging}
+                  className="px-3 py-2 text-xs font-medium rounded border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Auth overlay */}
         {authed === false && (
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center rounded-lg">
@@ -252,5 +388,6 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
         )}
       </div>
     </div>
+  </>
   );
 }
