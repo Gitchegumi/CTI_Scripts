@@ -164,6 +164,14 @@ def from_oanda_symbol(oanda_sym: str) -> str:
     return oanda_sym.replace("_", "")
 
 
+# ── Chop / Regime Filter ────────────────────────────────────────────────────
+CHOP_FILTER_ENABLED = os.getenv("CHOP_FILTER_ENABLED", "true").lower() in ("true", "1", "yes")
+CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES = int(os.getenv("CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES", "6"))
+CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES = int(os.getenv("CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES", "6"))
+CHOP_MAX_DIRECTION_FLIPS = int(os.getenv("CHOP_MAX_DIRECTION_FLIPS", "1"))
+CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER = float(os.getenv("CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER", "1.25"))
+CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES = int(os.getenv("CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES", "2"))
+
 # ── CTI Challenge Rules ────────────────────────────────────────────────────
 # CTI_CHALLENGE_TYPE env var:
 #   1-step = 1-Step Challenge (8% profit target, single phase)

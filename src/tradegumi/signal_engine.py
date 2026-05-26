@@ -33,6 +33,71 @@ from tradegumi.indicators import (
     candles_to_df,
 )
 
+
+def _chop_diagnostic_criterion(
+    chop_type: str,
+    context: dict,
+) -> CriterionResult:
+    """Build a chop/regime filter criterion for diagnostics.
+
+    All chop blocks are market_validity criteria with required=True so they
+    appear as blockers in strategy metrics.
+    """
+    reason_map = {
+        "opposite_signal_chop": "market_invalid:opposite_signal_chop",
+        "chop_suppression": "market_invalid:chop_suppression",
+        "weak_15m_bridge": "trend:weak_15m_bridge",
+        "trend_not_persistent": "trend:not_persistent",
+        "direction_flip_chop": "market_invalid:direction_flip_chop",
+    }
+    reason = reason_map.get(chop_type, f"chop:{chop_type}")
+    return _criterion(
+        "chop_filter",
+        "trend",
+        context,
+        "chop_safe",
+        False,
+        None,
+        "boolean",
+        required=True,
+        reason=reason,
+        context=context,
+    )
+
+
+def _direction_label(trend: Optional[str]) -> str:
+    """Normalize trend string into BUY/SELL/none for chop comparison."""
+    if trend is None:
+        return "none"
+    t = str(trend).strip().upper()
+    if t in {"UPTREND", "UP", "BUY"}:
+        return "BUY"
+    if t in {"DOWNTREND", "DOWN", "SELL"}:
+        return "SELL"
+    return "none"
+
+
+def _actionable_direction(value: object) -> str:
+    """Return BUY/SELL/none for an lr numeric value or trend string."""
+    if isinstance(value, str):
+        v = value.strip().upper()
+        if v in {"BUY", "UPTREND", "UP"}:
+            return "BUY"
+        if v in {"SELL", "DOWNTREND", "DOWN"}:
+            return "SELL"
+        return "none"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "none"
+    if not math.isfinite(numeric):
+        return "none"
+    if numeric > 0:
+        return "BUY"
+    if numeric < 0:
+        return "SELL"
+    return "none"
+
 log = log.getLogger(__name__)
 
 
@@ -251,6 +316,13 @@ def get_threshold_version() -> str:
         "pullback_kc_proximity_atr": config.PULLBACK_KC_PROXIMITY_ATR,
         "pullback_stoch_rsi_relaxed": config.PULLBACK_STOCH_RSI_RELAXED,
         "continuation_trend_require_5m": config.CONTINUATION_TREND_REQUIRE_5M,
+        # Chop / regime filter thresholds
+        "chop_filter_enabled": config.CHOP_FILTER_ENABLED,
+        "chop_opposite_signal_suppression_candles": config.CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES,
+        "chop_direction_flip_lookback_candles": config.CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES,
+        "chop_max_direction_flips": config.CHOP_MAX_DIRECTION_FLIPS,
+        "chop_require_15m_strength_multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
+        "chop_require_trend_persistence_candles": config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:12]
@@ -707,6 +779,227 @@ class SignalEngine:
         self.client = client
         self.watchlist = watchlist or set(config.EXECUTION_SYMBOLS)
         self.shock_filter = shock_filter or VolatilityShockFilter()
+        # Per-instance chop filter state (was class-level; isolation fix)
+        self._chop_state: dict[str, dict] = {}
+
+    # ── Chop / Regime Filter helpers ──────────────────────────────────────────
+
+    def _record_signal_direction(self, symbol: str, direction: str, timestamp: Optional[datetime] = None) -> None:
+        """Record the most recent emitted usable signal direction per symbol.
+
+        Called whenever a signal is actually emitted.
+        """
+        now = timestamp or datetime.now(timezone.utc)
+        state = self._chop_state.setdefault(symbol, {})
+        state["last_signal_direction"] = direction
+        state["last_signal_timestamp"] = now.isoformat()
+        state["last_signal_timestamp_unix"] = now.timestamp()
+
+    def _has_opposite_signal_conflict(self, symbol: str, direction: str) -> tuple[bool, dict]:
+        """Check if a prior same-symbol signal is unresolved (no opposite-direction conflict).
+
+        Returns (conflict, context) where context is None when no conflict.
+        """
+        state = self._chop_state.get(symbol)
+        if state is None:
+            return False, {}
+        last_dir = state.get("last_signal_direction")
+        if last_dir is None:
+            return False, {}
+        current = _direction_label(direction)
+        last = _direction_label(last_dir)
+        if current != "none" and last != "none" and current != last:
+            return True, {
+                "symbol": symbol,
+                "current_direction": current,
+                "conflicting_direction": last,
+                "last_signal_timestamp": state.get("last_signal_timestamp"),
+                "last_signal_direction": last,
+            }
+        return False, {}
+
+    def _set_chop_suppression(self, symbol: str, candles_remaining: int, current_time: Optional[datetime] = None) -> None:
+        """Enter chop suppression for a symbol after an opposite-direction conflict."""
+        now = current_time or datetime.now(timezone.utc)
+        # M5 candles: suppression ends after N candles from now
+        suppression_until = now + timedelta(minutes=5 * candles_remaining)
+        state = self._chop_state.setdefault(symbol, {})
+        state["chop_suppression_until"] = suppression_until.isoformat()
+        state["chop_suppression_candles"] = candles_remaining
+
+    def _is_chop_suppressed(self, symbol: str, current_time: Optional[datetime] = None) -> tuple[bool, dict]:
+        """Check if symbol is currently under chop suppression.
+
+        Returns (suppressed, context).
+        """
+        state = self._chop_state.get(symbol)
+        if state is None:
+            return False, {}
+        until_str = state.get("chop_suppression_until")
+        if until_str is None:
+            return False, {}
+        now = current_time or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        try:
+            until = datetime.fromisoformat(until_str)
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False, {}
+        remaining = max(0, int((until - now).total_seconds() / 300))
+        if now < until:
+            return True, {
+                "symbol": symbol,
+                "suppression_until": until.isoformat(),
+                "suppression_candles_remaining": remaining,
+                "last_signal_timestamp": state.get("last_signal_timestamp"),
+                "last_signal_direction": state.get("last_signal_direction"),
+            }
+        # Expired — clean up
+        state.pop("chop_suppression_until", None)
+        state.pop("chop_suppression_candles", None)
+        return False, {}
+
+    def _record_trend_evaluation(self, symbol: str, direction: str, current_time: Optional[datetime] = None) -> None:
+        """Append the latest evaluated direction to per-symbol trend history."""
+        now = current_time or datetime.now(timezone.utc)
+        state = self._chop_state.setdefault(symbol, {})
+        evaluations = state.setdefault("trend_evaluations", [])
+        evaluations.append({"direction": direction, "timestamp": now.isoformat()})
+        # Keep only needed history for flip detection + persistence
+        max_keep = max(config.CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES, config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES) + 2
+        if len(evaluations) > max_keep:
+            state["trend_evaluations"] = evaluations[-max_keep:]
+
+    def _recent_actionable_directions(self, symbol: str, count: int) -> list[str]:
+        """Return the last N actionable (BUY/SELL) directions, newest last."""
+        state = self._chop_state.get(symbol, {})
+        evaluations = state.get("trend_evaluations", [])
+        dirs = []
+        for ev in reversed(evaluations):
+            d = _direction_label(ev.get("direction", "none"))
+            if d != "none":
+                dirs.append(d)
+            if len(dirs) >= count:
+                break
+        return list(reversed(dirs))
+
+    def _count_direction_flips(self, symbol: str, lookback: int) -> tuple[int, list[str]]:
+        """Count direction flips in the last N actionable evaluations.
+
+        Ignore none/flat transitions. Returns (flip_count, recent_directions).
+        """
+        dirs = self._recent_actionable_directions(symbol, lookback)
+        flips = 0
+        for i in range(1, len(dirs)):
+            if dirs[i] != dirs[i - 1]:
+                flips += 1
+        return flips, dirs
+
+    def _check_chop_filters(
+        self,
+        symbol: str,
+        trend: str,
+        lr_15m: float,
+        current_time: Optional[datetime] = None,
+    ) -> tuple[bool, list[CriterionResult], Optional[str], Optional[dict]]:
+        """Run all chop/regime filters after trend classification and before signal stack.
+
+        Returns (blocked, criteria, reason, context) where reason is a stable
+        decision_reason string, and context is extra diagnostic info.
+        """
+        if not config.CHOP_FILTER_ENABLED:
+            return False, [], None, None
+
+        criteria: list[CriterionResult] = []
+        current_dir = _direction_label(trend)
+
+        # 1. Chop suppression (ongoing from prior opposite-direction conflict)
+        suppressed, suppression_ctx = self._is_chop_suppressed(symbol, current_time)
+        if suppressed:
+            criteria.append(_chop_diagnostic_criterion("chop_suppression", suppression_ctx))
+            return (
+                True,
+                criteria,
+                "market_invalid:chop_suppression",
+                suppression_ctx,
+            )
+
+        # 2. Opposite-direction same-symbol conflict → trigger suppression
+        conflict, conflict_ctx = self._has_opposite_signal_conflict(symbol, trend)
+        if conflict:
+            # Enter suppression for future candles
+            self._set_chop_suppression(symbol, config.CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES, current_time)
+            criteria.append(_chop_diagnostic_criterion("opposite_signal_chop", conflict_ctx))
+            return (
+                True,
+                criteria,
+                "market_invalid:opposite_signal_chop",
+                conflict_ctx,
+            )
+
+        # 3. Stronger 15M bridge requirement
+        required_15m = self.LR_15M_THRESHOLD * config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER
+        if abs(lr_15m) < required_15m:
+            strength_ctx = {
+                "lr_15m": lr_15m,
+                "threshold_15m": self.LR_15M_THRESHOLD,
+                "multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
+                "required_15m_strength": required_15m,
+                "margin": abs(lr_15m) - required_15m,
+            }
+            criteria.append(_chop_diagnostic_criterion("weak_15m_bridge", strength_ctx))
+            return (
+                True,
+                criteria,
+                "trend:weak_15m_bridge",
+                strength_ctx,
+            )
+
+        # 4. Trend persistence requirement
+        persistence_needed = config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES
+        if persistence_needed > 0 and current_dir != "none":
+            recent_dirs = self._recent_actionable_directions(symbol, persistence_needed)
+            if len(recent_dirs) < persistence_needed:
+                persistent = False
+            else:
+                persistent = all(d == current_dir for d in recent_dirs)
+            if not persistent:
+                persist_ctx = {
+                    "required_persistence_candles": persistence_needed,
+                    "recent_directions": recent_dirs,
+                    "current_direction": current_dir,
+                }
+                criteria.append(_chop_diagnostic_criterion("trend_not_persistent", persist_ctx))
+                return (
+                    True,
+                    criteria,
+                    "trend:not_persistent",
+                    persist_ctx,
+                )
+
+        # 5. Direction flip chop detection
+        lookback = config.CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES
+        max_flips = config.CHOP_MAX_DIRECTION_FLIPS
+        if lookback > 0 and current_dir != "none":
+            flips, recent_dirs = self._count_direction_flips(symbol, lookback)
+            if flips > max_flips:
+                flip_ctx = {
+                    "lookback_candles": lookback,
+                    "max_allowed_flips": max_flips,
+                    "observed_flips": flips,
+                    "recent_directions": recent_dirs,
+                }
+                criteria.append(_chop_diagnostic_criterion("direction_flip_chop", flip_ctx))
+                return (
+                    True,
+                    criteria,
+                    "market_invalid:direction_flip_chop",
+                    flip_ctx,
+                )
+
+        return False, [], None, None
 
     # ── Trend Filter ─────────────────────────────────────────────────────────
 
@@ -1634,6 +1927,50 @@ class SignalEngine:
             )
             return None, trend, lr_1h, lr_15, lr_5, diag
 
+        # ── Record trend evaluation for chop filter ──────────────────────────
+        self._record_trend_evaluation(symbol, trend)
+
+        # ── Chop / Regime Filter checks (after trend, before signal stack) ───
+        chop_blocked, chop_criteria, chop_reason, chop_context = self._check_chop_filters(
+            symbol, trend, lr_15,
+        )
+        if chop_blocked:
+            log.debug("%s blocked by chop filter: %s", symbol, chop_reason)
+            diag = SignalDiagnostic(
+                symbol=symbol,
+                evaluated_at=datetime.now().astimezone().isoformat(),
+                trend=trend,
+                lr_1h=lr_1h,
+                lr_15m=lr_15,
+                lr_5m=lr_5,
+                raw_lr_1h=raw_lr_1h,
+                raw_lr_15m=raw_lr_15,
+                raw_lr_5m=raw_lr_5,
+                filtered_lr_1h=filtered_lr_1h,
+                filtered_lr_15m=filtered_lr_15,
+                filtered_lr_5m=filtered_lr_5,
+                trend_changed_after_filter=trend_changed_after_filter,
+                volatility_shock_detected=active_shock.detected if active_shock else False,
+                shock_timeframe=active_shock.timeframe if active_shock else None,
+                shock_candle_time=active_shock.candle_time if active_shock else None,
+                shock_true_range=active_shock.true_range if active_shock else None,
+                shock_atr=active_shock.atr if active_shock else None,
+                shock_atr_multiple=active_shock.atr_multiple if active_shock else None,
+                shock_lookback_bars=active_shock.lookback_bars if active_shock else 0,
+                shock_direction=active_shock.direction if active_shock else "none",
+                shock_suppression_until=active_shock.suppression_until if active_shock else None,
+                shock_suppression_candles_remaining=active_shock.suppression_candles_remaining if active_shock else 0,
+                market_validity_state="invalid",
+                market_validity_reason=chop_reason,
+                final_decision="skipped",
+                decision_reason=chop_reason,
+                direction="BUY" if trend == "Uptrend" else "SELL",
+                criteria=trend_criteria + chop_criteria + (shock_criteria if shock_suppressed else []),
+                threshold_version=get_threshold_version(),
+                trend_decision=trend_decision,
+            )
+            return None, trend, lr_1h, lr_15, lr_5, diag
+
         # ── Cooldown check ───────────────────────────────────────────────────
         cooldown_key = f"{symbol}:{trend}"
         last_signal_ts = self._cooldown.get(cooldown_key, 0.0)
@@ -1712,6 +2049,9 @@ class SignalEngine:
         if signal:
             # Record signal timestamp for cooldown
             self._cooldown[cooldown_key] = time.time()
+            # Record signal direction for chop filter
+            signal_dir = "BUY" if trend == "Uptrend" else "SELL"
+            self._record_signal_direction(symbol, signal_dir)
 
         diag = SignalDiagnostic(
             symbol=symbol,
