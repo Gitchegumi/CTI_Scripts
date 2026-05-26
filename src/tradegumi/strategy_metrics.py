@@ -131,6 +131,7 @@ class EvaluatedOpportunity:
     timeframe: str = "M5"
     mode: str = "alert_only"
     strategy: str = "CTI-v1"
+    signal_type: str = "pullback"  # "pullback" or "continuation"
     direction: str = "none"
     trend: str = "unknown"
     final_decision: str = "indeterminate"
@@ -152,6 +153,26 @@ class EvaluatedOpportunity:
     threshold_version_unknown_reason: Optional[str] = None
     usable_for_strategy_stats: Optional[bool] = None
     stats_exclusion_reason: Optional[str] = None
+    # Volatility shock + filtered LR fields
+    volatility_shock_detected: bool = False
+    shock_timeframe: Optional[str] = None
+    shock_candle_time: Optional[str] = None
+    shock_true_range: Optional[float] = None
+    shock_atr: Optional[float] = None
+    shock_atr_multiple: Optional[float] = None
+    shock_lookback_bars: int = 0
+    shock_direction: str = "none"
+    shock_suppression_until: Optional[str] = None
+    shock_suppression_candles_remaining: int = 0
+    raw_lr_1h: Optional[float] = None
+    raw_lr_15m: Optional[float] = None
+    raw_lr_5m: Optional[float] = None
+    filtered_lr_1h: Optional[float] = None
+    filtered_lr_15m: Optional[float] = None
+    filtered_lr_5m: Optional[float] = None
+    trend_changed_after_filter: bool = False
+    market_validity_state: str = "valid"
+    market_validity_reason: Optional[str] = None
 
     def to_dict(self, include_criteria: bool = True) -> dict[str, Any]:
         data = asdict(self)
@@ -254,6 +275,7 @@ def init_schema(db_path: Path = DB_FILE) -> None:
                 timeframe TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 strategy TEXT NOT NULL,
+                signal_type TEXT NOT NULL DEFAULT 'pullback',
                 direction TEXT NOT NULL,
                 trend TEXT NOT NULL,
                 final_decision TEXT NOT NULL,
@@ -318,11 +340,32 @@ def init_schema(db_path: Path = DB_FILE) -> None:
         _ensure_column(conn, "evaluated_opportunities", "threshold_version_unknown_reason", "TEXT")
         _ensure_column(conn, "evaluated_opportunities", "usable_for_strategy_stats", "INTEGER")
         _ensure_column(conn, "evaluated_opportunities", "stats_exclusion_reason", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "signal_type", "TEXT NOT NULL DEFAULT 'pullback'")
         _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
         _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
         _ensure_column(conn, "criterion_results", "reason", "TEXT")
         _ensure_column(conn, "criterion_results", "context", "TEXT NOT NULL DEFAULT '{}'")
+        # ── Volatility shock + filtered LR columns ────────────────────────────
+        _ensure_column(conn, "evaluated_opportunities", "volatility_shock_detected", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "shock_timeframe", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_candle_time", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_true_range", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_atr", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_atr_multiple", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "shock_lookback_bars", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "shock_direction", "TEXT NOT NULL DEFAULT 'none'")
+        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_until", "TEXT")
+        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_candles_remaining", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_1h", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_15m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "raw_lr_5m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_1h", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_15m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_5m", "REAL")
+        _ensure_column(conn, "evaluated_opportunities", "trend_changed_after_filter", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "evaluated_opportunities", "market_validity_state", "TEXT NOT NULL DEFAULT 'valid'")
+        _ensure_column(conn, "evaluated_opportunities", "market_validity_reason", "TEXT")
     _initialized_db_paths.add(db_key)
 
 
@@ -540,13 +583,19 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
         conn.execute(
             """
             INSERT OR REPLACE INTO evaluated_opportunities (
-                id, evaluated_at, symbol, timeframe, mode, strategy, direction, trend,
+                id, evaluated_at, symbol, timeframe, mode, strategy, signal_type, direction, trend,
                 final_decision, decision_reason, confidence, failed_criteria_count,
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at,
                 first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
                 near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
-                stats_exclusion_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                stats_exclusion_reason,
+                volatility_shock_detected, shock_timeframe, shock_candle_time, shock_true_range,
+                shock_atr, shock_atr_multiple, shock_lookback_bars, shock_direction,
+                shock_suppression_until, shock_suppression_candles_remaining,
+                raw_lr_1h, raw_lr_15m, raw_lr_5m,
+                filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
+                trend_changed_after_filter, market_validity_state, market_validity_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 opportunity.id,
@@ -555,6 +604,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 opportunity.timeframe,
                 opportunity.mode,
                 opportunity.strategy,
+                opportunity.signal_type,
                 opportunity.direction,
                 opportunity.trend,
                 opportunity.final_decision,
@@ -575,6 +625,25 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                 opportunity.threshold_version_unknown_reason,
                 None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
                 opportunity.stats_exclusion_reason,
+                int(opportunity.volatility_shock_detected),
+                opportunity.shock_timeframe,
+                opportunity.shock_candle_time,
+                opportunity.shock_true_range,
+                opportunity.shock_atr,
+                opportunity.shock_atr_multiple,
+                opportunity.shock_lookback_bars,
+                opportunity.shock_direction,
+                opportunity.shock_suppression_until,
+                opportunity.shock_suppression_candles_remaining,
+                opportunity.raw_lr_1h,
+                opportunity.raw_lr_15m,
+                opportunity.raw_lr_5m,
+                opportunity.filtered_lr_1h,
+                opportunity.filtered_lr_15m,
+                opportunity.filtered_lr_5m,
+                int(opportunity.trend_changed_after_filter),
+                opportunity.market_validity_state,
+                opportunity.market_validity_reason,
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
@@ -670,6 +739,26 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
             None if "usable_for_strategy_stats" not in row.keys() or row["usable_for_strategy_stats"] is None else bool(row["usable_for_strategy_stats"])
         ),
         stats_exclusion_reason=row["stats_exclusion_reason"] if "stats_exclusion_reason" in row.keys() else None,
+        # Volatility shock + filtered LR fields
+        volatility_shock_detected=bool(row["volatility_shock_detected"]) if "volatility_shock_detected" in row.keys() else False,
+        shock_timeframe=row["shock_timeframe"] if "shock_timeframe" in row.keys() else None,
+        shock_candle_time=row["shock_candle_time"] if "shock_candle_time" in row.keys() else None,
+        shock_true_range=row["shock_true_range"] if "shock_true_range" in row.keys() else None,
+        shock_atr=row["shock_atr"] if "shock_atr" in row.keys() else None,
+        shock_atr_multiple=row["shock_atr_multiple"] if "shock_atr_multiple" in row.keys() else None,
+        shock_lookback_bars=row["shock_lookback_bars"] if "shock_lookback_bars" in row.keys() else 0,
+        shock_direction=row["shock_direction"] if "shock_direction" in row.keys() else "none",
+        shock_suppression_until=row["shock_suppression_until"] if "shock_suppression_until" in row.keys() else None,
+        shock_suppression_candles_remaining=row["shock_suppression_candles_remaining"] if "shock_suppression_candles_remaining" in row.keys() else 0,
+        raw_lr_1h=row["raw_lr_1h"] if "raw_lr_1h" in row.keys() else None,
+        raw_lr_15m=row["raw_lr_15m"] if "raw_lr_15m" in row.keys() else None,
+        raw_lr_5m=row["raw_lr_5m"] if "raw_lr_5m" in row.keys() else None,
+        filtered_lr_1h=row["filtered_lr_1h"] if "filtered_lr_1h" in row.keys() else None,
+        filtered_lr_15m=row["filtered_lr_15m"] if "filtered_lr_15m" in row.keys() else None,
+        filtered_lr_5m=row["filtered_lr_5m"] if "filtered_lr_5m" in row.keys() else None,
+        trend_changed_after_filter=bool(row["trend_changed_after_filter"]) if "trend_changed_after_filter" in row.keys() else False,
+        market_validity_state=row["market_validity_state"] if "market_validity_state" in row.keys() else "valid",
+        market_validity_reason=row["market_validity_reason"] if "market_validity_reason" in row.keys() else None,
     )
 
 

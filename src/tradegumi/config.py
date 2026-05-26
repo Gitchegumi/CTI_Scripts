@@ -38,6 +38,14 @@ DISCORD_USER_ID     = os.getenv("DISCORD_USER_ID", "")
 # Token required to access the /journal page on the dashboard.
 JOURNAL_TOKEN = os.getenv("JOURNAL_TOKEN", "")
 
+# ── Volatility Shock Filter ─────────────────────────────────────────────────
+VOLATILITY_SHOCK_ENABLED = os.getenv("VOLATILITY_SHOCK_ENABLED", "true").lower() in ("true", "1", "yes")
+SHOCK_CANDLE_ATR_MULTIPLE = float(os.getenv("SHOCK_CANDLE_ATR_MULTIPLE", "3.0"))
+SHOCK_2_BAR_ATR_MULTIPLE = float(os.getenv("SHOCK_2_BAR_ATR_MULTIPLE", "4.0"))
+SHOCK_3_BAR_ATR_MULTIPLE = float(os.getenv("SHOCK_3_BAR_ATR_MULTIPLE", "5.0"))
+SHOCK_SUPPRESSION_CANDLES = int(os.getenv("SHOCK_SUPPRESSION_CANDLES", "3"))
+SHOCK_LOOKBACK_CANDLES = int(os.getenv("SHOCK_LOOKBACK_CANDLES", "3"))
+
 # Strategy diagnostics
 STRATEGY_METRICS_RETENTION_DAYS = int(os.getenv("STRATEGY_METRICS_RETENTION_DAYS", "90"))
 STRATEGY_METRICS_DEFAULT_DAYS = int(os.getenv("STRATEGY_METRICS_DEFAULT_DAYS", "7"))
@@ -62,6 +70,16 @@ RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.0025"))  # 0.25%
 # ── ATR / SL / TP ───────────────────────────────────────────────────────────
 SL_ATR_MULTIPLIER = float(os.getenv("SL_ATR_MULTIPLIER", "3"))
 TP_ATR_MULTIPLIER = float(os.getenv("TP_ATR_MULTIPLIER", "12"))
+
+# ── CTI-v1.1 Dual-Path Thresholds ──────────────────────────────────────────
+# Continuation path (CTI-v1.1-continuation-test)
+CONTINUATION_KC_PROXIMITY_ATR = float(os.getenv("CONTINUATION_KC_PROXIMITY_ATR", "0.25"))
+CONTINUATION_STRUCTURE_BARS = int(os.getenv("CONTINUATION_STRUCTURE_BARS", "5"))
+# Pullback path relaxed thresholds
+PULLBACK_KC_PROXIMITY_ATR = float(os.getenv("PULLBACK_KC_PROXIMITY_ATR", "0.25"))
+PULLBACK_STOCH_RSI_RELAXED = os.getenv("PULLBACK_STOCH_RSI_RELAXED", "true").lower() in ("true", "1", "yes")
+# Trend bias: 1H+15M agreement only (continuation) vs full 3-TF (pullback)
+CONTINUATION_TREND_REQUIRE_5M = os.getenv("CONTINUATION_TREND_REQUIRE_5M", "false").lower() in ("true", "1", "yes")
 
 # ── Symbols ─────────────────────────────────────────────────────────────────
 FOREX_MAJORS = ["EURUSD", "GBPUSD", "NZDUSD", "AUDUSD", "USDCHF", "USDCAD", "USDJPY"]
@@ -145,6 +163,14 @@ def from_oanda_symbol(oanda_sym: str) -> str:
         return CTI_SYMBOL_MAP[oanda_sym]
     return oanda_sym.replace("_", "")
 
+
+# ── Chop / Regime Filter ────────────────────────────────────────────────────
+CHOP_FILTER_ENABLED = os.getenv("CHOP_FILTER_ENABLED", "true").lower() in ("true", "1", "yes")
+CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES = int(os.getenv("CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES", "6"))
+CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES = int(os.getenv("CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES", "6"))
+CHOP_MAX_DIRECTION_FLIPS = int(os.getenv("CHOP_MAX_DIRECTION_FLIPS", "1"))
+CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER = float(os.getenv("CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER", "1.25"))
+CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES = int(os.getenv("CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES", "2"))
 
 # ── CTI Challenge Rules ────────────────────────────────────────────────────
 # CTI_CHALLENGE_TYPE env var:

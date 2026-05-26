@@ -801,3 +801,106 @@ class TestTrendDecisionDiagnostics:
         summary = get_summary(iso(-1), iso(1), db_path=db)
         assert summary["indeterminate_count"] == 1
         assert summary["skipped_count"] == 0
+
+class TestShockAndFilteredLRFields:
+    """Bug 4: Persist shock and filtered LR diagnostic fields."""
+
+    def _make_opportunity(self, **overrides) -> EvaluatedOpportunity:
+        defaults = dict(
+            id="opp-shock-test",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            timeframe="H1",
+            mode="production",
+            strategy="Trender",
+            direction="LONG",
+            trend="Uptrend",
+            final_decision="rejected",
+            decision_reason="market_invalid:volatility_shock",
+            confidence=0.0,
+            failed_criteria_count=1,
+            near_miss=False,
+            data_complete=True,
+            data_quality_notes=[],
+            threshold_version="v1",
+            created_at=iso(),
+            criteria=[],
+            first_blocker="volatility_shock",
+            all_blockers=["volatility_shock"],
+            blocking_layer="data_quality",
+            trend_decision=None,
+            pipeline_state="complete",
+            near_miss_reason=None,
+            threshold_version_unknown_reason=None,
+            usable_for_strategy_stats=True,
+            stats_exclusion_reason=None,
+            # Shock/LR fields
+            volatility_shock_detected=True,
+            shock_timeframe="M5",
+            shock_candle_time=iso(),
+            shock_true_range=0.500,
+            shock_atr=0.070,
+            shock_atr_multiple=7.14,
+            shock_lookback_bars=1,
+            shock_direction="down",
+            shock_suppression_until=iso(),
+            shock_suppression_candles_remaining=3,
+            raw_lr_1h=0.002,
+            raw_lr_15m=0.003,
+            raw_lr_5m=0.001,
+            filtered_lr_1h=0.001,
+            filtered_lr_15m=0.002,
+            filtered_lr_5m=0.0005,
+            trend_changed_after_filter=True,
+            market_validity_state="invalid",
+            market_validity_reason="market_invalid:volatility_shock",
+        )
+        defaults.update(overrides)
+        return EvaluatedOpportunity(**defaults)
+
+    def test_shock_fields_round_trip(self):
+        db = temp_db()
+        opp = self._make_opportunity()
+        recorded = record_opportunity(opp, db)
+        assert recorded.volatility_shock_detected is True
+        assert recorded.shock_timeframe == "M5"
+        assert recorded.shock_atr_multiple == 7.14
+
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        assert exported["volatility_shock_detected"] is True
+        assert exported["shock_timeframe"] == "M5"
+        assert exported["shock_atr_multiple"] == 7.14
+        assert exported["shock_suppression_candles_remaining"] == 3
+
+    def test_no_shock_fields_are_persisted_false(self):
+        db = temp_db()
+        opp = self._make_opportunity(
+            volatility_shock_detected=False,
+            shock_timeframe=None,
+            shock_atr_multiple=None,
+            market_validity_state="valid",
+            market_validity_reason=None,
+        )
+        recorded = record_opportunity(opp, db)
+        assert recorded.volatility_shock_detected is False
+        assert recorded.market_validity_state == "valid"
+
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        assert exported["volatility_shock_detected"] is False
+        assert exported["market_validity_state"] == "valid"
+        assert exported["market_validity_reason"] is None
+
+    def test_raw_and_filtered_lr_round_trip(self):
+        db = temp_db()
+        opp = self._make_opportunity()
+        recorded = record_opportunity(opp, db)
+        assert recorded.raw_lr_1h == 0.002
+        assert recorded.filtered_lr_1h == 0.001
+        assert recorded.trend_changed_after_filter is True
+
+        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        assert exported["raw_lr_1h"] == 0.002
+        assert exported["filtered_lr_1h"] == 0.001
+        assert exported["trend_changed_after_filter"] is True
+        assert exported["raw_lr_5m"] == 0.001
+        assert exported["filtered_lr_5m"] == 0.0005
