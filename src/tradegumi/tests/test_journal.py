@@ -19,6 +19,7 @@ class FakeSignal:
         signal_price=None,
         atr=0.0010,
         setup_condition_first_true_at=None,
+        prime_outcome_candles=None,
     ):
         self.symbol = symbol
         self.direction = direction
@@ -26,11 +27,16 @@ class FakeSignal:
         self.confidence = confidence
         self.entry_price = entry_price
         self.signal_price = signal_price if signal_price is not None else entry_price
-        self.stop_loss = entry_price - 0.0020
-        self.take_profit = entry_price + 0.0040
+        if direction.upper() == "SELL":
+            self.stop_loss = entry_price + 0.0020
+            self.take_profit = entry_price - 0.0040
+        else:
+            self.stop_loss = entry_price - 0.0020
+            self.take_profit = entry_price + 0.0040
         self.lot_size = 1.0
         self.atr = atr
         self.setup_condition_first_true_at = setup_condition_first_true_at
+        self.prime_outcome_candles = prime_outcome_candles or []
 
 
 def write_entries(path, entries):
@@ -173,6 +179,8 @@ def test_append_signal_creates_setup_group_and_trade_outcome_fields(journal_file
     assert entry["late_signal"] is False
     assert entry["usable_for_strategy_stats"] is True
     assert entry["trade_grade"] == "PENDING"
+    assert entry["prime_active"] is True
+    assert entry["prime_suppressed_signal_count"] == 0
 
 
 def test_append_signal_marks_duplicate_inside_group_window(journal_file, monkeypatch):
@@ -181,37 +189,36 @@ def test_append_signal_marks_duplicate_inside_group_window(journal_file, monkeyp
 
     journal.append_signal(FakeSignal())
     journal.append_signal(FakeSignal())
-    newest, first = journal.read_journal()
+    first = journal.read_journal()[0]
 
-    assert newest["setup_group_id"] == first["setup_group_id"]
-    assert newest["is_duplicate_setup"] is True
-    assert newest["usable_for_strategy_stats"] is False
-    assert newest["trade_grade"] == "DUPLICATE"
-    assert newest["stats_exclusion_reason"] == "duplicate_setup"
+    assert first["is_duplicate_setup"] is False
+    assert first["prime_active"] is True
+    assert first["prime_suppressed_signal_count"] == 1
 
 
-def test_append_signal_starts_new_group_at_window_boundary(journal_file, monkeypatch):
+def test_append_signal_suppresses_beyond_group_window_when_prime_unresolved(journal_file, monkeypatch):
     times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:10:00+00:00"])
     monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
 
     journal.append_signal(FakeSignal())
     journal.append_signal(FakeSignal())
-    newest, first = journal.read_journal()
+    first = journal.read_journal()[0]
 
-    assert newest["setup_group_id"] != first["setup_group_id"]
-    assert newest["is_duplicate_setup"] is False
+    assert len(journal.read_journal()) == 1
+    assert first["prime_suppressed_signal_count"] == 1
 
 
-def test_append_signal_uses_strategy_identity_for_grouping(journal_file, monkeypatch):
+def test_append_signal_suppresses_same_symbol_different_strategy(journal_file, monkeypatch):
     times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
     monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
 
     journal.append_signal(FakeSignal(strategy="CTI-v1"))
     journal.append_signal(FakeSignal(strategy="CTI-v2"))
-    newest, first = journal.read_journal()
+    first = journal.read_journal()[0]
 
-    assert newest["setup_group_id"] != first["setup_group_id"]
-    assert newest["is_duplicate_setup"] is False
+    assert len(journal.read_journal()) == 1
+    assert first["strategy"] == "CTI-v1"
+    assert first["prime_suppressed_signal_count"] == 1
 
 
 def test_append_signal_marks_late_signal_and_distance(journal_file, monkeypatch):
@@ -348,3 +355,204 @@ def test_reset_pending_or_missing_signal_is_safe(journal_file):
     assert journal.reset_signal_to_pending("sig-1") is True
     assert journal.reset_signal_to_pending("missing") is False
     assert journal.read_journal()[0]["notes"] == "ok"
+
+
+def candle_at(ts, high=1.1010, low=1.0990):
+    return {"t": ts, "h": high, "l": low}
+
+
+def test_prime_suppresses_later_buy_without_new_row(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    first_id = journal.append_signal(FakeSignal())
+    suppressed_id = journal.append_signal(FakeSignal())
+    entries = journal.read_journal()
+
+    assert len(entries) == 1
+    assert entries[0]["signal_id"] == first_id
+    assert suppressed_id != first_id
+    assert entries[0]["prime_suppressed_signal_count"] == 1
+    assert entries[0]["prime_suppressed_same_direction_count"] == 1
+    assert entries[0]["prime_suppressed_opposite_direction_count"] == 0
+    assert entries[0]["prime_suppressed_last_at"] == "2026-05-14T14:12:00+00:00"
+
+
+def test_prime_suppresses_later_sell_without_new_row(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="BUY"))
+    journal.append_signal(FakeSignal(direction="SELL"))
+    entry = journal.read_journal()[0]
+
+    assert entry["prime_suppressed_signal_count"] == 1
+    assert entry["prime_suppressed_same_direction_count"] == 0
+    assert entry["prime_suppressed_opposite_direction_count"] == 1
+
+
+def test_prime_is_symbol_specific(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:01:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(symbol="AUDUSD"))
+    journal.append_signal(FakeSignal(symbol="GBPJPY", entry_price=190.0, atr=0.1))
+    entries = journal.read_journal()
+
+    assert len(entries) == 2
+    assert {entry["symbol"] for entry in entries} == {"AUDUSD", "GBPJPY"}
+    assert all(entry["prime_active"] for entry in entries)
+
+
+def test_buy_prime_tp_hit_closes_and_replaces_prime(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="BUY"))
+    journal.append_signal(FakeSignal(direction="BUY", prime_outcome_candles=[candle_at("2026-05-14T14:05:00+00:00", high=1.1045, low=1.0995)]))
+    newest, old = journal.read_journal()
+
+    assert len(journal.read_journal()) == 2
+    assert old["prime_active"] is False
+    assert old["prime_closed_reason"] == "inferred_tp"
+    assert old["prime_closed_at"] == "2026-05-14T14:12:00+00:00"
+    assert newest["prime_active"] is True
+    assert newest["is_duplicate_setup"] is False
+
+
+def test_buy_prime_sl_hit_closes_and_replaces_prime(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="BUY"))
+    journal.append_signal(FakeSignal(direction="BUY", prime_outcome_candles=[candle_at("2026-05-14T14:05:00+00:00", high=1.1010, low=1.0975)]))
+    newest, old = journal.read_journal()
+
+    assert old["prime_closed_reason"] == "inferred_sl"
+    assert old["prime_active"] is False
+    assert newest["prime_active"] is True
+
+
+def test_sell_prime_tp_hit_closes_and_replaces_prime(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="SELL"))
+    journal.append_signal(FakeSignal(direction="SELL", prime_outcome_candles=[candle_at("2026-05-14T14:05:00+00:00", high=1.1005, low=1.0955)]))
+    newest, old = journal.read_journal()
+
+    assert old["prime_closed_reason"] == "inferred_tp"
+    assert old["prime_active"] is False
+    assert newest["prime_active"] is True
+
+
+def test_sell_prime_sl_hit_closes_and_replaces_prime(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="SELL"))
+    journal.append_signal(FakeSignal(direction="SELL", prime_outcome_candles=[candle_at("2026-05-14T14:05:00+00:00", high=1.1025, low=1.0980)]))
+    newest, old = journal.read_journal()
+
+    assert old["prime_closed_reason"] == "inferred_sl"
+    assert old["prime_active"] is False
+    assert newest["prime_active"] is True
+
+
+def test_ambiguous_prime_close_uses_conservative_sl(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="BUY"))
+    journal.append_signal(FakeSignal(direction="BUY", prime_outcome_candles=[candle_at("2026-05-14T14:05:00+00:00", high=1.1045, low=1.0975)]))
+    _, old = journal.read_journal()
+
+    assert old["prime_closed_reason"] == "inferred_sl"
+    assert old["prime_close_ambiguous"] is True
+
+
+def test_active_prime_recovers_from_persisted_journal(journal_file, monkeypatch):
+    write_entries(
+        journal_file,
+        [
+            {
+                "signal_id": "sig-1",
+                "symbol": "EURUSD",
+                "direction": "BUY",
+                "strategy": "CTI-v1",
+                "entry_price": 1.1,
+                "stop_loss": 1.098,
+                "take_profit": 1.104,
+                "signal_timestamp": "2026-05-14T14:00:00+00:00",
+                "grade": "PENDING",
+                "trade_grade": "PENDING",
+                "usable_for_strategy_stats": True,
+                "prime_active": True,
+                "prime_suppressed_signal_count": 0,
+            }
+        ],
+    )
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:12:00+00:00")
+
+    journal.append_signal(FakeSignal())
+    entry = journal.read_journal()[0]
+
+    assert len(journal.read_journal()) == 1
+    assert entry["prime_suppressed_signal_count"] == 1
+
+
+def test_export_journal_csv_includes_prime_fields(journal_file):
+    write_entries(journal_file, [{"signal_id": "sig-1", "symbol": "EURUSD", "prime_active": True, "prime_suppressed_signal_count": 2}])
+
+    rows = list(csv.DictReader(StringIO(journal.export_journal_csv())))
+
+    assert "prime_active" in rows[0]
+    assert "prime_suppressed_signal_count" in rows[0]
+    assert "prime_suppressed_last_at" in rows[0]
+    assert "prime_closed_reason" in rows[0]
+    assert "prime_closed_at" in rows[0]
+    assert "prime_close_ambiguous" in rows[0]
+
+
+def test_manual_grade_and_invalidation_deactivate_prime(journal_file):
+    write_entries(
+        journal_file,
+        [
+            {"signal_id": "sig-1", "grade": "PENDING", "trade_grade": "PENDING", "usable_for_strategy_stats": True, "prime_active": True},
+            {"signal_id": "sig-2", "grade": "PENDING", "trade_grade": "PENDING", "usable_for_strategy_stats": True, "prime_active": True},
+        ],
+    )
+
+    assert journal.grade_by_signal_id("sig-1", "TP_HIT") is True
+    assert journal.invalidate_signal("sig-2", "bad setup") is True
+    entries = {entry["signal_id"]: entry for entry in journal.read_journal()}
+
+    assert entries["sig-1"]["prime_active"] is False
+    assert entries["sig-1"]["prime_closed_reason"] == "manual_grade"
+    assert entries["sig-2"]["prime_active"] is False
+    assert entries["sig-2"]["prime_closed_reason"] == "manual_invalidated"
+
+
+def test_reset_pending_deactivates_prime_state(journal_file):
+    write_entries(
+        journal_file,
+        [
+            {
+                "signal_id": "sig-1",
+                "grade": "SL_HIT",
+                "trade_grade": "SL_HIT",
+                "usable_for_strategy_stats": True,
+                "prime_active": True,
+                "entry_valid_at_signal": True,
+                "is_duplicate_setup": False,
+                "late_signal": False,
+                "signal_age_bars": 0,
+            }
+        ],
+    )
+
+    assert journal.reset_signal_to_pending("sig-1") is True
+    entry = journal.read_journal()[0]
+
+    assert entry["prime_active"] is False
+    assert entry["prime_closed_reason"] == "reset"

@@ -7,6 +7,7 @@ os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(os.getcwd(), ".numba_cache"))
 
 from tradegumi.signal_engine import classify_trend_decision, get_threshold_version, evaluate_threshold
+from tradegumi import journal
 from tradegumi.strategy_metrics import (
     CriterionResult,
     EvaluatedOpportunity,
@@ -228,6 +229,31 @@ def test_summary_counts_only_usable_emitted_signals_as_trade_opportunities():
     assert summary["stats_unknown_eligibility_count"] == 1
     assert summary["stats_exclusion_counts"] == {"duplicate_setup": 1}
     assert {row["id"]: row["usable_for_strategy_stats"] for row in exported}["opp-1"] is True
+
+
+def test_summary_includes_prime_suppression_metrics(tmp_path, monkeypatch):
+    journal_file = tmp_path / "signal_journal.jsonl"
+    monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
+    journal_file.write_text(
+        "\n".join(
+            [
+                '{"signal_id":"sig-1","symbol":"EURUSD","signal_timestamp":"2026-05-06T12:00:00+00:00","prime_suppressed_signal_count":3,"prime_suppressed_same_direction_count":1,"prime_suppressed_opposite_direction_count":2,"prime_closed_reason":"inferred_sl","prime_close_ambiguous":true}',
+                '{"signal_id":"sig-2","symbol":"GBPJPY","signal_timestamp":"2026-05-06T13:00:00+00:00","prime_suppressed_signal_count":1,"prime_suppressed_same_direction_count":1,"prime_closed_reason":"inferred_tp","prime_close_ambiguous":false}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = get_summary("2026-05-06", "2026-05-06", db_path=temp_db())
+
+    assert summary["total_prime_suppressed_signals"] == 4
+    assert summary["prime_suppressed_signals_by_symbol"] == {"GBPJPY": 1, "EURUSD": 3}
+    assert summary["prime_suppressed_same_direction_count"] == 2
+    assert summary["prime_suppressed_opposite_direction_count"] == 2
+    assert summary["inferred_tp_close_count"] == 1
+    assert summary["inferred_sl_close_count"] == 1
+    assert summary["ambiguous_prime_close_count"] == 1
 
 
 def test_date_only_end_includes_selected_day_and_excludes_following_day():

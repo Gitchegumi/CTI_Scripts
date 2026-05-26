@@ -94,6 +94,7 @@ class Signal:
     suggested_entry: Optional[float] = None
     entry_tolerance: Optional[float] = None
     setup_condition_first_true_at: Optional[str] = None
+    recent_candles: Optional[list[Candle]] = None
 
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
@@ -926,6 +927,7 @@ class SignalEngine:
             suggested_entry=round(entry_price, _price_decimals(entry_price)),
             entry_tolerance=round(atr * config.SIGNAL_ENTRY_TOLERANCE_ATR, _price_decimals(entry_price)),
             setup_condition_first_true_at=setup_condition_first_true_at,
+            recent_candles=candles,
         ), criteria, "emitted", confidence
 
     def _indeterminate_diagnostic(

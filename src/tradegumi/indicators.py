@@ -3,6 +3,10 @@
 Adapted from CTI_Scripts/py_scripts/trading_scripts/api/indicators.py
 Pure pandas_ta — no API dependencies. Client-agnostic.
 """
+import os
+
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
 import pandas as pd
 import pandas_ta as ta  # noqa: F401 — used by getattr on ta.*
 
