@@ -551,12 +551,18 @@ class SignalEngine:
 
     # ── 4-Layer Signal Stack ─────────────────────────────────────────────────
 
-    def _get_signal(self, symbol: str, trend: str) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
+    def _get_signal(
+        self,
+        symbol: str,
+        trend: str,
+        trend_lr: Optional[tuple[float, float, float]] = None,
+    ) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
         """Run the 4-layer signal stack on 5m candles.
 
         Args:
             symbol: Trading symbol
             trend: "Uptrend" or "Downtrend"
+            trend_lr: Optional LR values already computed by the trend filter.
 
         Returns:
             Signal or None
@@ -847,16 +853,20 @@ class SignalEngine:
             "candlestick": candle_strength,
         }
 
-        # Trend strength component
-        candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-        candles_15m = self.client.get_candles(symbol, "M15", count=60)
-        candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
-        df_1h = candles_to_df(candles_1h)
-        df_15 = candles_to_df(candles_15m)
-        df_5  = candles_to_df(candles_5m)
-        lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
-        lr_15 = calculate_linear_regression(df_15, length=25).iloc[-1]
-        lr_5  = calculate_linear_regression(df_5,  length=14).iloc[-1]
+        # Trend strength component. check_symbol passes these values from
+        # _get_trend so scan cycles do not fetch H1/M15/M5 candles twice.
+        if trend_lr is None:
+            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
+            candles_15m = self.client.get_candles(symbol, "M15", count=60)
+            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+            df_1h = candles_to_df(candles_1h)
+            df_15 = candles_to_df(candles_15m)
+            df_5  = candles_to_df(candles_5m)
+            lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
+            lr_15 = calculate_linear_regression(df_15, length=25).iloc[-1]
+            lr_5  = calculate_linear_regression(df_5,  length=14).iloc[-1]
+        else:
+            lr_1h, lr_15, lr_5 = trend_lr
         trend_str = trend_score(lr_15, lr_5, trend,
                                 self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD)
         breakdown["trend"] = trend_str
@@ -1062,7 +1072,7 @@ class SignalEngine:
             return None, trend, lr_1h, lr_15, lr_5, diag
 
         try:
-            signal, criteria, reason, confidence = self._get_signal(symbol, trend)
+            signal, criteria, reason, confidence = self._get_signal(symbol, trend, (lr_1h, lr_15, lr_5))
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="signal_stack")
             note = f"signal stack provider data incomplete: {context['error_type']}"

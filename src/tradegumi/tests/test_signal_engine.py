@@ -14,8 +14,10 @@ class FakeClient:
 
     def __init__(self, candles_by_timeframe: dict[str, list[Candle]]):
         self.candles_by_timeframe = candles_by_timeframe
+        self.calls: list[tuple[str, str, int]] = []
 
     def get_candles(self, instrument: str, granularity: str, count: int):
+        self.calls.append((instrument, granularity, count))
         return self.candles_by_timeframe.get(granularity, [])[-count:]
 
     def get_pricing(self, instruments: list[str]):
@@ -268,6 +270,51 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     assert reason == "emitted"
     assert confidence == 1.0
     assert {"stoch_rsi", "macd", "keltner", "confidence"}.issubset({c.criterion_name for c in criteria})
+
+
+def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
+    client = FakeClient({"M5": candles, "M15": candles, "H1": candles})
+    engine = SignalEngine(client)
+    count = len(candles)
+
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_stoch_rsi",
+        lambda df, length, k, d: pd.DataFrame({"k": [20.0] * (count - 1) + [40.0], "d": [30.0] * count}),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_macd",
+        lambda df, fast, slow, signal: pd.DataFrame({
+            "macd": [0.2] * count,
+            "signal": [0.1] * count,
+            "histogram": [0.1] * (count - 1) + [0.2],
+        }),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_keltner_channels",
+        lambda df, length, multiplier, mamode: pd.DataFrame({
+            "upper": [1.2] * count,
+            "mid": [1.1] * count,
+            "lower": [1.11] * count,
+        }),
+    )
+    monkeypatch.setattr(
+        "tradegumi.signal_engine.calculate_candlestick_patterns",
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [100]}),
+    )
+    monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+    monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 1.0)
+    monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+    signal, _, reason, _ = engine._get_signal("EURUSD", "Uptrend", (0.01, 0.01, 0.01))
+
+    assert signal is not None
+    assert reason == "emitted"
+    assert [call[1:] for call in client.calls] == [("M5", 100)]
 
 
 def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
