@@ -218,6 +218,7 @@ class Signal:
     suggested_entry: Optional[float] = None
     entry_tolerance: Optional[float] = None
     setup_condition_first_true_at: Optional[str] = None
+    recent_candles: Optional[list[Candle]] = None
 
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
@@ -1123,6 +1124,7 @@ class SignalEngine:
         self,
         symbol: str,
         trend: str,
+        trend_lr: Optional[tuple[float, float, float]] = None,
         *,
         raw_lr_1h: float = 0.0,
         raw_lr_15m: float = 0.0,
@@ -1138,6 +1140,9 @@ class SignalEngine:
         Args:
             symbol: Trading symbol
             trend: "Uptrend" or "Downtrend"
+            trend_lr: Optional LR values already computed by the trend filter.
+                      When provided, these are used as the primary LR values.
+                      Raw/filtered LR values are still passed for shock diagnostics.
 
         Returns:
             Signal or None
@@ -1606,10 +1611,25 @@ class SignalEngine:
             "candlestick": candle_strength,
         }
 
-        # Trend strength component (use precomputed LR values)
-        lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
-        lr_15 = filtered_lr_15m if self.shock_filter.enabled else raw_lr_15m
-        lr_5 = filtered_lr_5m if self.shock_filter.enabled else raw_lr_5m
+        # Trend strength component. check_symbol passes these values from
+        # _get_trend so scan cycles do not fetch H1/M15/M5 candles twice.
+        # When trend_lr is provided (remote tuple API), use it directly.
+        # Otherwise fetch the trend candles ourselves (legacy / standalone call).
+        if trend_lr is None:
+            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
+            candles_15m = self.client.get_candles(symbol, "M15", count=60)
+            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+            df_1h = candles_to_df(candles_1h)
+            df_15 = candles_to_df(candles_15m)
+            df_5  = candles_to_df(candles_5m)
+            raw_lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
+            raw_lr_15m = calculate_linear_regression(df_15, length=25).iloc[-1]
+            raw_lr_5m = calculate_linear_regression(df_5,  length=14).iloc[-1]
+            lr_1h = raw_lr_1h
+            lr_15 = raw_lr_15m
+            lr_5 = raw_lr_5m
+        else:
+            lr_1h, lr_15, lr_5 = trend_lr
         trend_str = trend_score(lr_15, lr_5, trend,
                                 self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD)
         breakdown["trend"] = trend_str
@@ -1701,6 +1721,7 @@ class SignalEngine:
             suggested_entry=round(entry_price, _price_decimals(entry_price)),
             entry_tolerance=round(atr * config.SIGNAL_ENTRY_TOLERANCE_ATR, _price_decimals(entry_price)),
             setup_condition_first_true_at=setup_condition_first_true_at,
+            recent_candles=candles,
         ), criteria, "emitted", confidence
 
     def _indeterminate_diagnostic(
@@ -2004,6 +2025,7 @@ class SignalEngine:
         try:
             signal, criteria, reason, confidence = self._get_signal(
                 symbol, trend,
+                (lr_1h, lr_15, lr_5),
                 raw_lr_1h=raw_lr_1h, raw_lr_15m=raw_lr_15, raw_lr_5m=raw_lr_5,
                 filtered_lr_1h=filtered_lr_1h, filtered_lr_15m=filtered_lr_15, filtered_lr_5m=filtered_lr_5,
                 trend_changed_after_filter=trend_changed_after_filter,

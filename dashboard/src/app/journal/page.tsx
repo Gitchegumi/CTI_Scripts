@@ -29,6 +29,14 @@ interface JournalEntry {
   late_signal?: boolean;
   usable_for_strategy_stats?: boolean;
   stats_exclusion_reason?: string | null;
+  prime_active?: boolean;
+  prime_suppressed_signal_count?: number;
+  prime_suppressed_last_at?: string | null;
+  prime_closed_reason?: string | null;
+  prime_closed_at?: string | null;
+  prime_close_ambiguous?: boolean;
+  prime_suppressed_same_direction_count?: number;
+  prime_suppressed_opposite_direction_count?: number;
   grade_timestamp: string | null;
   notes: string;
   discord_msg_id: string | null;
@@ -58,6 +66,14 @@ function normalizedTradeGrade(grade: JournalEntry["grade"]): TradeGrade {
   if (grade === "MANUAL_CLOSE") return "BE";
   if (grade === "EXPIRED") return "MISSED_ENTRY";
   return grade;
+}
+
+function suppressedPrimeLabel(entry: JournalEntry): string | null {
+  const total = entry.prime_suppressed_signal_count ?? 0;
+  if (total <= 0) return null;
+  const opposite = entry.prime_suppressed_opposite_direction_count ?? 0;
+  if (opposite > 0) return `${total} total, ${opposite} opposite direction`;
+  return String(total);
 }
 
 // ── Grouping logic ────────────────────────────────────────────────────────────
@@ -364,6 +380,12 @@ function TradeGroupCard({
             <div className={master.usable_for_strategy_stats ? "text-green-300 text-right" : "text-orange-300 text-right"}>
               {master.usable_for_strategy_stats ? "Included" : (master.stats_exclusion_reason ?? "Excluded")}
             </div>
+            {suppressedPrimeLabel(master) && (
+              <>
+                <div className="text-slate-400">Suppressed by this prime</div>
+                <div className="text-cyan-200 text-right">{suppressedPrimeLabel(master)}</div>
+              </>
+            )}
           </div>
         );
       })()}

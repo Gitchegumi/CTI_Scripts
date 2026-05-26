@@ -221,6 +221,13 @@ class DiagnosticSummary:
     stats_excluded_count: int = 0
     stats_unknown_eligibility_count: int = 0
     stats_exclusion_counts: dict[str, int] = field(default_factory=dict)
+    total_prime_suppressed_signals: int = 0
+    prime_suppressed_signals_by_symbol: dict[str, int] = field(default_factory=dict)
+    prime_suppressed_same_direction_count: int = 0
+    prime_suppressed_opposite_direction_count: int = 0
+    inferred_tp_close_count: int = 0
+    inferred_sl_close_count: int = 0
+    ambiguous_prime_close_count: int = 0
     criterion_summaries: list[CriterionSummary] = field(default_factory=list)
     top_blockers: list[BlockerSummary] = field(default_factory=list)
     first_blocker: Optional[str] = None   # criterion_name of the first blocker
@@ -987,6 +994,76 @@ def _pipeline_funnel(rows: list[sqlite3.Row], criterion_rows: list[sqlite3.Row])
     }
 
 
+def _journal_timestamp(entry: dict[str, Any]) -> Optional[datetime]:
+    """Return the best available journal timestamp for metrics range filters."""
+    for key in ("prime_closed_at", "prime_suppressed_last_at", "signal_timestamp", "created_at", "evaluated_at"):
+        value = entry.get(key)
+        if not value:
+            continue
+        try:
+            return _parse_dt(str(value))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[str] = None) -> dict[str, Any]:
+    """Aggregate prime suppression evidence from persisted Signal Journal records."""
+    try:
+        from tradegumi import journal as signal_journal
+
+        entries = signal_journal.read_journal()
+    except Exception:
+        return {
+            "total_prime_suppressed_signals": 0,
+            "prime_suppressed_signals_by_symbol": {},
+            "prime_suppressed_same_direction_count": 0,
+            "prime_suppressed_opposite_direction_count": 0,
+            "inferred_tp_close_count": 0,
+            "inferred_sl_close_count": 0,
+            "ambiguous_prime_close_count": 0,
+        }
+
+    start_dt = _parse_dt(start_iso)
+    end_dt = _parse_dt(end_iso)
+    symbol_key = symbol.upper() if symbol else None
+    by_symbol: dict[str, int] = {}
+    same_direction = 0
+    opposite_direction = 0
+    inferred_tp = 0
+    inferred_sl = 0
+    ambiguous = 0
+
+    for entry in entries:
+        entry_symbol = str(entry.get("symbol") or "").upper()
+        if symbol_key and entry_symbol != symbol_key:
+            continue
+        timestamp = _journal_timestamp(entry)
+        if timestamp is not None and not (start_dt <= timestamp < end_dt):
+            continue
+        suppressed_count = int(entry.get("prime_suppressed_signal_count") or 0)
+        if suppressed_count:
+            by_symbol[entry_symbol or "UNKNOWN"] = by_symbol.get(entry_symbol or "UNKNOWN", 0) + suppressed_count
+        same_direction += int(entry.get("prime_suppressed_same_direction_count") or 0)
+        opposite_direction += int(entry.get("prime_suppressed_opposite_direction_count") or 0)
+        if entry.get("prime_closed_reason") == "inferred_tp":
+            inferred_tp += 1
+        if entry.get("prime_closed_reason") == "inferred_sl":
+            inferred_sl += 1
+        if entry.get("prime_close_ambiguous") is True:
+            ambiguous += 1
+
+    return {
+        "total_prime_suppressed_signals": sum(by_symbol.values()),
+        "prime_suppressed_signals_by_symbol": by_symbol,
+        "prime_suppressed_same_direction_count": same_direction,
+        "prime_suppressed_opposite_direction_count": opposite_direction,
+        "inferred_tp_close_count": inferred_tp,
+        "inferred_sl_close_count": inferred_sl,
+        "ambiguous_prime_close_count": ambiguous,
+    }
+
+
 def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Path = DB_FILE) -> dict[str, Any]:
     init_schema(db_path)
     start_iso, end_iso = _normalize_range_bounds(start, end)
@@ -1059,6 +1136,7 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
                 ids,
             ).fetchall()
 
+        prime_summary = _prime_suppression_summary(start_iso, end_iso, symbol)
         summary = DiagnosticSummary(
             start=start_iso,
             end=end_iso,
@@ -1072,6 +1150,13 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             stats_excluded_count=stats_excluded_count,
             stats_unknown_eligibility_count=stats_unknown_eligibility_count,
             stats_exclusion_counts=stats_exclusion_counts,
+            total_prime_suppressed_signals=prime_summary["total_prime_suppressed_signals"],
+            prime_suppressed_signals_by_symbol=prime_summary["prime_suppressed_signals_by_symbol"],
+            prime_suppressed_same_direction_count=prime_summary["prime_suppressed_same_direction_count"],
+            prime_suppressed_opposite_direction_count=prime_summary["prime_suppressed_opposite_direction_count"],
+            inferred_tp_close_count=prime_summary["inferred_tp_close_count"],
+            inferred_sl_close_count=prime_summary["inferred_sl_close_count"],
+            ambiguous_prime_close_count=prime_summary["ambiguous_prime_close_count"],
             criterion_summaries=_criterion_summaries(conn, ids),
             top_blockers=_blocker_summaries(conn, ids, sum(1 for r in rows if json.loads(r["all_blockers"] or "[]"))),
             first_blocker=first_blocker,

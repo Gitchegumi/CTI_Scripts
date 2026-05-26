@@ -28,6 +28,22 @@ New emitted signals include setup outcome fields that separate signal delivery f
 
 Emitted signals do not count as trade opportunities unless `usable_for_strategy_stats` is true. Strategy metrics report emitted signal count separately from `trade_opportunity_count`, with excluded and unknown eligibility records counted outside tradable setup statistics.
 
+## Prime Signal Suppression
+
+The first unresolved actionable signal for a symbol becomes that symbol's active prime. While the prime remains unresolved, later same-symbol signals are suppressed at the journal layer instead of creating new actionable rows. Suppression is symbol-specific and applies to both same-direction and opposite-direction follow-on signals.
+
+Prime records include:
+
+- `prime_active` shows whether the record is still the unresolved prime for its symbol.
+- `prime_suppressed_signal_count` counts follow-on signals suppressed by this prime.
+- `prime_suppressed_last_at` records the latest suppressed signal timestamp.
+- `prime_suppressed_same_direction_count` and `prime_suppressed_opposite_direction_count` summarize repeated firing and chop symptoms when available.
+- `prime_closed_reason`, `prime_closed_at`, and `prime_close_ambiguous` record inferred or manual prime resolution.
+
+Before suppressing a follow-on signal, the journal checks market candles carried by the emitted signal to infer whether the active prime touched its take profit or stop loss. BUY primes close by target when candle high reaches take profit and by stop when candle low reaches stop loss. SELL primes close by target when candle low reaches take profit and by stop when candle high reaches stop loss. If both are touched in the same candle, the journal records conservative stop-first closure and marks the close ambiguous.
+
+Suppressed signals do not create setup rows, do not require grading, and do not count as usable strategy-stat opportunities. They remain auditable through the active prime's suppression fields and strategy metrics.
+
 ## Purge
 
 `Purge` removes Signal Journal entries only after confirmation. The purge scope matches the active grade filter. This is intended for clearing stale signals created under old strategy parameters.

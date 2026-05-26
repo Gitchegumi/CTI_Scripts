@@ -56,6 +56,12 @@ PENDING_GRADE = "PENDING"
 TRADE_GRADES = {"TP_HIT", "SL_HIT", "BE", "MISSED_ENTRY", "LATE_SIGNAL", "DUPLICATE", "INVALID", PENDING_GRADE}
 VALID_GRADES = {"TP_HIT", "SL_HIT", "BE", "INVALID", "MANUAL_CLOSE", "EXPIRED"}
 FILTER_GRADES = VALID_GRADES | {PENDING_GRADE}
+PRIME_CLOSE_INFERRED_TP = "inferred_tp"
+PRIME_CLOSE_INFERRED_SL = "inferred_sl"
+PRIME_CLOSE_MANUAL_GRADE = "manual_grade"
+PRIME_CLOSE_MANUAL_INVALIDATED = "manual_invalidated"
+PRIME_CLOSE_RESET = "reset"
+PRIME_UNRESOLVED_GRADES = {PENDING_GRADE}
 EXPORT_FIELDS = [
     "signal_id",
     "symbol",
@@ -97,6 +103,15 @@ EXPORT_FIELDS = [
     "usable_for_strategy_stats",
     "trade_grade",
     "stats_exclusion_reason",
+    "prime_active",
+    "prime_suppressed_signal_count",
+    "prime_suppressed_last_at",
+    "prime_closed_reason",
+    "prime_closed_at",
+    "prime_close_ambiguous",
+    "prime_suppressed_same_direction_count",
+    "prime_suppressed_opposite_direction_count",
+    "prime_suppressed_signal_ids",
     "trade_result",
     "outcome",
     "outcome_status",
@@ -494,6 +509,159 @@ def _setup_outcome_fields(signal: Any, base_entry: dict[str, Any], existing_entr
     }
 
 
+def _make_actionable_after_prime_close(entry: dict[str, Any], signal_ts: datetime) -> None:
+    """Ensure an inferred prime replacement is treated as a fresh actionable setup."""
+    entry["setup_group_id"] = _setup_group_id(entry.get("symbol"), entry.get("direction"), entry.get("strategy"), signal_ts)
+    entry["is_duplicate_setup"] = False
+    if entry.get("entry_valid_at_signal") is True and not bool(entry.get("late_signal")):
+        entry["usable_for_strategy_stats"] = True
+        entry["trade_grade"] = PENDING_GRADE
+        entry.pop("stats_exclusion_reason", None)
+
+
+def _prime_initial_fields() -> dict[str, Any]:
+    """Return initialized prime-state fields for a new actionable journal entry."""
+    return {
+        "prime_active": True,
+        "prime_suppressed_signal_count": 0,
+        "prime_suppressed_last_at": None,
+        "prime_closed_reason": None,
+        "prime_closed_at": None,
+        "prime_close_ambiguous": False,
+        "prime_suppressed_same_direction_count": 0,
+        "prime_suppressed_opposite_direction_count": 0,
+        "prime_suppressed_signal_ids": [],
+    }
+
+
+def _direction_key(value: Any) -> str:
+    """Normalize signal direction labels used by alerts and strategy internals."""
+    normalized = str(value or "").strip().upper()
+    if normalized in {"BUY", "LONG", "UPTREND", "UP"}:
+        return "BUY"
+    if normalized in {"SELL", "SHORT", "DOWNTREND", "DOWN"}:
+        return "SELL"
+    return normalized
+
+
+def _is_unresolved_prime(entry: dict[str, Any]) -> bool:
+    """Return whether a persisted journal entry can suppress same-symbol signals."""
+    if entry.get("prime_active") is not True:
+        return False
+    trade_grade = str(entry.get("trade_grade") or entry.get("grade") or PENDING_GRADE).upper()
+    if trade_grade not in PRIME_UNRESOLVED_GRADES:
+        return False
+    if entry.get("usable_for_strategy_stats") is False:
+        return False
+    return True
+
+
+def _active_prime_for_symbol(entries: list[dict[str, Any]], symbol: Any) -> Optional[dict[str, Any]]:
+    """Return the newest active unresolved prime for the supplied symbol."""
+    target = _normal_key(symbol)
+    for entry in reversed(entries):
+        if _normal_key(entry.get("symbol")) == target and _is_unresolved_prime(entry):
+            return entry
+    return None
+
+
+def _candle_time(candle: Any) -> Optional[datetime]:
+    """Extract a timezone-aware candle timestamp from supported candle shapes."""
+    if isinstance(candle, dict):
+        raw = candle.get("time", candle.get("t"))
+    else:
+        raw = getattr(candle, "time", None)
+        if raw is None:
+            raw = getattr(candle, "t", None)
+    return _parse_journal_datetime(raw)
+
+
+def _candle_high_low(candle: Any) -> tuple[Optional[float], Optional[float]]:
+    """Extract high and low values from an execution candle or dict-like candle."""
+    if isinstance(candle, dict):
+        high = candle.get("h", candle.get("high"))
+        low = candle.get("l", candle.get("low"))
+    else:
+        high = getattr(candle, "h", getattr(candle, "high", None))
+        low = getattr(candle, "l", getattr(candle, "low", None))
+    return _coerce_float(high), _coerce_float(low)
+
+
+def _signal_prime_candles(signal: Any) -> list[Any]:
+    """Return candidate candles carried by a signal for prime outcome inference."""
+    value = _signal_attr(signal, ("prime_outcome_candles", "recent_candles", "candles"), None)
+    if value is None:
+        return []
+    return list(value)
+
+
+def _candles_between(candles: list[Any], start: Optional[datetime], end: Optional[datetime]) -> list[Any]:
+    """Filter candles to the inclusive prime-to-follow-on evaluation window."""
+    if start is None or end is None:
+        return []
+    selected: list[Any] = []
+    for candle in candles:
+        candle_ts = _candle_time(candle)
+        if candle_ts is None:
+            continue
+        if start <= candle_ts <= end:
+            selected.append(candle)
+    return selected
+
+
+def _infer_prime_close(prime: dict[str, Any], candles: list[Any], new_signal_ts: datetime) -> Optional[dict[str, Any]]:
+    """Infer whether a prime signal reached target or stop before a later signal."""
+    direction = _direction_key(prime.get("direction"))
+    stop_loss = _coerce_float(prime.get("stop_loss"))
+    take_profit = _coerce_float(prime.get("take_profit"))
+    prime_ts = _parse_journal_datetime(prime.get("signal_timestamp"))
+    if direction not in {"BUY", "SELL"} or stop_loss is None or take_profit is None or prime_ts is None:
+        return None
+
+    for candle in _candles_between(candles, prime_ts, new_signal_ts):
+        high, low = _candle_high_low(candle)
+        if high is None or low is None:
+            continue
+        if direction == "BUY":
+            hit_tp = high >= take_profit
+            hit_sl = low <= stop_loss
+        else:
+            hit_tp = low <= take_profit
+            hit_sl = high >= stop_loss
+        if hit_tp and hit_sl:
+            return {"reason": PRIME_CLOSE_INFERRED_SL, "ambiguous": True}
+        if hit_sl:
+            return {"reason": PRIME_CLOSE_INFERRED_SL, "ambiguous": False}
+        if hit_tp:
+            return {"reason": PRIME_CLOSE_INFERRED_TP, "ambiguous": False}
+    return None
+
+
+def _deactivate_prime(entry: dict[str, Any], reason: str, closed_at: Optional[str] = None, ambiguous: bool = False) -> None:
+    """Mark a prime entry inactive while preserving its suppression evidence."""
+    if entry.get("prime_active") is True:
+        entry["prime_active"] = False
+        entry["prime_closed_reason"] = reason
+        entry["prime_closed_at"] = closed_at or _now_iso()
+        entry["prime_close_ambiguous"] = bool(ambiguous)
+
+
+def _record_prime_suppression(prime: dict[str, Any], new_entry: dict[str, Any], suppressed_at: str) -> None:
+    """Update suppression counters on an unresolved active prime."""
+    count = int(prime.get("prime_suppressed_signal_count") or 0) + 1
+    prime["prime_suppressed_signal_count"] = count
+    prime["prime_suppressed_last_at"] = suppressed_at
+    if _direction_key(prime.get("direction")) == _direction_key(new_entry.get("direction")):
+        prime["prime_suppressed_same_direction_count"] = int(prime.get("prime_suppressed_same_direction_count") or 0) + 1
+    else:
+        prime["prime_suppressed_opposite_direction_count"] = int(prime.get("prime_suppressed_opposite_direction_count") or 0) + 1
+    suppressed_ids = prime.get("prime_suppressed_signal_ids")
+    if not isinstance(suppressed_ids, list):
+        suppressed_ids = []
+    suppressed_ids.append(str(new_entry.get("signal_id")))
+    prime["prime_suppressed_signal_ids"] = suppressed_ids[-25:]
+
+
 def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> str:
     """Append a new PENDING entry to the journal. Returns the signal_id."""
     JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -535,9 +703,25 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
 
     with _lock:
         existing_entries = _read_entries_oldest_first()
+        active_prime = _active_prime_for_symbol(existing_entries, entry.get("symbol"))
+        signal_ts = _parse_journal_datetime(ts) or datetime.now(timezone.utc)
+        inferred_close = _infer_prime_close(active_prime, _signal_prime_candles(signal), signal_ts) if active_prime else None
+        if active_prime and not inferred_close:
+            _record_prime_suppression(active_prime, entry, ts)
+            _write_entries(existing_entries)
+            return signal_id
+        if active_prime and inferred_close:
+            _deactivate_prime(active_prime, inferred_close["reason"], ts, bool(inferred_close["ambiguous"]))
+
         entry.update(_setup_outcome_fields(signal, entry, existing_entries, ts))
-        with open(JOURNAL_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, sort_keys=True) + "\n")
+        if active_prime and inferred_close:
+            _make_actionable_after_prime_close(entry, signal_ts)
+        if entry.get("usable_for_strategy_stats") is True:
+            entry.update(_prime_initial_fields())
+        else:
+            entry.update({"prime_active": False, "prime_suppressed_signal_count": 0})
+        existing_entries.append(entry)
+        _write_entries(existing_entries)
 
     return signal_id
 
@@ -563,6 +747,8 @@ def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> 
             if not updated and entry.get(lookup_field) == lookup_key:
                 entry["grade"] = grade
                 entry["trade_grade"] = _grade_for_completion(grade)
+                close_reason = PRIME_CLOSE_MANUAL_INVALIDATED if entry["trade_grade"] == "INVALID" else PRIME_CLOSE_MANUAL_GRADE
+                _deactivate_prime(entry, close_reason)
                 if entry["trade_grade"] == "INVALID":
                     entry["usable_for_strategy_stats"] = False
                     entry["stats_exclusion_reason"] = "manual_invalidated"
@@ -712,6 +898,8 @@ def reset_signal_to_pending(signal_id: str) -> bool:
                 elif entry.get("stats_exclusion_reason") == "manual_invalidated":
                     entry["stats_exclusion_reason"] = "invalidated_reset_requires_review"
                 entry["grade_timestamp"] = None
+                if entry.get("prime_active") is True:
+                    _deactivate_prime(entry, PRIME_CLOSE_RESET)
                 for field in reset_fields:
                     entry.pop(field, None)
                 updated = True

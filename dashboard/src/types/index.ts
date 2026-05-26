@@ -291,6 +291,13 @@ export interface StrategyMetricsSummary {
   stats_excluded_count: number;
   stats_unknown_eligibility_count: number;
   stats_exclusion_counts: Record<string, number>;
+  total_prime_suppressed_signals: number;
+  prime_suppressed_signals_by_symbol: Record<string, number>;
+  prime_suppressed_same_direction_count: number;
+  prime_suppressed_opposite_direction_count: number;
+  inferred_tp_close_count: number;
+  inferred_sl_close_count: number;
+  ambiguous_prime_close_count: number;
   rejected_count: number;
   skipped_count: number;
   indeterminate_count: number;
