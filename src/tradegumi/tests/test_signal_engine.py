@@ -214,6 +214,10 @@ def test_failed_oanda_candle_fetch_is_indeterminate_not_rejected(monkeypatch):
 
     monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * len(df)))
 
+    # Warm up chop filter state so trend persistence check passes
+    engine._record_trend_evaluation("EURUSD", "Uptrend")
+    engine._record_trend_evaluation("EURUSD", "Uptrend")
+
     signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
 
     assert signal is None
@@ -321,6 +325,7 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
 
 
 def test_missing_macd_signal_column_is_indeterminate_not_strategy_rejection(monkeypatch):
+    from tradegumi import config
     now = datetime.now(timezone.utc)
     candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)
     engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
@@ -338,6 +343,10 @@ def test_missing_macd_signal_column_is_indeterminate_not_strategy_rejection(monk
             "histogram": [0.1] * (count - 1) + [0.2],
         }),
     )
+
+    # Warm up chop filter state so trend persistence check passes
+    for _ in range(config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES):
+        engine._record_trend_evaluation("EURUSD", "Uptrend")
 
     signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
 
@@ -392,6 +401,7 @@ class TestShockDiagnosticSemantics:
     """Bug 1: Shock diagnostic semantics."""
 
     def test_no_shock_does_not_add_volatility_shock_criterion(self, monkeypatch):
+        from tradegumi import config
         now = datetime.now(timezone.utc)
         candles = closed_candles(60, now)
         engine = SignalEngine(
@@ -410,6 +420,10 @@ class TestShockDiagnosticSemantics:
             "tradegumi.signal_engine.calculate_linear_regression",
             lambda df, length: pd.Series([0.01] * len(df)),
         )
+
+        # Warm up chop filter state so trend persistence check passes
+        for _ in range(config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES):
+            engine._record_trend_evaluation("EURUSD", "Uptrend")
 
         signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol("EURUSD")
 
@@ -806,3 +820,293 @@ class TestClassifyTrendBias:
         assert result["bias_result"] == "flat"
         assert result["strength_passed_1h"] is False
         assert result["strength_passed_15m"] is True
+
+
+class TestChopFilter:
+    """Chop / regime filter: opposite-signal conflict, suppression, 15M strength, persistence, flip detection."""
+
+    def _warm_persistence(self, engine, symbol, direction, n):
+        """Pre-populate trend evaluations so persistence check passes."""
+        for _ in range(n):
+            engine._record_trend_evaluation(symbol, direction)
+
+    def _make_strong_lr(self, monkeypatch):
+        """Mock calculate_linear_regression to return strong LRs on all TFs."""
+        def lr_side_effect(df, length):
+            if length == 20:
+                return pd.Series([0.012] * len(df))  # 1H strong
+            if length == 25:
+                return pd.Series([0.012] * len(df))  # 15M strong (> 0.008 * 1.25)
+            return pd.Series([0.005] * len(df))      # 5M strong
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lr_side_effect)
+
+    def _setup_continuation_signal(self, engine, monkeypatch, count):
+        """Mock all signal stack layers so continuation fires reliably."""
+        last_price = 1.1000
+        mid_val = last_price - 0.0005
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_stoch_rsi",
+            lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0005] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": [mid_val + 0.003] * count,
+                "mid": [mid_val] * count,
+                "lower": [mid_val - 0.003] * count,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+        )
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+    def _emit_signal(self, engine, symbol):
+        """Call check_symbol and return the diagnostic, with detailed logging on failure."""
+        signal, trend, lr_1h, lr_15, lr_5, diag = engine.check_symbol(symbol)
+        return signal, trend, diag
+
+    def test_opposite_direction_conflict_blocks_signal_and_enters_suppression(self, monkeypatch):
+        """Requirement 1: same-symbol opposite-direction signal while prior unresolved → blocked."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        # First signal: BUY (Uptrend)
+        signal, trend, diag = self._emit_signal(engine, "EURUSD")
+        assert signal is not None
+        assert trend == "Uptrend"
+
+        # Manually inject a conflicting last signal direction (SELL) to simulate
+        # the scenario where a prior opposite-direction signal is unresolved.
+        engine._record_signal_direction("EURUSD", "SELL")
+
+        # Now a new Uptrend evaluation should conflict
+        signal2, trend2, diag2 = self._emit_signal(engine, "EURUSD")
+        assert signal2 is None
+        assert diag2.final_decision == "skipped"
+        assert diag2.decision_reason == "market_invalid:opposite_signal_chop"
+        assert diag2.market_validity_state == "invalid"
+        chop_criterion = next(c for c in diag2.criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.passed is False
+        assert chop_criterion.reason == "market_invalid:opposite_signal_chop"
+        assert chop_criterion.context["current_direction"] == "BUY"
+        assert chop_criterion.context["conflicting_direction"] == "SELL"
+
+    def test_chop_suppression_blocks_subsequent_evaluations(self, monkeypatch):
+        """Requirement 2: after opposite-direction conflict, symbol is suppressed for N candles."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        # Clear class-level cooldown state from prior tests
+        SignalEngine._cooldown.clear()
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        # Emit first signal
+        signal, trend, diag = self._emit_signal(engine, "EURUSD")
+        if signal is None:
+            # Debug: understand why the first signal did not emit
+            print(f"DEBUG: first signal not emitted. reason={diag.decision_reason}")
+            for c in diag.criteria:
+                print(f"  {c.criterion_name}: passed={c.passed} reason={c.reason}")
+        assert signal is not None
+
+        # Inject opposite-direction conflict → triggers suppression
+        engine._record_signal_direction("EURUSD", "SELL")
+
+        # Conflict evaluation triggers suppression
+        _, _, diag_conflict = self._emit_signal(engine, "EURUSD")
+        assert diag_conflict.decision_reason == "market_invalid:opposite_signal_chop"
+
+        # Immediately evaluate again — should be in suppression window
+        signal3, trend3, diag3 = self._emit_signal(engine, "EURUSD")
+        assert signal3 is None
+        assert diag3.decision_reason == "market_invalid:chop_suppression"
+        assert diag3.market_validity_state == "invalid"
+        chop_criterion = next(c for c in diag3.criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.reason == "market_invalid:chop_suppression"
+        assert chop_criterion.context["suppression_candles_remaining"] > 0
+        assert chop_criterion.context["suppression_candles_remaining"] <= config.CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES
+
+    def test_weak_15m_bridge_blocks_signal(self, monkeypatch):
+        """Requirement 3: abs(lr_15m) must be >= LR_15M_THRESHOLD * multiplier."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        # 15M is just below chop threshold (0.008 * 1.25 = 0.010) but above trend threshold (0.008)
+        def weak_15m_lr(df, length):
+            if length == 20:
+                return pd.Series([0.012] * len(df))
+            if length == 25:
+                return pd.Series([0.009] * len(df))  # passes trend (>=0.008) but fails chop (<0.010)
+            return pd.Series([0.005] * len(df))
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", weak_15m_lr)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is None
+        assert diag.decision_reason == "trend:weak_15m_bridge"
+        assert diag.market_validity_state == "invalid"
+        chop_criterion = next(c for c in diag.criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.reason == "trend:weak_15m_bridge"
+        assert chop_criterion.context["lr_15m"] == 0.009
+        assert chop_criterion.context["required_15m_strength"] == 0.010
+
+    def test_trend_persistence_blocks_without_prior_evaluations(self, monkeypatch):
+        """Requirement 4: without enough prior same-direction evaluations, signal is blocked."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        # No warmup — persistence check should fail
+
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is None
+        assert diag.decision_reason == "trend:not_persistent"
+        assert diag.market_validity_state == "invalid"
+        chop_criterion = next(c for c in diag.criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.reason == "trend:not_persistent"
+        assert chop_criterion.context["required_persistence_candles"] == config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES
+
+    def test_trend_persistence_passes_after_warmup(self, monkeypatch):
+        """Requirement 4: with enough prior evaluations, signal proceeds."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        # Clear class-level cooldown state from prior tests
+        SignalEngine._cooldown.clear()
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is not None
+        assert diag.decision_reason not in ("trend:not_persistent", "market_invalid:chop_suppression")
+
+    def test_direction_flip_chop_blocks_on_excessive_flips(self, monkeypatch):
+        """Requirement 5: too many direction flips in lookback → chop."""
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+
+        # Seed evaluations with alternating directions > max_flips
+        for i in range(config.CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES + 2):
+            engine._record_trend_evaluation("EURUSD", "Uptrend" if i % 2 == 0 else "Downtrend")
+
+        # Warm persistence with the current direction
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is None
+        assert diag.decision_reason == "market_invalid:direction_flip_chop"
+        assert diag.market_validity_state == "invalid"
+        chop_criterion = next(c for c in diag.criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.reason == "market_invalid:direction_flip_chop"
+        assert chop_criterion.context["observed_flips"] > config.CHOP_MAX_DIRECTION_FLIPS
+
+    def test_chop_filter_disabled_allows_all_signals(self, monkeypatch):
+        """When CHOP_FILTER_ENABLED is false, no chop blocks occur."""
+        import tradegumi.config as config_module
+        orig_enabled = config_module.CHOP_FILTER_ENABLED
+        try:
+            config_module.CHOP_FILTER_ENABLED = False
+            now = datetime.now(timezone.utc)
+            count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+            candles = closed_candles(count, now)
+            engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+            # Clear class-level cooldown state from prior tests
+            SignalEngine._cooldown.clear()
+
+            self._make_strong_lr(monkeypatch)
+            self._setup_continuation_signal(engine, monkeypatch, count)
+            # No warmup, no suppression handling needed
+
+            signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+            assert signal is not None
+            assert diag.decision_reason != "market_invalid:chop_suppression"
+            assert diag.decision_reason != "trend:not_persistent"
+        finally:
+            config_module.CHOP_FILTER_ENABLED = orig_enabled
+
+    def test_chop_suppression_expires_after_window(self, monkeypatch):
+        """Suppression window eventually expires and allows signals again."""
+        from tradegumi import config
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        # Clear class-level cooldown state from prior tests
+        SignalEngine._cooldown.clear()
+
+        self._make_strong_lr(monkeypatch)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        # Emit first signal
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is not None
+
+        # Inject opposite-direction conflict → triggers suppression
+        engine._record_signal_direction("EURUSD", "SELL")
+        _, _, _, _, _, diag_conflict = engine.check_symbol("EURUSD")
+        assert diag_conflict.decision_reason == "market_invalid:opposite_signal_chop"
+
+        # Fast-forward time past suppression window and clear the conflicting
+        # direction so the test verifies only suppression expiration.
+        state = engine._chop_state["EURUSD"]
+        state["chop_suppression_until"] = (now - timedelta(minutes=1)).isoformat()
+        state["last_signal_direction"] = "BUY"  # align with current trend
+
+        # Also clear cooldown from the first emitted signal
+        SignalEngine._cooldown.clear()
+
+        # Now evaluate again — suppression should be expired and no conflict
+        signal2, trend2, _, _, _, diag2 = engine.check_symbol("EURUSD")
+        assert signal2 is not None
+        assert "chop_suppression_until" not in state or state.get("chop_suppression_until") is None
