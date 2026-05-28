@@ -168,7 +168,7 @@
 - [x] T051 Run `npm run lint` and `npm run build` from `dashboard/` if dashboard files changed
 - [x] T052 Verify quickstart scenarios in `specs/013-alert-signal-autograding/quickstart.md`
 - [x] T053 Confirm no undocumented broker browser/chart/devtools endpoint usage was introduced anywhere under `src/` or `dashboard/`
-- [ ] T054 Submit PR with DockeGumi as reviewer
+- [x] T054 Submit PR with DockeGumi as reviewer
 
 ---
 
