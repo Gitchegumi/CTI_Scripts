@@ -313,6 +313,13 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         # ── Live API endpoints (require Oanda client) ──
+        if path == "/api/prices":
+            from tradegumi.price_observations import DEFAULT_PRICE_HISTORY
+            symbols = [s.strip().upper() for s in (self._get_query_param("symbols") or "").split(",") if s.strip()]
+            observations = DEFAULT_PRICE_HISTORY.latest_many(symbols).values() if symbols else []
+            self._send_json([observation.to_dict() for observation in observations])
+            return
+
         if path == "/api/positions":
             client = get_runtime_state().get("client")
             if not client:

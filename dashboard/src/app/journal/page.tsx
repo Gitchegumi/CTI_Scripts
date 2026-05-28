@@ -19,6 +19,15 @@ interface JournalEntry {
   atr: number;
   rr: number | null;
   signal_timestamp: string;
+  status?: "pending" | "open_simulated" | "closed" | "ambiguous" | "invalidated" | "expired" | string;
+  outcome?: "tp" | "sl" | "ambiguous" | "expired" | "manually_closed" | "invalidated_by_prime" | "invalidated_by_system" | "none" | string;
+  outcome_source?: string | null;
+  exit_time?: string | null;
+  exit_price?: number | null;
+  outcome_checked_at?: string | null;
+  ambiguous_reason?: string | null;
+  manually_overridden?: boolean;
+  manual_override_reason?: string | null;
   grade: TradeGrade | "MANUAL_CLOSE" | "EXPIRED";
   trade_grade?: TradeGrade;
   setup_group_id?: string;
@@ -74,6 +83,32 @@ function suppressedPrimeLabel(entry: JournalEntry): string | null {
   const opposite = entry.prime_suppressed_opposite_direction_count ?? 0;
   if (opposite > 0) return `${total} total, ${opposite} opposite direction`;
   return String(total);
+}
+
+function titleCaseToken(value?: string | null): string {
+  if (!value) return "None";
+  return value
+    .split("_")
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function outcomeLabel(entry: JournalEntry): string | null {
+  const status = entry.status ? titleCaseToken(entry.status) : null;
+  const outcome = entry.outcome && entry.outcome !== "none" ? titleCaseToken(entry.outcome) : null;
+  if (!status && !outcome) return null;
+  return outcome ? `${status ?? "Open"} / ${outcome}` : status;
+}
+
+function sourceLabel(source?: string | null): string | null {
+  if (!source) return null;
+  if (source === "live_price_observation_1s") return "Auto 1s";
+  if (source === "live_price_observation_1s_mid") return "Auto 1s mid";
+  if (source === "oanda_pricing_stream") return "Stream";
+  if (source === "historical_candle") return "Candle";
+  if (source === "manual") return "Manual";
+  if (source === "system_prime_filter") return "Prime filter";
+  return titleCaseToken(source);
 }
 
 // ── Grouping logic ────────────────────────────────────────────────────────────
@@ -386,6 +421,40 @@ function TradeGroupCard({
                 <div className="text-cyan-200 text-right">{suppressedPrimeLabel(master)}</div>
               </>
             )}
+            {outcomeLabel(master) && (
+              <>
+                <div className="text-slate-400">Outcome</div>
+                <div className={master.status === "ambiguous" ? "text-amber-300 text-right" : "text-white text-right"}>
+                  {outcomeLabel(master)}
+                </div>
+              </>
+            )}
+            {sourceLabel(master.outcome_source) && (
+              <>
+                <div className="text-slate-400">Source</div>
+                <div className="text-slate-200 text-right">{sourceLabel(master.outcome_source)}</div>
+              </>
+            )}
+            {master.exit_time && (
+              <>
+                <div className="text-slate-400">Exit</div>
+                <div className="text-white text-right">
+                  {master.exit_price != null ? fmtPrice(master.exit_price) : "N/A"} <span className="text-slate-500">{fmtTime(master.exit_time)}</span>
+                </div>
+              </>
+            )}
+            {master.manually_overridden && (
+              <>
+                <div className="text-slate-400">Manual Override</div>
+                <div className="text-blue-200 text-right">{master.manual_override_reason || "Yes"}</div>
+              </>
+            )}
+            {master.ambiguous_reason && (
+              <>
+                <div className="text-slate-400">Ambiguous</div>
+                <div className="text-amber-300 text-right">{titleCaseToken(master.ambiguous_reason)}</div>
+              </>
+            )}
           </div>
         );
       })()}
@@ -498,6 +567,20 @@ function TradeGroupCard({
                   {" / "}
                   <span className="text-green-400">{fmtPrice(e.take_profit)}</span>
                 </div>
+                {outcomeLabel(e) && (
+                  <>
+                    <div className="text-slate-500">Outcome</div>
+                    <div className={e.status === "ambiguous" ? "text-amber-300 text-right" : "text-white text-right"}>
+                      {outcomeLabel(e)}
+                    </div>
+                  </>
+                )}
+                {e.exit_price != null && (
+                  <>
+                    <div className="text-slate-500">Exit</div>
+                    <div className="text-white text-right">{fmtPrice(e.exit_price)}</div>
+                  </>
+                )}
               </div>
             );
           })}

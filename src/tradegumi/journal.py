@@ -56,6 +56,21 @@ PENDING_GRADE = "PENDING"
 TRADE_GRADES = {"TP_HIT", "SL_HIT", "BE", "MISSED_ENTRY", "LATE_SIGNAL", "DUPLICATE", "INVALID", PENDING_GRADE}
 VALID_GRADES = {"TP_HIT", "SL_HIT", "BE", "INVALID", "MANUAL_CLOSE", "EXPIRED"}
 FILTER_GRADES = VALID_GRADES | {PENDING_GRADE}
+STATUS_PENDING = "pending"
+STATUS_OPEN_SIMULATED = "open_simulated"
+STATUS_CLOSED = "closed"
+STATUS_AMBIGUOUS = "ambiguous"
+STATUS_INVALIDATED = "invalidated"
+STATUS_EXPIRED = "expired"
+OUTCOME_NONE = "none"
+OUTCOME_TP = "tp"
+OUTCOME_SL = "sl"
+OUTCOME_EXPIRED = "expired"
+OUTCOME_MANUALLY_CLOSED = "manually_closed"
+OUTCOME_INVALIDATED_BY_PRIME = "invalidated_by_prime"
+OUTCOME_INVALIDATED_BY_SYSTEM = "invalidated_by_system"
+OUTCOME_SOURCE_MANUAL = "manual"
+OUTCOME_SOURCE_SYSTEM_PRIME_FILTER = "system_prime_filter"
 PRIME_CLOSE_INFERRED_TP = "inferred_tp"
 PRIME_CLOSE_INFERRED_SL = "inferred_sl"
 PRIME_CLOSE_MANUAL_GRADE = "manual_grade"
@@ -91,6 +106,18 @@ EXPORT_FIELDS = [
     "rr",
     "signal_timestamp",
     "status",
+    "outcome",
+    "outcome_source",
+    "exit_time",
+    "exit_price",
+    "outcome_checked_at",
+    "observations_to_outcome",
+    "bars_to_outcome",
+    "max_favorable_excursion",
+    "max_adverse_excursion",
+    "ambiguous_reason",
+    "manually_overridden",
+    "manual_override_reason",
     "grade",
     "pending_state",
     "grade_timestamp",
@@ -112,8 +139,8 @@ EXPORT_FIELDS = [
     "prime_suppressed_same_direction_count",
     "prime_suppressed_opposite_direction_count",
     "prime_suppressed_signal_ids",
+    "prime_suppressed_signal_outcomes",
     "trade_result",
-    "outcome",
     "outcome_status",
     "pnl",
     "pnl_percent",
@@ -279,6 +306,55 @@ def _normalize_csv_value(value: Any) -> Any:
     if value is None:
         return ""
     return value
+
+
+def _default_status_for_entry(entry: dict[str, Any]) -> str:
+    """Infer a safe outcome status for legacy journal entries."""
+    grade = str(entry.get("grade") or PENDING_GRADE).upper()
+    trade_grade = str(entry.get("trade_grade") or grade).upper()
+    if grade == PENDING_GRADE and trade_grade == PENDING_GRADE:
+        return STATUS_OPEN_SIMULATED
+    if grade == "EXPIRED":
+        return STATUS_EXPIRED
+    if trade_grade == "INVALID":
+        return STATUS_INVALIDATED
+    return STATUS_CLOSED
+
+
+def _default_outcome_for_entry(entry: dict[str, Any]) -> str:
+    """Infer a safe outcome value for legacy grade-only entries."""
+    grade = str(entry.get("grade") or PENDING_GRADE).upper()
+    trade_grade = str(entry.get("trade_grade") or grade).upper()
+    if grade == "TP_HIT" or trade_grade == "TP_HIT":
+        return OUTCOME_TP
+    if grade == "SL_HIT" or trade_grade == "SL_HIT":
+        return OUTCOME_SL
+    if grade == "EXPIRED":
+        return OUTCOME_EXPIRED
+    if grade == "MANUAL_CLOSE":
+        return OUTCOME_MANUALLY_CLOSED
+    if trade_grade == "INVALID":
+        return OUTCOME_INVALIDATED_BY_SYSTEM
+    return OUTCOME_NONE
+
+
+def _apply_outcome_defaults(entry: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a journal entry with additive outcome defaults."""
+    normalized = dict(entry)
+    normalized.setdefault("status", _default_status_for_entry(normalized))
+    normalized.setdefault("outcome", _default_outcome_for_entry(normalized))
+    normalized.setdefault("outcome_source", OUTCOME_SOURCE_MANUAL if normalized.get("grade") not in (None, PENDING_GRADE) else None)
+    normalized.setdefault("exit_time", normalized.get("grade_timestamp"))
+    normalized.setdefault("exit_price", None)
+    normalized.setdefault("outcome_checked_at", normalized.get("grade_timestamp"))
+    normalized.setdefault("observations_to_outcome", None)
+    normalized.setdefault("bars_to_outcome", None)
+    normalized.setdefault("max_favorable_excursion", None)
+    normalized.setdefault("max_adverse_excursion", None)
+    normalized.setdefault("ambiguous_reason", None)
+    normalized.setdefault("manually_overridden", False)
+    normalized.setdefault("manual_override_reason", None)
+    return normalized
 
 
 def _matches_optional_filter(entry: dict[str, Any], name: str, value: Optional[str]) -> bool:
@@ -548,6 +624,10 @@ def _is_unresolved_prime(entry: dict[str, Any]) -> bool:
     """Return whether a persisted journal entry can suppress same-symbol signals."""
     if entry.get("prime_active") is not True:
         return False
+    status = str(entry.get("status") or "").lower()
+    outcome = str(entry.get("outcome") or "").lower()
+    if status == STATUS_CLOSED and outcome in {OUTCOME_TP, OUTCOME_SL}:
+        return False
     trade_grade = str(entry.get("trade_grade") or entry.get("grade") or PENDING_GRADE).upper()
     if trade_grade not in PRIME_UNRESOLVED_GRADES:
         return False
@@ -660,6 +740,21 @@ def _record_prime_suppression(prime: dict[str, Any], new_entry: dict[str, Any], 
         suppressed_ids = []
     suppressed_ids.append(str(new_entry.get("signal_id")))
     prime["prime_suppressed_signal_ids"] = suppressed_ids[-25:]
+    suppressed_outcomes = prime.get("prime_suppressed_signal_outcomes")
+    if not isinstance(suppressed_outcomes, list):
+        suppressed_outcomes = []
+    suppressed_outcomes.append(
+        {
+            "signal_id": str(new_entry.get("signal_id")),
+            "symbol": new_entry.get("symbol"),
+            "direction": _direction_key(new_entry.get("direction")),
+            "status": STATUS_INVALIDATED,
+            "outcome": OUTCOME_INVALIDATED_BY_PRIME,
+            "outcome_source": OUTCOME_SOURCE_SYSTEM_PRIME_FILTER,
+            "suppressed_at": suppressed_at,
+        }
+    )
+    prime["prime_suppressed_signal_outcomes"] = suppressed_outcomes[-25:]
 
 
 def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> str:
@@ -684,6 +779,19 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
         "rr": rr,
         "signal_timestamp": ts,
         "grade": "PENDING",
+        "status": STATUS_OPEN_SIMULATED,
+        "outcome": OUTCOME_NONE,
+        "outcome_source": None,
+        "exit_time": None,
+        "exit_price": None,
+        "outcome_checked_at": None,
+        "observations_to_outcome": 0,
+        "bars_to_outcome": None,
+        "max_favorable_excursion": 0.0,
+        "max_adverse_excursion": 0.0,
+        "ambiguous_reason": None,
+        "manually_overridden": False,
+        "manual_override_reason": None,
         "grade_timestamp": None,
         "notes": notes,
         "discord_msg_id": discord_msg_id,
@@ -752,7 +860,20 @@ def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> 
                 if entry["trade_grade"] == "INVALID":
                     entry["usable_for_strategy_stats"] = False
                     entry["stats_exclusion_reason"] = "manual_invalidated"
+                    entry["status"] = STATUS_INVALIDATED
+                    entry["outcome"] = OUTCOME_INVALIDATED_BY_SYSTEM
+                elif grade == "EXPIRED":
+                    entry["status"] = STATUS_EXPIRED
+                    entry["outcome"] = OUTCOME_EXPIRED
+                else:
+                    entry["status"] = STATUS_CLOSED
+                    entry["outcome"] = OUTCOME_MANUALLY_CLOSED if grade == "MANUAL_CLOSE" else _default_outcome_for_entry(entry)
                 entry["grade_timestamp"] = _now_iso()
+                entry["outcome_source"] = OUTCOME_SOURCE_MANUAL
+                entry["exit_time"] = entry["grade_timestamp"]
+                entry["outcome_checked_at"] = entry["grade_timestamp"]
+                entry["manually_overridden"] = True
+                entry["manual_override_reason"] = notes or None
                 entry["notes"] = notes
                 stripped = json.dumps(entry)
                 updated = True
@@ -835,7 +956,7 @@ def read_journal() -> list:
     with _lock:
         entries = _read_entries_oldest_first()
 
-    return list(reversed(entries))
+    return [_apply_outcome_defaults(entry) for entry in reversed(entries)]
 
 
 def build_journal_export(selection: Optional[SignalJournalExportSelection] = None) -> SignalJournalExportResult:
@@ -851,7 +972,8 @@ def build_journal_export(selection: Optional[SignalJournalExportSelection] = Non
     writer = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for entry in entries:
-        writer.writerow({key: _normalize_csv_value(entry.get(key)) for key in fields})
+        normalized = _apply_outcome_defaults(entry)
+        writer.writerow({key: _normalize_csv_value(normalized.get(key)) for key in fields})
     return SignalJournalExportResult(out.getvalue(), _export_filename(selection), len(entries))
 
 
@@ -883,7 +1005,22 @@ def reset_signal_to_pending(signal_id: str) -> bool:
     """Reset one signal to PENDING while preserving signal evidence and notes."""
     if not signal_id:
         return False
-    reset_fields = ("outcome", "outcome_status", "score", "reviewed_at", "resolved_at")
+    reset_fields = (
+        "outcome_status",
+        "score",
+        "reviewed_at",
+        "resolved_at",
+        "exit_time",
+        "exit_price",
+        "outcome_checked_at",
+        "observations_to_outcome",
+        "bars_to_outcome",
+        "max_favorable_excursion",
+        "max_adverse_excursion",
+        "ambiguous_reason",
+        "outcome_source",
+        "manual_override_reason",
+    )
     with _lock:
         entries = _read_entries_oldest_first()
         updated = False
@@ -891,6 +1028,9 @@ def reset_signal_to_pending(signal_id: str) -> bool:
             if not updated and entry.get("signal_id") == signal_id:
                 entry["grade"] = PENDING_GRADE
                 entry["trade_grade"] = PENDING_GRADE
+                entry["status"] = STATUS_OPEN_SIMULATED
+                entry["outcome"] = OUTCOME_NONE
+                entry["manually_overridden"] = False
                 usable = _strategy_usable_for_entry(entry)
                 entry["usable_for_strategy_stats"] = usable
                 if usable:

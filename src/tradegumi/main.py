@@ -46,6 +46,8 @@ from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlati
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
+from tradegumi.price_observations import DASHBOARD_POLL, publish_tick_observations
+from tradegumi.signal_outcomes import evaluate_price_observation
 from tradegumi.callback import (
     send_signal_callback, send_rescan_callback, send_mode_change_callback,
     send_trade_callback, send_status_callback, send_closed_market_callback,
@@ -431,6 +433,12 @@ def run(mode: str):
         prices = {}
         try:
             ticks = client.get_pricing(scan_symbols)
+            observations = publish_tick_observations(ticks, source=DASHBOARD_POLL)
+            for observation in observations:
+                try:
+                    evaluate_price_observation(observation)
+                except Exception as e:
+                    log.debug("Signal outcome evaluation failed for %s: %s", observation.symbol, e)
             prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
         except Exception as e:
             log.debug("Price fetch failed: %s", e)

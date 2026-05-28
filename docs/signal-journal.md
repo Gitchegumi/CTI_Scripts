@@ -44,13 +44,33 @@ Before suppressing a follow-on signal, the journal checks market candles carried
 
 Suppressed signals do not create setup rows, do not require grading, and do not count as usable strategy-stat opportunities. They remain auditable through the active prime's suppression fields and strategy metrics.
 
+## Alert-Only Auto-Grading
+
+Alert-only and Developing-mode signals can be auto-graded from shared price observations after they are journaled. The evaluator does not generate signals, place trades, close positions, or call Oanda directly. It consumes the same `PriceObservation` records published from the backend one-second pricing path that feeds dashboard state.
+
+Outcome fields are additive and safe for legacy records:
+
+- `status` is one of `pending`, `open_simulated`, `closed`, `ambiguous`, `invalidated`, or `expired`.
+- `outcome` is one of `tp`, `sl`, `ambiguous`, `expired`, `manually_closed`, `invalidated_by_prime`, `invalidated_by_system`, or `none`.
+- `outcome_source` records whether the result came from `live_price_observation_1s`, midpoint fallback, a future stream, candle data, manual review, or system prime filtering.
+- `exit_time`, `exit_price`, and `outcome_checked_at` record the evaluator audit trail.
+- `observations_to_outcome`, `max_favorable_excursion`, and `max_adverse_excursion` summarize observed movement when available.
+- `ambiguous_reason` explains unresolved ordering, such as target and stop appearing hit in the same evaluator cycle.
+- `manually_overridden` and `manual_override_reason` protect human review decisions.
+
+Bid/ask grading uses executable-side prices: BUY targets and stops use bid; SELL targets and stops use ask. If only midpoint is available, auto-grading may still close the signal, but `outcome_source` explicitly records midpoint-based grading so it is not confused with execution-quality bid/ask grading.
+
+Manual grades are authoritative. A manually graded or manually locked signal is skipped by the evaluator. Resetting a signal to pending clears auto outcome fields and makes the signal eligible for auto-grading again unless a manual lock remains.
+
+The first implementation keeps price observations in bounded memory. A future Oanda pricing stream should publish the same observation shape with `source=oanda_pricing_stream`, allowing the evaluator and dashboard read paths to remain unchanged.
+
 ## Purge
 
 `Purge` removes Signal Journal entries only after confirmation. The purge scope matches the active grade filter. This is intended for clearing stale signals created under old strategy parameters.
 
 ## Reset To Pending
 
-`Reset to Pending` is available on graded signal groups. It changes the selected signal back to `PENDING`, clears grade-specific outcome fields such as `grade_timestamp`, `outcome`, `score`, and review timestamps, and preserves the original signal data, diagnostics, and user notes.
+`Reset to Pending` is available on graded signal groups. It changes the selected signal back to `PENDING`, clears grade-specific outcome fields such as `grade_timestamp`, exit details, outcome source, score, and review timestamps, and preserves the original signal data, diagnostics, and user notes.
 
 `Mark Invalid` preserves the original signal evidence and notes while setting `trade_grade` to `INVALID`, `usable_for_strategy_stats` to false, and `stats_exclusion_reason` to `manual_invalidated`.
 

@@ -225,6 +225,7 @@ class DiagnosticSummary:
     prime_suppressed_signals_by_symbol: dict[str, int] = field(default_factory=dict)
     prime_suppressed_same_direction_count: int = 0
     prime_suppressed_opposite_direction_count: int = 0
+    prime_invalidated_by_prime_count: int = 0
     inferred_tp_close_count: int = 0
     inferred_sl_close_count: int = 0
     ambiguous_prime_close_count: int = 0
@@ -1012,13 +1013,15 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
     try:
         from tradegumi import journal as signal_journal
 
-        entries = signal_journal.read_journal()
+        with signal_journal._lock:
+            entries = signal_journal._read_entries_oldest_first()
     except Exception:
         return {
             "total_prime_suppressed_signals": 0,
             "prime_suppressed_signals_by_symbol": {},
             "prime_suppressed_same_direction_count": 0,
             "prime_suppressed_opposite_direction_count": 0,
+            "prime_invalidated_by_prime_count": 0,
             "inferred_tp_close_count": 0,
             "inferred_sl_close_count": 0,
             "ambiguous_prime_close_count": 0,
@@ -1030,6 +1033,7 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
     by_symbol: dict[str, int] = {}
     same_direction = 0
     opposite_direction = 0
+    invalidated_by_prime = 0
     inferred_tp = 0
     inferred_sl = 0
     ambiguous = 0
@@ -1046,6 +1050,14 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
             by_symbol[entry_symbol or "UNKNOWN"] = by_symbol.get(entry_symbol or "UNKNOWN", 0) + suppressed_count
         same_direction += int(entry.get("prime_suppressed_same_direction_count") or 0)
         opposite_direction += int(entry.get("prime_suppressed_opposite_direction_count") or 0)
+        suppressed_outcomes = entry.get("prime_suppressed_signal_outcomes")
+        if isinstance(suppressed_outcomes, list):
+            invalidated_by_prime += sum(
+                1 for outcome in suppressed_outcomes
+                if isinstance(outcome, dict) and outcome.get("outcome") == "invalidated_by_prime"
+            )
+        elif suppressed_count:
+            invalidated_by_prime += suppressed_count
         if entry.get("prime_closed_reason") == "inferred_tp":
             inferred_tp += 1
         if entry.get("prime_closed_reason") == "inferred_sl":
@@ -1058,6 +1070,7 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
         "prime_suppressed_signals_by_symbol": by_symbol,
         "prime_suppressed_same_direction_count": same_direction,
         "prime_suppressed_opposite_direction_count": opposite_direction,
+        "prime_invalidated_by_prime_count": invalidated_by_prime,
         "inferred_tp_close_count": inferred_tp,
         "inferred_sl_close_count": inferred_sl,
         "ambiguous_prime_close_count": ambiguous,
@@ -1154,6 +1167,7 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             prime_suppressed_signals_by_symbol=prime_summary["prime_suppressed_signals_by_symbol"],
             prime_suppressed_same_direction_count=prime_summary["prime_suppressed_same_direction_count"],
             prime_suppressed_opposite_direction_count=prime_summary["prime_suppressed_opposite_direction_count"],
+            prime_invalidated_by_prime_count=prime_summary["prime_invalidated_by_prime_count"],
             inferred_tp_close_count=prime_summary["inferred_tp_close_count"],
             inferred_sl_close_count=prime_summary["inferred_sl_close_count"],
             ambiguous_prime_close_count=prime_summary["ambiguous_prime_close_count"],

@@ -17,10 +17,10 @@
 
 **Purpose**: Prepare the codebase for shared price observations and outcome fields.
 
-- [ ] T001 Inspect current journal field defaults, export headers, and prime helper behavior in `src/tradegumi/journal.py`
-- [ ] T002 Inspect current one-second pricing path in `src/tradegumi/main.py` and current live dashboard price consumers in `src/tradegumi/api_server.py` and `dashboard/src/hooks/useData.ts`
-- [ ] T003 [P] Create placeholder test modules `src/tradegumi/tests/test_price_observations.py` and `src/tradegumi/tests/test_signal_outcomes.py`
-- [ ] T004 [P] Confirm Python docstring expectations for new modules in `src/tradegumi/price_observations.py` and `src/tradegumi/signal_outcomes.py`
+- [x] T001 Inspect current journal field defaults, export headers, and prime helper behavior in `src/tradegumi/journal.py`
+- [x] T002 Inspect current one-second pricing path in `src/tradegumi/main.py` and current live dashboard price consumers in `src/tradegumi/api_server.py` and `dashboard/src/hooks/useData.ts`
+- [x] T003 [P] Create placeholder test modules `src/tradegumi/tests/test_price_observations.py` and `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T004 [P] Confirm Python docstring expectations for new modules in `src/tradegumi/price_observations.py` and `src/tradegumi/signal_outcomes.py`
 
 ---
 
@@ -30,12 +30,12 @@
 
 **CRITICAL**: No user story implementation should begin until this phase is complete.
 
-- [ ] T005 [P] Implement `PriceObservation`, source constants, timestamp normalization, and bid/ask/mid derivation in `src/tradegumi/price_observations.py`
-- [ ] T006 [P] Implement bounded per-symbol rolling history and latest-observation read helpers in `src/tradegumi/price_observations.py`
-- [ ] T007 [P] Add unit tests for observation validation, mid derivation, latest lookup, and bounded pruning in `src/tradegumi/tests/test_price_observations.py`
-- [ ] T008 Add additive journal outcome constants, default normalization helpers, and export header fields in `src/tradegumi/journal.py`
-- [ ] T009 Add journal read/update helpers for unresolved alert-only/developing entries and outcome field updates in `src/tradegumi/journal.py`
-- [ ] T010 Add tests for legacy, expired, invalidated, and export-compatible outcome fields in `src/tradegumi/tests/test_journal.py`
+- [x] T005 [P] Implement `PriceObservation`, source constants, timestamp normalization, and bid/ask/mid derivation in `src/tradegumi/price_observations.py`
+- [x] T006 [P] Implement bounded per-symbol rolling history and latest-observation read helpers in `src/tradegumi/price_observations.py`
+- [x] T007 [P] Add unit tests for observation validation, mid derivation, latest lookup, and bounded pruning in `src/tradegumi/tests/test_price_observations.py`
+- [x] T008 Add additive journal outcome constants, default normalization helpers, and export header fields in `src/tradegumi/journal.py`
+- [x] T009 Add journal read/update helpers for unresolved alert-only/developing entries and outcome field updates in `src/tradegumi/journal.py`
+- [x] T010 Add tests for legacy, expired, invalidated, and export-compatible outcome fields in `src/tradegumi/tests/test_journal.py`
 
 **Checkpoint**: Foundation ready; the repo has a neutral observation model and journal can safely read/write outcome fields.
 
@@ -49,17 +49,17 @@
 
 ### Tests for User Story 1
 
-- [ ] T011 [P] [US1] Add long TP, long SL, short TP, short SL, and no-hit evaluator tests in `src/tradegumi/tests/test_signal_outcomes.py`
-- [ ] T012 [P] [US1] Add midpoint fallback outcome-source test in `src/tradegumi/tests/test_signal_outcomes.py`
-- [ ] T013 [P] [US1] Add same-cycle ambiguous TP/SL test in `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T011 [P] [US1] Add long TP, long SL, short TP, short SL, and no-hit evaluator tests in `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T012 [P] [US1] Add midpoint fallback outcome-source test in `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T013 [P] [US1] Add same-cycle ambiguous TP/SL test in `src/tradegumi/tests/test_signal_outcomes.py`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Implement outcome decision dataclasses and BUY/SELL bid/ask/midpoint rules in `src/tradegumi/signal_outcomes.py`
-- [ ] T015 [US1] Implement evaluator service that evaluates unresolved same-symbol entries and updates only journal outcome fields in `src/tradegumi/signal_outcomes.py`
-- [ ] T016 [US1] Update `src/tradegumi/journal.py` to map auto TP/SL outcomes to compatible `grade` and `trade_grade` values without breaking existing filters
-- [ ] T017 [US1] Record `outcome_checked_at`, `exit_time`, `exit_price`, `observations_to_outcome`, `max_favorable_excursion`, and `max_adverse_excursion` when available in `src/tradegumi/journal.py`
-- [ ] T018 [US1] Run focused backend tests for `src/tradegumi/tests/test_signal_outcomes.py` and related journal tests
+- [x] T014 [US1] Implement outcome decision dataclasses and BUY/SELL bid/ask/midpoint rules in `src/tradegumi/signal_outcomes.py`
+- [x] T015 [US1] Implement evaluator service that evaluates unresolved same-symbol entries and updates only journal outcome fields in `src/tradegumi/signal_outcomes.py`
+- [x] T016 [US1] Update `src/tradegumi/journal.py` to map auto TP/SL outcomes to compatible `grade` and `trade_grade` values without breaking existing filters
+- [x] T017 [US1] Record `outcome_checked_at`, `exit_time`, `exit_price`, `observations_to_outcome`, `max_favorable_excursion`, and `max_adverse_excursion` when available in `src/tradegumi/journal.py`
+- [x] T018 [US1] Run focused backend tests for `src/tradegumi/tests/test_signal_outcomes.py` and related journal tests
 
 **Checkpoint**: User Story 1 works independently as the MVP.
 
@@ -73,16 +73,16 @@
 
 ### Tests for User Story 2
 
-- [ ] T019 [P] [US2] Add test proving published `PriceTick` values become `dashboard_poll` observations in `src/tradegumi/tests/test_price_observations.py`
-- [ ] T020 [P] [US2] Add integration-style test with a fake client showing one pricing fetch feeds evaluator updates in `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T019 [P] [US2] Add test proving published `PriceTick` values become `dashboard_poll` observations in `src/tradegumi/tests/test_price_observations.py`
+- [x] T020 [P] [US2] Add integration-style test with a fake client showing one pricing fetch feeds evaluator updates in `src/tradegumi/tests/test_signal_outcomes.py`
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Publish existing one-second `client.get_pricing(scan_symbols)` ticks into the shared observation service in `src/tradegumi/main.py`
-- [ ] T022 [US2] Invoke the signal outcome evaluator from the same observation publication path in `src/tradegumi/main.py`
-- [ ] T023 [US2] Add latest price observation read support for dashboard/API consumers in `src/tradegumi/api_server.py` where it avoids duplicate pricing calls
-- [ ] T024 [US2] Ensure `/api/positions` behavior in `src/tradegumi/api_server.py` remains backward compatible if no shared observation exists
-- [ ] T025 [US2] Run tests that verify no evaluator-specific `get_pricing()` call path exists
+- [x] T021 [US2] Publish existing one-second `client.get_pricing(scan_symbols)` ticks into the shared observation service in `src/tradegumi/main.py`
+- [x] T022 [US2] Invoke the signal outcome evaluator from the same observation publication path in `src/tradegumi/main.py`
+- [x] T023 [US2] Add latest price observation read support for dashboard/API consumers in `src/tradegumi/api_server.py` where it avoids duplicate pricing calls
+- [x] T024 [US2] Ensure `/api/positions` behavior in `src/tradegumi/api_server.py` remains backward compatible if no shared observation exists
+- [x] T025 [US2] Run tests that verify no evaluator-specific `get_pricing()` call path exists
 
 **Checkpoint**: Dashboard-price and evaluator flow share the backend observation path.
 
@@ -96,15 +96,15 @@
 
 ### Tests for User Story 3
 
-- [ ] T026 [P] [US3] Add manual override is not overwritten test in `src/tradegumi/tests/test_signal_outcomes.py`
-- [ ] T027 [P] [US3] Add reset-to-pending clears auto outcome eligibility test in `src/tradegumi/tests/test_journal.py`
+- [x] T026 [P] [US3] Add manual override is not overwritten test in `src/tradegumi/tests/test_signal_outcomes.py`
+- [x] T027 [P] [US3] Add reset-to-pending clears auto outcome eligibility test in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Update manual grade and invalidation flows to set manual override fields in `src/tradegumi/journal.py`
-- [ ] T029 [US3] Update reset flow to clear auto outcome fields and preserve manual lock semantics in `src/tradegumi/journal.py`
-- [ ] T030 [US3] Ensure evaluator skips manually overridden or manually locked entries in `src/tradegumi/signal_outcomes.py`
-- [ ] T031 [US3] Run focused manual grade/reset/evaluator tests
+- [x] T028 [US3] Update manual grade and invalidation flows to set manual override fields in `src/tradegumi/journal.py`
+- [x] T029 [US3] Update reset flow to clear auto outcome fields and preserve manual lock semantics in `src/tradegumi/journal.py`
+- [x] T030 [US3] Ensure evaluator skips manually overridden or manually locked entries in `src/tradegumi/signal_outcomes.py`
+- [x] T031 [US3] Run focused manual grade/reset/evaluator tests
 
 **Checkpoint**: Manual review state remains authoritative.
 
@@ -118,17 +118,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T032 [P] [US4] Add unresolved prime blocks and increments invalidated-by-prime test in `src/tradegumi/tests/test_journal.py`
-- [ ] T033 [P] [US4] Add resolved TP/SL prime allows new prime test in `src/tradegumi/tests/test_journal.py`
-- [ ] T034 [P] [US4] Add ambiguous prime prevents duplicate open prime test in `src/tradegumi/tests/test_journal.py`
+- [x] T032 [P] [US4] Add unresolved prime blocks and increments invalidated-by-prime test in `src/tradegumi/tests/test_journal.py`
+- [x] T033 [P] [US4] Add resolved TP/SL prime allows new prime test in `src/tradegumi/tests/test_journal.py`
+- [x] T034 [P] [US4] Add ambiguous prime prevents duplicate open prime test in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 4
 
-- [ ] T035 [US4] Update active-prime detection to treat auto TP/SL outcomes as resolved in `src/tradegumi/journal.py`
-- [ ] T036 [US4] Record `invalidated_by_prime` outcome/status/source when a new same-symbol signal is blocked in `src/tradegumi/journal.py`
-- [ ] T037 [US4] Ensure prime deactivation and new-prime creation remain atomic within append/update locking in `src/tradegumi/journal.py`
-- [ ] T038 [US4] Update prime suppression metrics for invalidated-by-prime evidence if supported in `src/tradegumi/strategy_metrics.py`
-- [ ] T039 [US4] Run focused prime suppression and strategy metrics tests
+- [x] T035 [US4] Update active-prime detection to treat auto TP/SL outcomes as resolved in `src/tradegumi/journal.py`
+- [x] T036 [US4] Record `invalidated_by_prime` outcome/status/source when a new same-symbol signal is blocked in `src/tradegumi/journal.py`
+- [x] T037 [US4] Ensure prime deactivation and new-prime creation remain atomic within append/update locking in `src/tradegumi/journal.py`
+- [x] T038 [US4] Update prime suppression metrics for invalidated-by-prime evidence if supported in `src/tradegumi/strategy_metrics.py`
+- [x] T039 [US4] Run focused prime suppression and strategy metrics tests
 
 **Checkpoint**: Prime suppression agrees with auto-graded journal outcomes.
 
@@ -142,16 +142,16 @@
 
 ### Tests for User Story 5
 
-- [ ] T040 [P] [US5] Add export fields test for status/outcome/source/exit/manual/ambiguous fields in `src/tradegumi/tests/test_journal.py`
-- [ ] T041 [P] [US5] Add dashboard type coverage for journal outcome fields in `dashboard/src/types/index.ts`
+- [x] T040 [P] [US5] Add export fields test for status/outcome/source/exit/manual/ambiguous fields in `src/tradegumi/tests/test_journal.py`
+- [x] T041 [P] [US5] Add dashboard type coverage for journal outcome fields in `dashboard/src/types/index.ts`
 
 ### Implementation for User Story 5
 
-- [ ] T042 [US5] Pass additive outcome fields through journal API responses in `src/tradegumi/api_server.py`
-- [ ] T043 [US5] Add compact outcome/source/exit/manual/ambiguous rendering to `dashboard/src/app/journal/page.tsx`
-- [ ] T044 [US5] Update shared dashboard journal types in `dashboard/src/types/index.ts`
-- [ ] T045 [US5] Update journal export behavior and filename compatibility checks in `src/tradegumi/journal.py`
-- [ ] T046 [US5] Run dashboard lint/build checks from `dashboard/` when UI/types compile
+- [x] T042 [US5] Pass additive outcome fields through journal API responses in `src/tradegumi/api_server.py`
+- [x] T043 [US5] Add compact outcome/source/exit/manual/ambiguous rendering to `dashboard/src/app/journal/page.tsx`
+- [x] T044 [US5] Update shared dashboard journal types in `dashboard/src/types/index.ts`
+- [x] T045 [US5] Update journal export behavior and filename compatibility checks in `src/tradegumi/journal.py`
+- [x] T046 [US5] Run dashboard lint/build checks from `dashboard/` when UI/types compile
 
 **Checkpoint**: Analysts can review and export auto-graded outcomes.
 
@@ -161,13 +161,13 @@
 
 **Purpose**: Documentation, regression, quality, and PR preparation.
 
-- [ ] T047 [P] Update or create `docs/signal-journal.md` with auto-grading fields, manual override behavior, reset behavior, and streaming upgrade note
-- [ ] T048 Review changed Python code for intention-revealing names, simple control flow, bounded retention, and no unexplained magic values
-- [ ] T049 Add or update Python module, class, function, method, and non-trivial helper docstrings in `src/tradegumi/price_observations.py`, `src/tradegumi/signal_outcomes.py`, and modified journal/API helpers
-- [ ] T050 Run `pytest src/tradegumi/tests`
-- [ ] T051 Run `npm run lint` and `npm run build` from `dashboard/` if dashboard files changed
-- [ ] T052 Verify quickstart scenarios in `specs/013-alert-signal-autograding/quickstart.md`
-- [ ] T053 Confirm no undocumented broker browser/chart/devtools endpoint usage was introduced anywhere under `src/` or `dashboard/`
+- [x] T047 [P] Update or create `docs/signal-journal.md` with auto-grading fields, manual override behavior, reset behavior, and streaming upgrade note
+- [x] T048 Review changed Python code for intention-revealing names, simple control flow, bounded retention, and no unexplained magic values
+- [x] T049 Add or update Python module, class, function, method, and non-trivial helper docstrings in `src/tradegumi/price_observations.py`, `src/tradegumi/signal_outcomes.py`, and modified journal/API helpers
+- [x] T050 Run `pytest src/tradegumi/tests`
+- [x] T051 Run `npm run lint` and `npm run build` from `dashboard/` if dashboard files changed
+- [x] T052 Verify quickstart scenarios in `specs/013-alert-signal-autograding/quickstart.md`
+- [x] T053 Confirm no undocumented broker browser/chart/devtools endpoint usage was introduced anywhere under `src/` or `dashboard/`
 - [ ] T054 Submit PR with DockeGumi as reviewer
 
 ---

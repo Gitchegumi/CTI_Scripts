@@ -237,7 +237,7 @@ def test_summary_includes_prime_suppression_metrics(tmp_path, monkeypatch):
     journal_file.write_text(
         "\n".join(
             [
-                '{"signal_id":"sig-1","symbol":"EURUSD","signal_timestamp":"2026-05-06T12:00:00+00:00","prime_suppressed_signal_count":3,"prime_suppressed_same_direction_count":1,"prime_suppressed_opposite_direction_count":2,"prime_closed_reason":"inferred_sl","prime_close_ambiguous":true}',
+                '{"signal_id":"sig-1","symbol":"EURUSD","signal_timestamp":"2026-05-06T12:00:00+00:00","prime_suppressed_signal_count":3,"prime_suppressed_same_direction_count":1,"prime_suppressed_opposite_direction_count":2,"prime_suppressed_signal_outcomes":[{"outcome":"invalidated_by_prime"},{"outcome":"invalidated_by_prime"},{"outcome":"invalidated_by_prime"}],"prime_closed_reason":"inferred_sl","prime_close_ambiguous":true}',
                 '{"signal_id":"sig-2","symbol":"GBPJPY","signal_timestamp":"2026-05-06T13:00:00+00:00","prime_suppressed_signal_count":1,"prime_suppressed_same_direction_count":1,"prime_closed_reason":"inferred_tp","prime_close_ambiguous":false}',
             ]
         )
@@ -251,6 +251,7 @@ def test_summary_includes_prime_suppression_metrics(tmp_path, monkeypatch):
     assert summary["prime_suppressed_signals_by_symbol"] == {"GBPJPY": 1, "EURUSD": 3}
     assert summary["prime_suppressed_same_direction_count"] == 2
     assert summary["prime_suppressed_opposite_direction_count"] == 2
+    assert summary["prime_invalidated_by_prime_count"] == 4
     assert summary["inferred_tp_close_count"] == 1
     assert summary["inferred_sl_close_count"] == 1
     assert summary["ambiguous_prime_close_count"] == 1
