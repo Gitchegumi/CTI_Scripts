@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/012-prime-signal-suppression/plan.md
+specs/013-alert-signal-autograding/plan.md
 <!-- SPECKIT END -->

@@ -164,6 +164,49 @@ def test_export_journal_csv_has_required_columns_and_json_nested_values(journal_
     assert rows[0]["criteria"] == '{"risk":true,"trend":false}'
 
 
+def test_read_journal_defaults_legacy_outcome_fields(journal_file):
+    write_entries(journal_file, [{"signal_id": "sig-1", "grade": "PENDING", "trade_grade": "PENDING"}])
+
+    entry = journal.read_journal()[0]
+
+    assert entry["status"] == "open_simulated"
+    assert entry["outcome"] == "none"
+    assert entry["manually_overridden"] is False
+
+
+def test_export_journal_csv_includes_auto_grading_fields(journal_file):
+    write_entries(journal_file, [{"signal_id": "sig-1", "symbol": "EURUSD", "grade": "PENDING"}])
+
+    rows = list(csv.DictReader(StringIO(journal.export_journal_csv())))
+
+    assert "outcome_source" in rows[0]
+    assert "exit_time" in rows[0]
+    assert "exit_price" in rows[0]
+    assert "outcome_checked_at" in rows[0]
+    assert "manually_overridden" in rows[0]
+    assert "manual_override_reason" in rows[0]
+
+
+def test_expired_and_invalidated_outcome_defaults_export(journal_file):
+    write_entries(
+        journal_file,
+        [
+            {"signal_id": "expired", "grade": "EXPIRED"},
+            {"signal_id": "invalid", "grade": "INVALID", "trade_grade": "INVALID"},
+        ],
+    )
+
+    entries = {entry["signal_id"]: entry for entry in journal.read_journal()}
+    rows = {row["signal_id"]: row for row in csv.DictReader(StringIO(journal.export_journal_csv()))}
+
+    assert entries["expired"]["status"] == "expired"
+    assert entries["expired"]["outcome"] == "expired"
+    assert entries["invalid"]["status"] == "invalidated"
+    assert entries["invalid"]["outcome"] == "invalidated_by_system"
+    assert rows["expired"]["outcome"] == "expired"
+    assert rows["invalid"]["outcome"] == "invalidated_by_system"
+
+
 def test_append_signal_creates_setup_group_and_trade_outcome_fields(journal_file, monkeypatch):
     monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
 
@@ -345,7 +388,9 @@ def test_reset_signal_to_pending_preserves_signal_data_and_notes(journal_file):
     assert entry["grade_timestamp"] is None
     assert entry["notes"] == "keep this"
     assert entry["lr_1h"] == 0.003
-    assert "outcome" not in entry
+    assert entry["status"] == "open_simulated"
+    assert entry["outcome"] == "none"
+    assert entry["manually_overridden"] is False
     assert "score" not in entry
 
 
@@ -376,6 +421,9 @@ def test_prime_suppresses_later_buy_without_new_row(journal_file, monkeypatch):
     assert entries[0]["prime_suppressed_same_direction_count"] == 1
     assert entries[0]["prime_suppressed_opposite_direction_count"] == 0
     assert entries[0]["prime_suppressed_last_at"] == "2026-05-14T14:12:00+00:00"
+    assert entries[0]["prime_suppressed_signal_outcomes"][0]["status"] == "invalidated"
+    assert entries[0]["prime_suppressed_signal_outcomes"][0]["outcome"] == "invalidated_by_prime"
+    assert entries[0]["prime_suppressed_signal_outcomes"][0]["outcome_source"] == "system_prime_filter"
 
 
 def test_prime_suppresses_later_sell_without_new_row(journal_file, monkeypatch):

@@ -48,6 +48,40 @@ export interface SignalEntry {
   timestamp: string;
 }
 
+export type SignalOutcomeStatus =
+  | "pending"
+  | "open_simulated"
+  | "closed"
+  | "ambiguous"
+  | "invalidated"
+  | "expired";
+
+export type SignalOutcome =
+  | "tp"
+  | "sl"
+  | "ambiguous"
+  | "expired"
+  | "manually_closed"
+  | "invalidated_by_prime"
+  | "invalidated_by_system"
+  | "none";
+
+export interface SignalJournalOutcomeFields {
+  status?: SignalOutcomeStatus | string;
+  outcome?: SignalOutcome | string;
+  outcome_source?: string | null;
+  exit_time?: string | null;
+  exit_price?: number | null;
+  outcome_checked_at?: string | null;
+  observations_to_outcome?: number | null;
+  bars_to_outcome?: number | null;
+  max_favorable_excursion?: number | null;
+  max_adverse_excursion?: number | null;
+  ambiguous_reason?: string | null;
+  manually_overridden?: boolean;
+  manual_override_reason?: string | null;
+}
+
 export type TradeGrade =
   | "TP_HIT"
   | "SL_HIT"
@@ -295,6 +329,7 @@ export interface StrategyMetricsSummary {
   prime_suppressed_signals_by_symbol: Record<string, number>;
   prime_suppressed_same_direction_count: number;
   prime_suppressed_opposite_direction_count: number;
+  prime_invalidated_by_prime_count: number;
   inferred_tp_close_count: number;
   inferred_sl_close_count: number;
   ambiguous_prime_close_count: number;
