@@ -166,3 +166,29 @@ def test_same_cycle_midpoint_ambiguous_records_reason(journal_file):
     assert entry["status"] == STATUS_AMBIGUOUS
     assert entry["outcome"] == OUTCOME_AMBIGUOUS
     assert entry["ambiguous_reason"] == "tp_and_sl_hit_same_observation"
+
+
+def test_index_is_refreshed_in_memory_after_journal_write(journal_file, monkeypatch):
+    write_entries(
+        journal_file,
+        [
+            base_entry(signal_id="sig-1", symbol="EURUSD", take_profit=1.1040),
+            base_entry(signal_id="sig-2", symbol="USDJPY", entry_price=150.0, stop_loss=149.0, take_profit=151.0),
+        ],
+    )
+    read_count = 0
+    original_read = journal._read_entries_oldest_first
+
+    def counted_read():
+        nonlocal read_count
+        read_count += 1
+        return original_read()
+
+    monkeypatch.setattr(journal, "_read_entries_oldest_first", counted_read)
+
+    eur_summary = evaluate_price_observation(observation(symbol="EURUSD", bid=1.1041, ask=1.1043))
+    jpy_summary = evaluate_price_observation(observation(symbol="USDJPY", bid=151.1, ask=151.2))
+
+    assert len(eur_summary.updated) == 1
+    assert len(jpy_summary.updated) == 1
+    assert read_count == 1
