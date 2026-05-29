@@ -54,6 +54,15 @@ SIGNAL_SETUP_GROUP_WINDOW_MINUTES = int(os.getenv("SIGNAL_SETUP_GROUP_WINDOW_MIN
 SIGNAL_ENTRY_TOLERANCE_ATR = float(os.getenv("SIGNAL_ENTRY_TOLERANCE_ATR", "0.25"))
 SIGNAL_STALE_BARS = int(os.getenv("SIGNAL_STALE_BARS", "3"))
 
+# TradeGumi loop cadence and lightweight performance logging.
+# Defaults preserve fast live observation and intrabar signal evaluation.
+TRADEGUMI_PRICE_POLL_SECONDS = float(os.getenv("TRADEGUMI_PRICE_POLL_SECONDS", "1"))
+TRADEGUMI_SIGNAL_ENGINE_SECONDS = float(os.getenv("TRADEGUMI_SIGNAL_ENGINE_SECONDS", "5"))
+TRADEGUMI_LOOP_STATE_WRITE_SECONDS = float(os.getenv("TRADEGUMI_LOOP_STATE_WRITE_SECONDS", "5"))
+TRADEGUMI_WATCHLIST_RELOAD_SECONDS = float(os.getenv("TRADEGUMI_WATCHLIST_RELOAD_SECONDS", "60"))
+TRADEGUMI_PERF_LOG_SECONDS = float(os.getenv("TRADEGUMI_PERF_LOG_SECONDS", "60"))
+TRADEGUMI_PERF_ENABLED = os.getenv("TRADEGUMI_PERF_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
 # Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)

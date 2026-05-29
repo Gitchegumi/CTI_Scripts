@@ -16,6 +16,7 @@ import pandas as pd
 
 from tradegumi import config
 from tradegumi.api.base_client import ExecutionClient, Candle, ProviderRequestError
+from tradegumi.price_observations import latest_observation
 from tradegumi.strategy_metrics import CriterionResult, EvaluatedOpportunity
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 from tradegumi.indicators import (
@@ -300,6 +301,12 @@ class SignalDiagnostic:
         )
 
 
+@dataclass
+class _CandleCacheEntry:
+    candles: list[Candle]
+    expires_at: float
+
+
 def get_threshold_version() -> str:
     """Stable hash of active signal thresholds that affect diagnostics."""
     payload = {
@@ -395,6 +402,29 @@ def _timeframe_seconds(timeframe: str) -> int:
     if normalized.startswith("D"):
         return int(normalized[1:]) * 24 * 60 * 60
     return 300
+
+
+def _seconds_until_next_timeframe(timeframe: str, current_time: Optional[datetime] = None) -> float:
+    """Return seconds until the next candle boundary for cache invalidation."""
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    seconds = _timeframe_seconds(timeframe)
+    epoch = now.timestamp()
+    return max(1.0, seconds - (epoch % seconds))
+
+
+def _live_trigger_price(symbol: str, direction: str, fallback: float) -> float:
+    """Return the latest shared live price for trigger checks without provider calls."""
+    observation = latest_observation(symbol)
+    if observation is None:
+        return fallback
+    normalized = _actionable_direction(direction)
+    if normalized == "BUY" and observation.ask is not None:
+        return observation.ask
+    if normalized == "SELL" and observation.bid is not None:
+        return observation.bid
+    return observation.mid if observation.mid is not None else fallback
 
 
 def _candle_close_context(candle: Candle, timeframe: str, current_time: Optional[datetime] = None) -> dict:
@@ -782,6 +812,29 @@ class SignalEngine:
         self.shock_filter = shock_filter or VolatilityShockFilter()
         # Per-instance chop filter state (was class-level; isolation fix)
         self._chop_state: dict[str, dict] = {}
+        self._candle_cache: dict[tuple[str, str, int], _CandleCacheEntry] = {}
+
+    def clear_candle_cache(self) -> None:
+        """Clear cached historical candle context after watchlist/provider changes."""
+        self._candle_cache.clear()
+
+    def _get_cached_candles(self, symbol: str, timeframe: str, count: int) -> list[Candle]:
+        """Fetch candles once per timeframe boundary and reuse indicator context between checks."""
+        key = (symbol.upper(), timeframe.upper(), int(count))
+        now = time.time()
+        cached = self._candle_cache.get(key)
+        if cached is not None and cached.expires_at > now:
+            return cached.candles
+
+        candles = self.client.get_candles(symbol, timeframe, count=count)
+        ttl = _seconds_until_next_timeframe(timeframe)
+        expires_at = now + ttl
+        if candles:
+            last = candles[-1]
+            if not getattr(last, "complete", True):
+                expires_at = min(expires_at, now + max(1.0, ttl))
+        self._candle_cache[key] = _CandleCacheEntry(list(candles), expires_at)
+        return candles
 
     # ── Chop / Regime Filter helpers ──────────────────────────────────────────
 
@@ -1016,9 +1069,9 @@ class SignalEngine:
                  excluded_1h, excluded_15m, excluded_5m, trend_decision).
         """
         if candles_by_tf is None:
-            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-            candles_15m = self.client.get_candles(symbol, "M15", count=60)
-            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+            candles_1h  = self._get_cached_candles(symbol, "H1",  count=30)
+            candles_15m = self._get_cached_candles(symbol, "M15", count=60)
+            candles_5m  = self._get_cached_candles(symbol, "M5",  count=24)
         else:
             candles_1h  = candles_by_tf.get("H1", [])
             candles_15m = candles_by_tf.get("M15", [])
@@ -1147,7 +1200,7 @@ class SignalEngine:
         Returns:
             Signal or None
         """
-        candles = self.client.get_candles(symbol, "M5", count=100)
+        candles = self._get_cached_candles(symbol, "M5", count=100)
         if not candles:
             context = _signal_readiness_issue(
                 raw_candles=[],
@@ -1450,12 +1503,13 @@ class SignalEngine:
         # Check continuation: price on correct side of Keltner midline
         midline = float(kc[kc_mid_col].iloc[-1])
         last_close = float(df["c"].iloc[-1])
+        trigger_price = _live_trigger_price(symbol, trend, last_close)
         if trend == "Uptrend":
-            kc_continuation_ok = last_close > midline
-            kc_continuation_margin = last_close - midline
+            kc_continuation_ok = trigger_price > midline
+            kc_continuation_margin = trigger_price - midline
         else:
-            kc_continuation_ok = last_close < midline
-            kc_continuation_margin = midline - last_close
+            kc_continuation_ok = trigger_price < midline
+            kc_continuation_margin = midline - trigger_price
 
         # Check continuation: structure (last N candles show HH/HL or LH/LL)
         # Require at least one strictly progressive bar (not just flat/equal)
@@ -1480,7 +1534,7 @@ class SignalEngine:
 
         continuation_criteria.extend([
             _criterion("macd", "signal_stack", float(macd_current), "supports direction", bool(macd_continuation_ok), macd_continuation_margin),
-            _criterion("keltner", "signal_stack", {"close": last_close, "midline": midline}, "correct side of midline", bool(kc_continuation_ok), kc_continuation_margin),
+            _criterion("keltner", "signal_stack", {"trigger_price": trigger_price, "closed_candle_close": last_close, "midline": midline}, "correct side of midline", bool(kc_continuation_ok), kc_continuation_margin),
             _criterion("structure", "signal_stack", {"recent_highs": recent_highs, "recent_lows": recent_lows}, "HH/HL or LH/LL", bool(structure_ok), None),
             _criterion("trend_5m", "signal_stack", raw_lr_5m, "aligned with bias" if config.CONTINUATION_TREND_REQUIRE_5M else "optional", bool(trend_5m_aligned), abs(raw_lr_5m), required=config.CONTINUATION_TREND_REQUIRE_5M),
         ])
@@ -1521,7 +1575,7 @@ class SignalEngine:
                 continuation_criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, True, raw_confidence - MIN_CONFIDENCE, "gte"))
                 confidence = round(raw_confidence, 3)
 
-                entry_price = df["c"].iloc[-1]
+                entry_price = trigger_price
                 setup_condition_first_true_at = closed_candle.time.isoformat() if closed_candle else None
 
                 if trend == "Uptrend":
@@ -1616,9 +1670,9 @@ class SignalEngine:
         # When trend_lr is provided (remote tuple API), use it directly.
         # Otherwise fetch the trend candles ourselves (legacy / standalone call).
         if trend_lr is None:
-            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-            candles_15m = self.client.get_candles(symbol, "M15", count=60)
-            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+            candles_1h  = self._get_cached_candles(symbol, "H1",  count=30)
+            candles_15m = self._get_cached_candles(symbol, "M15", count=60)
+            candles_5m  = self._get_cached_candles(symbol, "M5",  count=24)
             df_1h = candles_to_df(candles_1h)
             df_15 = candles_to_df(candles_15m)
             df_5  = candles_to_df(candles_5m)
@@ -1657,7 +1711,7 @@ class SignalEngine:
 
         # ── Risk / Pricing ───────────────────────────────────────────────────
         # atr already computed at Keltner layer
-        entry_price = df["c"].iloc[-1]
+        entry_price = trigger_price
         setup_condition_first_true_at = closed_candle.time.isoformat() if closed_candle else None
 
         if trend == "Uptrend":
@@ -1794,9 +1848,9 @@ class SignalEngine:
 
         # ── Fetch candles ────────────────────────────────────────────────────
         try:
-            candles_1h  = self.client.get_candles(symbol, "H1",  count=30)
-            candles_15m = self.client.get_candles(symbol, "M15", count=60)
-            candles_5m  = self.client.get_candles(symbol, "M5",  count=24)
+            candles_1h  = self._get_cached_candles(symbol, "H1",  count=30)
+            candles_15m = self._get_cached_candles(symbol, "M15", count=60)
+            candles_5m  = self._get_cached_candles(symbol, "M5",  count=24)
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="trend_filter")
             note = f"trend data incomplete: {context['error_type']}"
