@@ -328,6 +328,26 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
     assert [call[1:] for call in client.calls] == [("M5", 100)]
 
 
+def test_candle_cache_reuses_history_until_timeframe_boundary(monkeypatch):
+    now = datetime.now(timezone.utc)
+    candles = closed_candles(40, now)
+    client = FakeClient({"M5": candles})
+    engine = SignalEngine(client)
+
+    monkeypatch.setattr("tradegumi.signal_engine._seconds_until_next_timeframe", lambda timeframe: 300.0)
+
+    first = engine._get_cached_candles("EURUSD", "M5", 24)
+    second = engine._get_cached_candles("EURUSD", "M5", 24)
+
+    assert first == second
+    assert client.calls == [("EURUSD", "M5", 24)]
+
+    engine._candle_cache[("EURUSD", "M5", 24)].expires_at = 0.0
+    engine._get_cached_candles("EURUSD", "M5", 24)
+
+    assert client.calls == [("EURUSD", "M5", 24), ("EURUSD", "M5", 24)]
+
+
 def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
     now = datetime.now(timezone.utc)
     candles = closed_candles(SignalEngine.SIGNAL_WINDOW_MIN_CANDLES, now)

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from threading import RLock
 from typing import Any, Optional
 
 from tradegumi import journal
@@ -37,6 +39,9 @@ OUTCOME_MANUALLY_CLOSED = "manually_closed"
 OUTCOME_INVALIDATED_BY_PRIME = "invalidated_by_prime"
 OUTCOME_INVALIDATED_BY_SYSTEM = "invalidated_by_system"
 
+GRADE_TP_HIT = "TP_HIT"
+GRADE_SL_HIT = "SL_HIT"
+
 
 @dataclass(frozen=True)
 class OutcomeDecision:
@@ -60,6 +65,27 @@ class OutcomeEvaluationSummary:
 
     evaluated_count: int
     updated: tuple[dict[str, Any], ...]
+
+
+@dataclass
+class _PendingJournalIndex:
+    """Cached unresolved journal entries grouped by normalized symbol."""
+
+    journal_path: Path
+    signature: tuple[int, int]
+    entries: list[dict[str, Any]]
+    by_symbol: dict[str, list[dict[str, Any]]]
+
+
+_pending_index: Optional[_PendingJournalIndex] = None
+_pending_index_lock = RLock()
+
+
+def reset_pending_index() -> None:
+    """Clear the unresolved journal index after tests or external maintenance."""
+    global _pending_index
+    with _pending_index_lock:
+        _pending_index = None
 
 
 def _direction(value: Any) -> str:
@@ -119,6 +145,54 @@ def _is_auto_grade_candidate(entry: dict[str, Any], symbol: str) -> bool:
         return False
     status = str(entry.get("status") or STATUS_OPEN_SIMULATED).lower()
     return status in {STATUS_PENDING, STATUS_OPEN_SIMULATED, ""}
+
+
+def _journal_signature() -> tuple[int, int]:
+    """Return a cheap signature for detecting journal file changes."""
+    try:
+        stat = journal.JOURNAL_FILE.stat()
+    except FileNotFoundError:
+        return (0, 0)
+    return (int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _build_pending_index(
+    path: Path,
+    signature: tuple[int, int],
+    entries: list[dict[str, Any]],
+) -> _PendingJournalIndex:
+    """Build an unresolved journal index from already-loaded entries."""
+    by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        symbol = _entry_symbol(entry)
+        if symbol and _is_auto_grade_candidate(entry, symbol):
+            by_symbol.setdefault(symbol, []).append(entry)
+    return _PendingJournalIndex(path, signature, entries, by_symbol)
+
+
+def _load_pending_index() -> _PendingJournalIndex:
+    """Load or reuse unresolved journal entries grouped by symbol."""
+    global _pending_index
+    with _pending_index_lock:
+        path = journal.JOURNAL_FILE
+        signature = _journal_signature()
+        if (
+            _pending_index is not None
+            and _pending_index.journal_path == path
+            and _pending_index.signature == signature
+        ):
+            return _pending_index
+
+        entries = journal._read_entries_oldest_first()
+        _pending_index = _build_pending_index(path, signature, entries)
+        return _pending_index
+
+
+def _refresh_pending_index(entries: list[dict[str, Any]]) -> None:
+    """Refresh the in-memory index after this process rewrites the journal."""
+    global _pending_index
+    with _pending_index_lock:
+        _pending_index = _build_pending_index(journal.JOURNAL_FILE, _journal_signature(), entries)
 
 
 def evaluate_entry(entry: dict[str, Any], observation: PriceObservation) -> OutcomeDecision:
@@ -191,6 +265,9 @@ def _excursions(entry: dict[str, Any], observation: PriceObservation) -> tuple[O
 
 def _apply_decision(entry: dict[str, Any], decision: OutcomeDecision, observation: PriceObservation) -> Optional[dict[str, Any]]:
     """Apply a decision to a journal entry and return summary data if updated."""
+    if not decision.closes_signal:
+        return None
+
     checked_at = datetime.now().astimezone().isoformat()
     entry["outcome_checked_at"] = checked_at
     entry["status"] = decision.status
@@ -204,18 +281,16 @@ def _apply_decision(entry: dict[str, Any], decision: OutcomeDecision, observatio
         entry["max_adverse_excursion"] = max(float(entry.get("max_adverse_excursion") or 0.0), adverse)
     if decision.ambiguous_reason:
         entry["ambiguous_reason"] = decision.ambiguous_reason
-    if not decision.closes_signal:
-        return None
 
     entry["exit_time"] = observation.timestamp.isoformat()
     entry["exit_price"] = decision.exit_price
     if decision.outcome == OUTCOME_TP:
-        entry["grade"] = "TP_HIT"
-        entry["trade_grade"] = "TP_HIT"
+        entry["grade"] = GRADE_TP_HIT
+        entry["trade_grade"] = GRADE_TP_HIT
         journal._deactivate_prime(entry, journal.PRIME_CLOSE_INFERRED_TP, entry["exit_time"], False)
     elif decision.outcome == OUTCOME_SL:
-        entry["grade"] = "SL_HIT"
-        entry["trade_grade"] = "SL_HIT"
+        entry["grade"] = GRADE_SL_HIT
+        entry["trade_grade"] = GRADE_SL_HIT
         journal._deactivate_prime(entry, journal.PRIME_CLOSE_INFERRED_SL, entry["exit_time"], False)
     elif decision.outcome == OUTCOME_AMBIGUOUS:
         entry["trade_grade"] = journal.PENDING_GRADE
@@ -232,17 +307,15 @@ def _apply_decision(entry: dict[str, Any], decision: OutcomeDecision, observatio
 def evaluate_price_observation(observation: PriceObservation) -> OutcomeEvaluationSummary:
     """Evaluate unresolved same-symbol journal entries for one observation."""
     updated: list[dict[str, Any]] = []
-    evaluated_count = 0
     with journal._lock:
-        entries = journal._read_entries_oldest_first()
-        for entry in entries:
-            if not _is_auto_grade_candidate(entry, observation.symbol):
-                continue
-            evaluated_count += 1
+        index = _load_pending_index()
+        entries_for_symbol = list(index.by_symbol.get(observation.symbol, ()))
+        for entry in entries_for_symbol:
             decision = evaluate_entry(entry, observation)
             summary = _apply_decision(entry, decision, observation)
             if summary is not None:
                 updated.append(summary)
-        if evaluated_count:
-            journal._write_entries(entries)
-    return OutcomeEvaluationSummary(evaluated_count=evaluated_count, updated=tuple(updated))
+        if updated:
+            journal._write_entries(index.entries)
+            _refresh_pending_index(index.entries)
+    return OutcomeEvaluationSummary(evaluated_count=len(entries_for_symbol), updated=tuple(updated))

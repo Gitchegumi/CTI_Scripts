@@ -114,7 +114,7 @@ export function useLoopState(marketOpen: boolean): UseLoopStateReturn {
   useEffect(() => {
     const fetchState = async () => {
       try {
-        const res = await fetch(`/data/loop_state.json?_=${Date.now()}`, {
+        const res = await fetch(`/api/data/loop_state?_=${Date.now()}`, {
           cache: "no-store",
         });
         if (!res.ok) {

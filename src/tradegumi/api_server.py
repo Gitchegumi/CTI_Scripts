@@ -162,6 +162,10 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/data/loop_state":
+            runtime_loop_state = get_runtime_state().get("loop_state")
+            if runtime_loop_state is not None:
+                self._send_json(runtime_loop_state)
+                return
             f = DATA_DIR / "loop_state.json"
             if f.exists():
                 self._send_json(json.loads(f.read_text()))

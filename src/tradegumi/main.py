@@ -14,6 +14,7 @@ import logging as log
 import signal
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,103 @@ from tradegumi.callback import (
     send_signal_callback, send_rescan_callback, send_mode_change_callback,
     send_trade_callback, send_status_callback, send_closed_market_callback,
 )
+
+
+@dataclass
+class LoopPerfStats:
+    """Lightweight rolling performance counters for the main loop."""
+
+    interval_seconds: float
+    started_at: float = field(default_factory=time.monotonic)
+    loop_count: int = 0
+    price_fetch_total: float = 0.0
+    price_fetch_count: int = 0
+    journal_eval_total: float = 0.0
+    journal_eval_count: int = 0
+    signal_pass_total: float = 0.0
+    signal_pass_count: int = 0
+    unresolved_evaluated: int = 0
+    symbols_priced: int = 0
+    symbols_signal_checked: int = 0
+    slowest_symbol: Optional[str] = None
+    slowest_symbol_seconds: float = 0.0
+
+    def add(self, name: str, seconds: float, count: int = 1) -> None:
+        if name == "price_fetch":
+            self.price_fetch_total += seconds
+            self.price_fetch_count += count
+        elif name == "journal_eval":
+            self.journal_eval_total += seconds
+            self.journal_eval_count += count
+        elif name == "signal_pass":
+            self.signal_pass_total += seconds
+            self.signal_pass_count += count
+
+    def note_slowest_symbol(self, symbol: str, seconds: float) -> None:
+        if seconds > self.slowest_symbol_seconds:
+            self.slowest_symbol = symbol
+            self.slowest_symbol_seconds = seconds
+
+    def due(self, now: float) -> bool:
+        return now - self.started_at >= self.interval_seconds
+
+    def reset(self, now: float) -> None:
+        interval = self.interval_seconds
+        self.__dict__.update(LoopPerfStats(interval).__dict__)
+        self.started_at = now
+
+    def log_summary(self) -> None:
+        def avg(total: float, count: int) -> float:
+            return (total / count) if count else 0.0
+
+        log.info(
+            "Perf summary: loops=%s avg_price_fetch=%.3fs avg_journal_eval=%.4fs "
+            "avg_signal_pass=%.3fs slowest_symbol=%s(%.3fs) unresolved_eval=%s "
+            "priced=%s signal_checked=%s",
+            self.loop_count,
+            avg(self.price_fetch_total, self.price_fetch_count),
+            avg(self.journal_eval_total, self.journal_eval_count),
+            avg(self.signal_pass_total, self.signal_pass_count),
+            self.slowest_symbol or "-",
+            self.slowest_symbol_seconds,
+            self.unresolved_evaluated,
+            self.symbols_priced,
+            self.symbols_signal_checked,
+        )
+
+
+@dataclass
+class WatchlistCache:
+    data: dict = field(default_factory=dict)
+    scan_symbols: list[str] = field(default_factory=list)
+    loaded_at: float = 0.0
+
+    def refresh(self, available: set[str], perf: Optional[LoopPerfStats] = None) -> None:
+        started = time.perf_counter()
+        self.data = load_watchlist_with_scores()
+        if perf:
+            log.debug("Perf watchlist loading %.4fs", time.perf_counter() - started)
+        started = time.perf_counter()
+        self.scan_symbols = [
+            s for s in self.data
+            if s in available and s not in config.UNAVAILABLE_INSTRUMENTS
+        ]
+        if perf:
+            log.debug("Perf scan_symbols construction %.4fs symbols=%s", time.perf_counter() - started, len(self.scan_symbols))
+        self.loaded_at = time.time()
+
+    def maybe_refresh(self, available: set[str], fallback_seconds: float, perf: Optional[LoopPerfStats] = None) -> None:
+        if not self.data or time.time() - self.loaded_at >= fallback_seconds:
+            self.refresh(available, perf)
+
+
+def _loop_state_payload(mode: str, loop_state: list[dict]) -> dict:
+    return {
+        "timestamp": datetime.now(NY_TZ).isoformat(),
+        "mode": mode,
+        "provider": "Oanda" if mode != "live" else "MatchTrader",
+        "symbols": loop_state,
+    }
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -367,13 +465,36 @@ def run(mode: str):
     RESCAN_INTERVAL = 30 * 60  # 30 minutes in seconds
     last_rescan_epoch = 0.0
 
+    price_poll_seconds = max(0.1, float(config.TRADEGUMI_PRICE_POLL_SECONDS))
+    signal_engine_seconds = max(0.1, float(config.TRADEGUMI_SIGNAL_ENGINE_SECONDS))
+    loop_state_write_seconds = max(0.1, float(config.TRADEGUMI_LOOP_STATE_WRITE_SECONDS))
+    watchlist_reload_seconds = max(1.0, float(config.TRADEGUMI_WATCHLIST_RELOAD_SECONDS))
+    perf_log_seconds = max(1.0, float(config.TRADEGUMI_PERF_LOG_SECONDS))
+    perf_stats = LoopPerfStats(perf_log_seconds)
+    perf_enabled = bool(config.TRADEGUMI_PERF_ENABLED)
+    watchlist_cache = WatchlistCache()
+    watchlist_cache.refresh(available, perf_stats if perf_enabled else None)
+
     log.info("Entering main loop — signal engine every 5s, price ticker every 1s")
+    log.info(
+        "Active intervals: price_poll=%.1fs signal_engine=%.1fs loop_state_write=%.1fs "
+        "watchlist_reload=%.1fs perf_log=%.1fs perf_enabled=%s",
+        price_poll_seconds,
+        signal_engine_seconds,
+        loop_state_write_seconds,
+        watchlist_reload_seconds,
+        perf_log_seconds,
+        perf_enabled,
+    )
     log.info("Watchlist re-scan every 30 minutes during market hours")
     log.info("Scheduled full re-scan at 02:00 ET (03:00 CT)")
 
     # Track last signal engine run for 5s cadence
     last_signal_run = 0.0
-    # Cache for price data and loop state (written every 1s by price ticker)
+    last_price_poll = 0.0
+    last_loop_state_write = 0.0
+    last_loop_state_body = ""
+    # Cache for price data and loop state between signal-engine passes.
     cached_loop_state: list[dict] = []
 
     while True:
@@ -420,6 +541,7 @@ def run(mode: str):
                     last_scan_result = new_result
 
                 engine = SignalEngine(client, watchlist=load_watchlist())
+                watchlist_cache.refresh(available, perf_stats if perf_enabled else None)
                 last_rescan_epoch = now_epoch
                 log.info("Re-scan complete — watchlist refreshed")
                 send_rescan_callback({"trigger": "full" if is_full_rescan or is_api_rescan else "periodic"})
@@ -427,29 +549,56 @@ def run(mode: str):
                 log.error("Re-scan failed: %s", e)
 
         # ── Price ticker (every 1s) ──────────────────────────────────────────
-        watchlist_data = load_watchlist_with_scores()
-        scan_symbols = [s for s in watchlist_data if s in available and s not in config.UNAVAILABLE_INSTRUMENTS]
+        perf_stats.loop_count += 1
+        watchlist_cache.maybe_refresh(available, watchlist_reload_seconds, perf_stats if perf_enabled else None)
+        watchlist_data = watchlist_cache.data
+        scan_symbols = watchlist_cache.scan_symbols
 
         prices = {}
-        try:
-            ticks = client.get_pricing(scan_symbols)
-            observations = publish_tick_observations(ticks, source=DASHBOARD_POLL)
-            for observation in observations:
-                try:
-                    evaluate_price_observation(observation)
-                except Exception as e:
-                    log.debug("Signal outcome evaluation failed for %s: %s", observation.symbol, e)
-            prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
-        except Exception as e:
-            log.debug("Price fetch failed: %s", e)
+        if now_epoch - last_price_poll >= price_poll_seconds:
+            last_price_poll = now_epoch
+            try:
+                started = time.perf_counter()
+                ticks = client.get_pricing(scan_symbols)
+                elapsed = time.perf_counter() - started
+                perf_stats.add("price_fetch", elapsed)
+                perf_stats.symbols_priced += len(ticks)
+                log.debug("Perf client.get_pricing %.4fs symbols=%s", elapsed, len(scan_symbols))
+
+                started = time.perf_counter()
+                observations = publish_tick_observations(ticks, source=DASHBOARD_POLL)
+                log.debug("Perf publish_tick_observations %.4fs observations=%s", time.perf_counter() - started, len(observations))
+
+                for observation in observations:
+                    try:
+                        started = time.perf_counter()
+                        summary = evaluate_price_observation(observation)
+                        elapsed = time.perf_counter() - started
+                        perf_stats.add("journal_eval", elapsed)
+                        perf_stats.unresolved_evaluated += summary.evaluated_count
+                        log.debug(
+                            "Perf evaluate_price_observation %.4fs symbol=%s evaluated=%s updated=%s",
+                            elapsed,
+                            observation.symbol,
+                            summary.evaluated_count,
+                            len(summary.updated),
+                        )
+                    except Exception as e:
+                        log.debug("Signal outcome evaluation failed for %s: %s", observation.symbol, e)
+                prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
+            except Exception as e:
+                log.debug("Price fetch failed: %s", e)
 
         # ── Signal engine (every 5s) ─────────────────────────────────────────
-        if now_epoch - last_signal_run >= 5.0:
+        if now_epoch - last_signal_run >= signal_engine_seconds:
             last_signal_run = now_epoch
+            signal_pass_started = time.perf_counter()
 
             # Run trailing SL
             try:
+                started = time.perf_counter()
                 trailing_manager.run_once()
+                log.debug("Perf trailing_manager.run_once %.4fs", time.perf_counter() - started)
             except Exception as e:
                 log.error("TrailingSL error: %s", e)
 
@@ -457,7 +606,12 @@ def run(mode: str):
             loop_summary = []
             loop_state = []
             for symbol in scan_symbols:
+                started = time.perf_counter()
                 tag, trend, lr_1h, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
+                elapsed = time.perf_counter() - started
+                perf_stats.symbols_signal_checked += 1
+                perf_stats.note_slowest_symbol(symbol, elapsed)
+                log.debug("Perf engine.check_symbol %.4fs symbol=%s", elapsed, symbol)
                 score = watchlist_data[symbol]["score"]
                 tier = watchlist_data[symbol]["tier"]
                 loop_summary.append((symbol, tag, tier, score))
@@ -485,6 +639,9 @@ def run(mode: str):
             ))
 
             cached_loop_state = loop_state
+            signal_elapsed = time.perf_counter() - signal_pass_started
+            perf_stats.add("signal_pass", signal_elapsed)
+            log.debug("Perf signal engine pass %.4fs symbols=%s", signal_elapsed, len(scan_symbols))
         else:
             # Between signal runs, just update prices in cached state
             loop_state = []
@@ -528,22 +685,36 @@ def run(mode: str):
 
         # ── Write loop state (every 1s) ──────────────────────────────────────
         try:
-            state_file = Path(__file__).parent / "data" / "loop_state.json"
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "timestamp": datetime.now(NY_TZ).isoformat(),
-                "mode": mode,
-                "provider": "Oanda" if mode != "live" else "MatchTrader",
-                "symbols": loop_state,
-            }
-            with open(state_file, "w") as f:
-                json.dump(payload, f, indent=2, default=str)
+            started = time.perf_counter()
+            payload = _loop_state_payload(mode, loop_state)
+            set_runtime_state({**get_runtime_state(), "loop_count": perf_stats.loop_count, "loop_state": payload})
+            log.debug("Perf dashboard/API state update work %.4fs", time.perf_counter() - started)
+
+            payload_for_change = {k: v for k, v in payload.items() if k != "timestamp"}
+            body_for_change = json.dumps(payload_for_change, sort_keys=True, separators=(",", ":"), default=str)
+            should_write_state = (
+                now_epoch - last_loop_state_write >= loop_state_write_seconds
+                or body_for_change != last_loop_state_body
+            )
+            if should_write_state:
+                started = time.perf_counter()
+                state_file = Path(__file__).parent / "data" / "loop_state.json"
+                state_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(state_file, "w") as f:
+                    json.dump(payload, f, separators=(",", ":"), default=str)
+                last_loop_state_write = now_epoch
+                last_loop_state_body = body_for_change
+                log.debug("Perf loop_state.json write %.4fs", time.perf_counter() - started)
         except Exception as e:
             log.warning("Failed to write loop_state.json: %s", e)
 
+        if perf_enabled and perf_stats.due(time.monotonic()):
+            perf_stats.log_summary()
+            perf_stats.reset(time.monotonic())
+
         # Sleep until next second boundary
         now_ct = datetime.now(CT_TZ)
-        sleep_sec = 1.0 - (now_ct.microsecond / 1_000_000)
+        sleep_sec = price_poll_seconds - (now_ct.microsecond / 1_000_000)
         time.sleep(max(0.1, sleep_sec))
 
 
