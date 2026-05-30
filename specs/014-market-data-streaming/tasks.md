@@ -15,11 +15,11 @@
 
 **Purpose**: Add configuration and test scaffolding without changing runtime behavior yet.
 
-- [ ] T001 Add market data env var documentation to `.env.example`
-- [ ] T002 Add market data configuration constants to `src/tradegumi/config.py`, including mode, reconnect interval, heartbeat timeout, max backoff, and max reconnect attempts
-- [ ] T003 [P] Create market data test fixture helpers in `src/tradegumi/tests/test_market_data.py`
-- [ ] T004 [P] Create Oanda stream payload fixtures in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T005 [P] Review planned Python modules for required module/class/function docstrings before implementation in `src/tradegumi/market_data.py`
+- [X] T001 Add market data env var documentation to `.env.example`
+- [X] T002 Add market data configuration constants to `src/tradegumi/config.py`, including mode, reconnect interval, heartbeat timeout, max backoff, and max reconnect attempts
+- [X] T003 [P] Create market data test fixture helpers in `src/tradegumi/tests/test_market_data.py`
+- [X] T004 [P] Create Oanda stream payload fixtures in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T005 [P] Review planned Python modules for required module/class/function docstrings before implementation in `src/tradegumi/market_data.py`
 
 ---
 
@@ -29,14 +29,14 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T006 Create provider-neutral lifecycle types and health dataclasses in `src/tradegumi/market_data.py`
-- [ ] T007 Implement provider-neutral observation dispatch helper in `src/tradegumi/market_data.py`
-- [ ] T008 Wire observation dispatch to `publish_tick_observations()` or equivalent shared history helpers in `src/tradegumi/price_observations.py`
-- [ ] T009 Wire observation dispatch to `evaluate_price_observation()` without duplicating journal evaluation in `src/tradegumi/market_data.py`
-- [ ] T010 [P] Add unit tests for provider-neutral lifecycle state transitions in `src/tradegumi/tests/test_market_data.py`
-- [ ] T011 [P] Add unit tests for observation dispatch to history and journal evaluator in `src/tradegumi/tests/test_market_data.py`
-- [ ] T012 Add stream/polling health snapshot shape for runtime state in `src/tradegumi/market_data.py`
-- [ ] T013 Update code-quality checklist coverage for new market data helpers in `src/tradegumi/tests/test_market_data.py`
+- [X] T006 Create provider-neutral lifecycle types and health dataclasses in `src/tradegumi/market_data.py`
+- [X] T007 Implement provider-neutral observation dispatch helper in `src/tradegumi/market_data.py`
+- [X] T008 Wire observation dispatch to `publish_tick_observations()` or equivalent shared history helpers in `src/tradegumi/price_observations.py`
+- [X] T009 Wire observation dispatch to `evaluate_price_observation()` without duplicating journal evaluation in `src/tradegumi/market_data.py`
+- [X] T010 [P] Add unit tests for provider-neutral lifecycle state transitions in `src/tradegumi/tests/test_market_data.py`
+- [X] T011 [P] Add unit tests for observation dispatch to history and journal evaluator in `src/tradegumi/tests/test_market_data.py`
+- [X] T012 Add stream/polling health snapshot shape for runtime state in `src/tradegumi/market_data.py`
+- [X] T013 Update code-quality checklist coverage for new market data helpers in `src/tradegumi/tests/test_market_data.py`
 
 **Checkpoint**: Provider-neutral market data foundation is ready for streaming and polling providers.
 
@@ -50,20 +50,20 @@
 
 ### Tests for User Story 1
 
-- [ ] T014 [P] [US1] Add Oanda chunked line-delimited price, heartbeat, malformed-line, and unknown-event parsing tests in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T015 [P] [US1] Add Oanda symbol mapping tests using `config.from_oanda_symbol()` in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T016 [P] [US1] Add source correctness tests for `OANDA_PRICING_STREAM` observations in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T017 [P] [US1] Add no-duplicate-REST-pricing test for healthy streaming mode in `src/tradegumi/tests/test_main_market_data.py`
+- [X] T014 [P] [US1] Add Oanda chunked line-delimited price, heartbeat, malformed-line, and unknown-event parsing tests in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T015 [P] [US1] Add Oanda symbol mapping tests using `config.from_oanda_symbol()` in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T016 [P] [US1] Add source correctness tests for `OANDA_PRICING_STREAM` observations in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T017 [P] [US1] Add no-duplicate-REST-pricing test for healthy streaming mode in `src/tradegumi/tests/test_main_market_data.py`
 
 ### Implementation for User Story 1
 
-- [ ] T018 [US1] Implement Oanda stream event parser for chunked line-delimited JSON events in `src/tradegumi/market_data.py`
-- [ ] T019 [US1] Implement Oanda streaming provider start/stop read loop using configured practice/live stream URL in `src/tradegumi/market_data.py`
-- [ ] T020 [US1] Convert Oanda price events to CTI-symbol `PriceObservation` records in `src/tradegumi/market_data.py`
-- [ ] T021 [US1] Integrate streaming provider construction with existing Oanda client auth/account settings in `src/tradegumi/main.py`
-- [ ] T022 [US1] Route live price observation through market data provider instead of direct `client.get_pricing()` while streaming is healthy in `src/tradegumi/main.py`
-- [ ] T023 [US1] Update loop state price merge to read latest shared observations in `src/tradegumi/main.py`
-- [ ] T024 [US1] Add compact INFO streaming health summary counters in `src/tradegumi/market_data.py`
+- [X] T018 [US1] Implement Oanda stream event parser for chunked line-delimited JSON events in `src/tradegumi/market_data.py`
+- [X] T019 [US1] Implement Oanda streaming provider start/stop read loop using configured practice/live stream URL in `src/tradegumi/market_data.py`
+- [X] T020 [US1] Convert Oanda price events to CTI-symbol `PriceObservation` records in `src/tradegumi/market_data.py`
+- [X] T021 [US1] Integrate streaming provider construction with existing Oanda client auth/account settings in `src/tradegumi/main.py`
+- [X] T022 [US1] Route live price observation through market data provider instead of direct `client.get_pricing()` while streaming is healthy in `src/tradegumi/main.py`
+- [X] T023 [US1] Update loop state price merge to read latest shared observations in `src/tradegumi/main.py`
+- [X] T024 [US1] Add compact INFO streaming health summary counters in `src/tradegumi/market_data.py`
 
 **Checkpoint**: Oanda streaming can serve as MVP live price source without duplicate REST pricing calls.
 
@@ -77,20 +77,20 @@
 
 ### Tests for User Story 2
 
-- [ ] T025 [P] [US2] Add heartbeat handling tests in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T026 [P] [US2] Add stale heartbeat reconnect tests in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T027 [P] [US2] Add reconnect backoff, max-attempt, fallback, and connection-limit tests in `src/tradegumi/tests/test_oanda_market_data.py`
-- [ ] T028 [P] [US2] Add polling fallback activation tests in `src/tradegumi/tests/test_market_data.py`
-- [ ] T029 [P] [US2] Add safe auth error logging tests in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T025 [P] [US2] Add heartbeat handling tests in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T026 [P] [US2] Add stale heartbeat reconnect tests in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T027 [P] [US2] Add reconnect backoff, max-attempt, fallback, and connection-limit tests in `src/tradegumi/tests/test_oanda_market_data.py`
+- [X] T028 [P] [US2] Add polling fallback activation tests in `src/tradegumi/tests/test_market_data.py`
+- [X] T029 [P] [US2] Add safe auth error logging tests in `src/tradegumi/tests/test_oanda_market_data.py`
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] Implement heartbeat liveness tracking in `src/tradegumi/market_data.py`
-- [ ] T031 [US2] Implement bounded reconnect, max-attempt, and backoff-cap policy in `src/tradegumi/market_data.py`
-- [ ] T032 [US2] Implement repeated-failure transition to polling fallback in `src/tradegumi/market_data.py`
-- [ ] T033 [US2] Implement polling market data provider wrapper around `ExecutionClient.get_pricing()` in `src/tradegumi/market_data.py`
-- [ ] T034 [US2] Wire fallback state into main loop market data orchestration in `src/tradegumi/main.py`
-- [ ] T035 [US2] Ensure provider error logs omit Oanda token/account secrets in `src/tradegumi/market_data.py`
+- [X] T030 [US2] Implement heartbeat liveness tracking in `src/tradegumi/market_data.py`
+- [X] T031 [US2] Implement bounded reconnect, max-attempt, and backoff-cap policy in `src/tradegumi/market_data.py`
+- [X] T032 [US2] Implement repeated-failure transition to polling fallback in `src/tradegumi/market_data.py`
+- [X] T033 [US2] Implement polling market data provider wrapper around `ExecutionClient.get_pricing()` in `src/tradegumi/market_data.py`
+- [X] T034 [US2] Wire fallback state into main loop market data orchestration in `src/tradegumi/main.py`
+- [X] T035 [US2] Ensure provider error logs omit Oanda token/account secrets in `src/tradegumi/market_data.py`
 
 **Checkpoint**: Streaming failure no longer blocks price observation or journal outcome updates.
 
@@ -104,18 +104,18 @@
 
 ### Tests for User Story 3
 
-- [ ] T036 [P] [US3] Add provider resubscribe tests for changed symbol sets in `src/tradegumi/tests/test_market_data.py`
-- [ ] T037 [P] [US3] Add no-duplicate-stream worker tests in `src/tradegumi/tests/test_market_data.py`
-- [ ] T038 [P] [US3] Add rescan-during-reconnect latest-symbol-set test in `src/tradegumi/tests/test_main_market_data.py`
-- [ ] T039 [P] [US3] Add graceful shutdown tests for active stream workers in `src/tradegumi/tests/test_market_data.py`
+- [X] T036 [P] [US3] Add provider resubscribe tests for changed symbol sets in `src/tradegumi/tests/test_market_data.py`
+- [X] T037 [P] [US3] Add no-duplicate-stream worker tests in `src/tradegumi/tests/test_market_data.py`
+- [X] T038 [P] [US3] Add rescan-during-reconnect latest-symbol-set test in `src/tradegumi/tests/test_main_market_data.py`
+- [X] T039 [P] [US3] Add graceful shutdown tests for active stream workers in `src/tradegumi/tests/test_market_data.py`
 
 ### Implementation for User Story 3
 
-- [ ] T040 [US3] Detect scan symbol changes and call provider resubscribe in `src/tradegumi/main.py`
-- [ ] T041 [US3] Stop old stream workers before replacing subscription generation in `src/tradegumi/market_data.py`
-- [ ] T042 [US3] Ensure reconnect uses latest subscription generation in `src/tradegumi/market_data.py`
-- [ ] T043 [US3] Add provider stop call to main shutdown handling in `src/tradegumi/main.py`
-- [ ] T044 [US3] Update runtime state with active symbol count and provider mode in `src/tradegumi/main.py`
+- [X] T040 [US3] Detect scan symbol changes and call provider resubscribe in `src/tradegumi/main.py`
+- [X] T041 [US3] Stop old stream workers before replacing subscription generation in `src/tradegumi/market_data.py`
+- [X] T042 [US3] Ensure reconnect uses latest subscription generation in `src/tradegumi/market_data.py`
+- [X] T043 [US3] Add provider stop call to main shutdown handling in `src/tradegumi/main.py`
+- [X] T044 [US3] Update runtime state with active symbol count and provider mode in `src/tradegumi/main.py`
 
 **Checkpoint**: Rescans and shutdown manage market data lifecycle cleanly.
 
@@ -129,16 +129,16 @@
 
 ### Tests for User Story 4
 
-- [ ] T045 [P] [US4] Add fake-provider consumer test for journal dispatch in `src/tradegumi/tests/test_market_data.py`
-- [ ] T046 [P] [US4] Add fake-provider latest-observation test for signal trigger pricing in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T047 [P] [US4] Add dashboard/runtime state no-provider-specific-fields test in `src/tradegumi/tests/test_main_market_data.py`
+- [X] T045 [P] [US4] Add fake-provider consumer test for journal dispatch in `src/tradegumi/tests/test_market_data.py`
+- [X] T046 [P] [US4] Add fake-provider latest-observation test for signal trigger pricing in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T047 [P] [US4] Add dashboard/runtime state no-provider-specific-fields test in `src/tradegumi/tests/test_main_market_data.py`
 
 ### Implementation for User Story 4
 
-- [ ] T048 [US4] Remove or isolate any Oanda-specific branching from journal/dashboard/signal consumers in `src/tradegumi/main.py`
-- [ ] T049 [US4] Keep Oanda stream raw payload handling isolated in provider code in `src/tradegumi/market_data.py`
-- [ ] T050 [US4] Add provider-neutral health response serialization in `src/tradegumi/api_server.py`
-- [ ] T051 [US4] Update dashboard types only if market-data health is surfaced in `dashboard/src/types/index.ts`
+- [X] T048 [US4] Remove or isolate any Oanda-specific branching from journal/dashboard/signal consumers in `src/tradegumi/main.py`
+- [X] T049 [US4] Keep Oanda stream raw payload handling isolated in provider code in `src/tradegumi/market_data.py`
+- [X] T050 [US4] Add provider-neutral health response serialization in `src/tradegumi/api_server.py`
+- [X] T051 [US4] Update dashboard types only if market-data health is surfaced in `dashboard/src/types/index.ts`
 
 **Checkpoint**: Future MatchTrader market data can implement the provider contract without rewriting consumers.
 
@@ -148,15 +148,15 @@
 
 **Purpose**: Documentation, validation, and operational hardening across all stories.
 
-- [ ] T052 [P] Update operator documentation for streaming mode and fallback in `docs/signal-journal.md`
-- [ ] T053 [P] Add `.env.example` comments for Oanda practice/live stream URLs and fallback settings
-- [ ] T054 Run quickstart validation scenarios from `specs/014-market-data-streaming/quickstart.md`
-- [ ] T055 Run focused pytest suite for market data, Oanda stream, signal outcomes, and price observations, including streamed journal dispatch timing coverage
-- [ ] T056 Run dashboard lint/build if dashboard files changed
-- [ ] T057 Review changed Python code for intention-revealing names and no unexplained magic values
-- [ ] T058 Verify required docstrings on new/modified Python modules, public classes, public methods, public functions, and non-trivial helpers
-- [ ] T059 Confirm logs redact secrets and detailed observation logs remain DEBUG-only
-- [ ] T060 Submit PR with DockeGumi as reviewer
+- [X] T052 [P] Update operator documentation for streaming mode and fallback in `docs/signal-journal.md`
+- [X] T053 [P] Add `.env.example` comments for Oanda practice/live stream URLs and fallback settings
+- [X] T054 Run quickstart validation scenarios from `specs/014-market-data-streaming/quickstart.md` using deterministic tests; live Oanda credential validation deferred
+- [X] T055 Run focused pytest suite for market data, Oanda stream, signal outcomes, and price observations, including streamed journal dispatch timing coverage
+- [X] T056 Run dashboard lint/build if dashboard files changed; not required because dashboard files were unchanged
+- [X] T057 Review changed Python code for intention-revealing names and no unexplained magic values
+- [X] T058 Verify required docstrings on new/modified Python modules, public classes, public methods, public functions, and non-trivial helpers
+- [X] T059 Confirm logs redact secrets and detailed observation logs remain DEBUG-only
+- [X] T060 Submit PR with DockeGumi as reviewer
 
 ---
 

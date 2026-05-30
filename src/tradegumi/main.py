@@ -9,6 +9,7 @@ Main loop checks each symbol on the watchlist every 60s during trading hours.
 Trailing SL runs as a co-routine in the same loop.
 """
 import argparse
+import atexit
 import json
 import logging as log
 import signal
@@ -47,7 +48,13 @@ from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlati
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
 from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
-from tradegumi.price_observations import DASHBOARD_POLL, publish_tick_observations
+from tradegumi.market_data import (
+    MODE_STREAMING,
+    ObservationDispatcher,
+    PollingMarketDataProvider,
+    create_market_data_provider,
+)
+from tradegumi.price_observations import DEFAULT_PRICE_HISTORY
 from tradegumi.signal_outcomes import evaluate_price_observation
 from tradegumi.callback import (
     send_signal_callback, send_rescan_callback, send_mode_change_callback,
@@ -150,6 +157,27 @@ def _loop_state_payload(mode: str, loop_state: list[dict]) -> dict:
         "provider": "Oanda" if mode != "live" else "MatchTrader",
         "symbols": loop_state,
     }
+
+
+def _latest_prices(symbols: list[str]) -> dict[str, dict]:
+    """Return latest shared observation prices keyed by symbol."""
+    prices: dict[str, dict] = {}
+    for symbol, observation in DEFAULT_PRICE_HISTORY.latest_many(symbols).items():
+        bid = observation.bid
+        ask = observation.ask
+        spread = round(ask - bid, 6) if bid is not None and ask is not None else None
+        prices[symbol] = {"bid": bid, "ask": ask, "spread": spread}
+    return prices
+
+
+def _should_poll_market_data(market_data_provider) -> bool:
+    """Return True when the main loop should use REST polling."""
+    return not (
+        config.TRADEGUMI_MARKET_DATA_MODE == MODE_STREAMING
+        and getattr(market_data_provider, "mode", None) == MODE_STREAMING
+        and market_data_provider.snapshot_health().get("status") == "running"
+        and not getattr(market_data_provider, "fallback_active", False)
+    )
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -474,6 +502,31 @@ def run(mode: str):
     perf_enabled = bool(config.TRADEGUMI_PERF_ENABLED)
     watchlist_cache = WatchlistCache()
     watchlist_cache.refresh(available, perf_stats if perf_enabled else None)
+    def timed_evaluate_price_observation(observation):
+        """Evaluate journal outcomes while preserving loop performance counters."""
+        started = time.perf_counter()
+        summary = evaluate_price_observation(observation)
+        elapsed = time.perf_counter() - started
+        perf_stats.add("journal_eval", elapsed)
+        perf_stats.unresolved_evaluated += summary.evaluated_count
+        log.debug(
+            "Perf evaluate_price_observation %.4fs symbol=%s evaluated=%s updated=%s",
+            elapsed,
+            observation.symbol,
+            summary.evaluated_count,
+            len(summary.updated),
+        )
+        return summary
+
+    dispatcher = ObservationDispatcher(evaluator=timed_evaluate_price_observation)
+    market_data_provider = create_market_data_provider(client, dispatcher)
+    polling_provider = (
+        market_data_provider
+        if isinstance(market_data_provider, PollingMarketDataProvider)
+        else PollingMarketDataProvider(client, dispatcher, configured_mode=config.TRADEGUMI_MARKET_DATA_MODE)
+    )
+    market_data_provider.start(watchlist_cache.scan_symbols)
+    atexit.register(market_data_provider.stop)
 
     log.info("Entering main loop — signal engine every 5s, price ticker every 1s")
     log.info(
@@ -485,6 +538,16 @@ def run(mode: str):
         watchlist_reload_seconds,
         perf_log_seconds,
         perf_enabled,
+    )
+    log.info(
+        "Market data: mode=%s provider=%s reconnect=%.1fs heartbeat_timeout=%.1fs "
+        "backoff_max=%.1fs max_reconnect_attempts=%s",
+        config.TRADEGUMI_MARKET_DATA_MODE,
+        getattr(market_data_provider, "name", "unknown"),
+        config.TRADEGUMI_STREAM_RECONNECT_SECONDS,
+        config.TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS,
+        config.TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS,
+        config.TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS,
     )
     log.info("Watchlist re-scan every 30 minutes during market hours")
     log.info("Scheduled full re-scan at 02:00 ET (03:00 CT)")
@@ -542,6 +605,11 @@ def run(mode: str):
 
                 engine = SignalEngine(client, watchlist=load_watchlist())
                 watchlist_cache.refresh(available, perf_stats if perf_enabled else None)
+                market_data_provider.resubscribe(
+                    watchlist_cache.scan_symbols,
+                    reason="full_rescan" if is_full_rescan else ("api_rescan" if is_api_rescan else "periodic_rescan"),
+                )
+                polling_provider.resubscribe(watchlist_cache.scan_symbols, reason="rescan")
                 last_rescan_epoch = now_epoch
                 log.info("Re-scan complete — watchlist refreshed")
                 send_rescan_callback({"trigger": "full" if is_full_rescan or is_api_rescan else "periodic"})
@@ -550,44 +618,28 @@ def run(mode: str):
 
         # ── Price ticker (every 1s) ──────────────────────────────────────────
         perf_stats.loop_count += 1
+        previous_scan_symbols = tuple(watchlist_cache.scan_symbols)
         watchlist_cache.maybe_refresh(available, watchlist_reload_seconds, perf_stats if perf_enabled else None)
         watchlist_data = watchlist_cache.data
         scan_symbols = watchlist_cache.scan_symbols
+        if tuple(scan_symbols) != previous_scan_symbols:
+            market_data_provider.resubscribe(scan_symbols, reason="watchlist_reload")
+            polling_provider.resubscribe(scan_symbols, reason="watchlist_reload")
 
-        prices = {}
+        prices = _latest_prices(scan_symbols)
         if now_epoch - last_price_poll >= price_poll_seconds:
             last_price_poll = now_epoch
-            try:
-                started = time.perf_counter()
-                ticks = client.get_pricing(scan_symbols)
-                elapsed = time.perf_counter() - started
-                perf_stats.add("price_fetch", elapsed)
-                perf_stats.symbols_priced += len(ticks)
-                log.debug("Perf client.get_pricing %.4fs symbols=%s", elapsed, len(scan_symbols))
-
-                started = time.perf_counter()
-                observations = publish_tick_observations(ticks, source=DASHBOARD_POLL)
-                log.debug("Perf publish_tick_observations %.4fs observations=%s", time.perf_counter() - started, len(observations))
-
-                for observation in observations:
-                    try:
-                        started = time.perf_counter()
-                        summary = evaluate_price_observation(observation)
-                        elapsed = time.perf_counter() - started
-                        perf_stats.add("journal_eval", elapsed)
-                        perf_stats.unresolved_evaluated += summary.evaluated_count
-                        log.debug(
-                            "Perf evaluate_price_observation %.4fs symbol=%s evaluated=%s updated=%s",
-                            elapsed,
-                            observation.symbol,
-                            summary.evaluated_count,
-                            len(summary.updated),
-                        )
-                    except Exception as e:
-                        log.debug("Signal outcome evaluation failed for %s: %s", observation.symbol, e)
-                prices = {t.symbol: {"bid": t.bid, "ask": t.ask, "spread": t.spread} for t in ticks}
-            except Exception as e:
-                log.debug("Price fetch failed: %s", e)
+            if _should_poll_market_data(market_data_provider):
+                try:
+                    started = time.perf_counter()
+                    observations = polling_provider.poll_once(scan_symbols)
+                    elapsed = time.perf_counter() - started
+                    perf_stats.add("price_fetch", elapsed)
+                    perf_stats.symbols_priced += len(observations)
+                    log.debug("Perf market_data.poll_once %.4fs symbols=%s", elapsed, len(scan_symbols))
+                except Exception as e:
+                    log.debug("Price fetch failed: %s", e)
+            prices = _latest_prices(scan_symbols)
 
         # ── Signal engine (every 5s) ─────────────────────────────────────────
         if now_epoch - last_signal_run >= signal_engine_seconds:
@@ -687,7 +739,13 @@ def run(mode: str):
         try:
             started = time.perf_counter()
             payload = _loop_state_payload(mode, loop_state)
-            set_runtime_state({**get_runtime_state(), "loop_count": perf_stats.loop_count, "loop_state": payload})
+            market_health = market_data_provider.snapshot_health()
+            set_runtime_state({
+                **get_runtime_state(),
+                "loop_count": perf_stats.loop_count,
+                "loop_state": payload,
+                "market_data": market_health,
+            })
             log.debug("Perf dashboard/API state update work %.4fs", time.perf_counter() - started)
 
             payload_for_change = {k: v for k, v in payload.items() if k != "timestamp"}
@@ -710,6 +768,19 @@ def run(mode: str):
 
         if perf_enabled and perf_stats.due(time.monotonic()):
             perf_stats.log_summary()
+            market_health = market_data_provider.snapshot_health()
+            log.info(
+                "Market data summary: mode=%s configured=%s provider=%s symbols=%s "
+                "observations_per_minute=%s reconnects=%s fallback=%s heartbeat_age=%s",
+                market_health.get("active_mode"),
+                market_health.get("configured_mode"),
+                market_health.get("provider"),
+                market_health.get("active_symbol_count"),
+                market_health.get("observations_per_minute"),
+                market_health.get("reconnect_count"),
+                market_health.get("fallback_active"),
+                market_health.get("last_heartbeat_age_seconds"),
+            )
             perf_stats.reset(time.monotonic())
 
         # Sleep until next second boundary
