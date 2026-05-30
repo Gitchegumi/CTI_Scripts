@@ -63,6 +63,14 @@ TRADEGUMI_WATCHLIST_RELOAD_SECONDS = float(os.getenv("TRADEGUMI_WATCHLIST_RELOAD
 TRADEGUMI_PERF_LOG_SECONDS = float(os.getenv("TRADEGUMI_PERF_LOG_SECONDS", "60"))
 TRADEGUMI_PERF_ENABLED = os.getenv("TRADEGUMI_PERF_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# Market data provider mode. Streaming is the default for Oanda, with REST
+# polling kept as the fallback path when streaming is unavailable or disabled.
+TRADEGUMI_MARKET_DATA_MODE = os.getenv("TRADEGUMI_MARKET_DATA_MODE", "streaming").strip().lower()
+TRADEGUMI_STREAM_RECONNECT_SECONDS = float(os.getenv("TRADEGUMI_STREAM_RECONNECT_SECONDS", "5"))
+TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS = float(os.getenv("TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS", "15"))
+TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS = float(os.getenv("TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS", "60"))
+TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS = int(os.getenv("TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS", "5"))
+
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
 # Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)
@@ -283,5 +291,7 @@ def validate_config():
         errors.append("OANDA_ACCOUNT_ID is required")
     if TRADEGUMI_MODE not in ("alert_only", "demo", "live"):
         errors.append(f"Invalid TRADEGUMI_MODE={TRADEGUMI_MODE}")
+    if TRADEGUMI_MARKET_DATA_MODE not in ("streaming", "polling"):
+        errors.append(f"Invalid TRADEGUMI_MARKET_DATA_MODE={TRADEGUMI_MARKET_DATA_MODE}")
     if errors:
         raise ValueError("Config errors: " + "; ".join(errors))

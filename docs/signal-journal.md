@@ -2,6 +2,12 @@
 
 The Signal Journal stores optimization evidence separately from the Manual Trade Journal. Signal actions do not delete or mutate manual trade records.
 
+## Market Data Streaming
+
+TradeGumi can grade Signal Journal outcomes from the shared market data observation path. With `TRADEGUMI_MARKET_DATA_MODE=streaming`, Oanda pricing stream events are normalized into `PriceObservation` records and immediately sent to the same journal evaluator used by polling. Heartbeats update stream liveness only; they do not create journal observations.
+
+If the stream fails authentication, disconnects repeatedly, or misses the configured heartbeat window, TradeGumi falls back to the existing polling path so TP/SL outcome grading and dashboard prices continue. Operators can tune stream reconnect behavior with `TRADEGUMI_STREAM_RECONNECT_SECONDS`, `TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS`, `TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS`, and `TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS`.
+
 ## Export
 
 `Export CSV` downloads the active Signal Journal grade filter and optional export date/time range. `All` exports every signal in the selected range; `Pending`, `TP Hit`, `SL Hit`, `Manual`, and `Expired` export only that grade.

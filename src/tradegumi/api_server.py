@@ -157,6 +157,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 "running": state.get("running", False),
                 "loop_count": state.get("loop_count", 0),
                 "last_signal_time": state.get("last_signal_time"),
+                "market_data": state.get("market_data"),
                 "tiers": config.CTI_CHALLENGE_TIERS if config.CTI_CHALLENGE_TYPE != "instant" else config.CTI_INSTANT_TIERS,
             })
             return

@@ -5,9 +5,11 @@ import pandas as pd
 from tradegumi.api.base_client import Candle, ProviderRequestError
 from tradegumi.signal_engine import (
     SignalEngine,
+    _live_trigger_price,
     _last_closed_candle_window,
     classify_trend_decision,
 )
+from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 
 
@@ -54,6 +56,15 @@ def closed_candles(count: int, now: datetime) -> list[Candle]:
     """Return count candles whose final candle closed shortly before now."""
     first_open = now - timedelta(minutes=5 * count, seconds=5)
     return [candle_at(first_open + timedelta(minutes=5 * index), 1.1 + index * 0.0001) for index in range(count)]
+
+
+def test_live_trigger_price_uses_latest_shared_observation():
+    DEFAULT_PRICE_HISTORY.publish(
+        PriceObservation(symbol="ZZZUSD", timestamp="2026-05-30T12:00:00Z", bid=1.2, ask=1.2003)
+    )
+
+    assert _live_trigger_price("ZZZUSD", "BUY", 1.0) == 1.2003
+    assert _live_trigger_price("ZZZUSD", "SELL", 1.0) == 1.2
 
 
 def test_signal_engine_data_with_insufficient_candles_reports_missing_window():
