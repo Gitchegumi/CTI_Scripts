@@ -34,7 +34,12 @@ STATUS_STARTING = "starting"
 STATUS_RUNNING = "running"
 STATUS_RECONNECTING = "reconnecting"
 STATUS_FALLBACK = "fallback"
-STATUS_FAILED = "failed"
+
+
+
+class StreamEndedError(requests.ConnectionError):
+    """Raised when a pricing stream ends cleanly (server close, not network error)."""
+    pass
 
 
 def _now_utc() -> datetime:
@@ -369,6 +374,9 @@ class OandaStreamingMarketDataProvider:
                     self.log.error("Oanda pricing stream authentication failed; activating polling fallback")
                     break
                 self.log.warning("Oanda pricing stream HTTP failure: type=%s", error_type)
+            except StreamEndedError:
+                self.log.info("Oanda pricing stream ended cleanly")
+                break
             except Exception as exc:
                 self.health.note_error(exc.__class__.__name__)
                 if not self._stop_event.is_set():
@@ -400,13 +408,20 @@ class OandaStreamingMarketDataProvider:
         self.health.status = STATUS_RUNNING
         self.health.active_mode = MODE_STREAMING
         self.health.fallback_active = False
+        last_hb_time = time.monotonic()
         for line in response.iter_lines(decode_unicode=False):
             if self._stop_event.is_set():
                 break
             event = parse_oanda_stream_line(line)
-            self.handle_event(event)
+            obs = self.handle_event(event)
+            now = time.monotonic()
+            # Track per-line heartbeat timeout: update on any data event.
+            if obs is not None or event.get("type") == "HEARTBEAT":
+                last_hb_time = now
+            if now - last_hb_time > self.heartbeat_timeout_seconds:
+                raise requests.ConnectionError("Heartbeat timeout")
         if not self._stop_event.is_set():
-            raise requests.ConnectionError("Oanda pricing stream ended")
+            raise StreamEndedError("Oanda pricing stream ended")
 
     def handle_event(self, event: Optional[dict[str, Any]]) -> Optional[PriceObservation]:
         """Handle one parsed Oanda stream event for tests and the stream loop."""

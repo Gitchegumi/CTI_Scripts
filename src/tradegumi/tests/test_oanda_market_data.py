@@ -104,6 +104,7 @@ def test_oanda_unknown_event_does_not_dispatch_observation():
 def test_oanda_reconnect_backoff_is_bounded():
     provider = _provider()
 
+    assert provider._next_backoff(1) == provider.reconnect_seconds
     assert provider._next_backoff(10) == 4
 
 

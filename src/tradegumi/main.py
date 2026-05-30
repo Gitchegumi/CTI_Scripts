@@ -52,6 +52,7 @@ from tradegumi.market_data import (
     MODE_STREAMING,
     ObservationDispatcher,
     PollingMarketDataProvider,
+    STATUS_RUNNING,
     create_market_data_provider,
 )
 from tradegumi.price_observations import DEFAULT_PRICE_HISTORY
@@ -171,13 +172,20 @@ def _latest_prices(symbols: list[str]) -> dict[str, dict]:
 
 
 def _should_poll_market_data(market_data_provider) -> bool:
-    """Return True when the main loop should use REST polling."""
-    return not (
-        config.TRADEGUMI_MARKET_DATA_MODE == MODE_STREAMING
-        and getattr(market_data_provider, "mode", None) == MODE_STREAMING
-        and market_data_provider.snapshot_health().get("status") == "running"
-        and not getattr(market_data_provider, "fallback_active", False)
-    )
+    """Return True when the main loop should use REST polling.
+
+    Decision is based purely on provider runtime state:
+    - Polling provider  → always poll.
+    - Streaming provider → poll if status != running or fallback is active.
+    """
+    if getattr(market_data_provider, "mode", None) != MODE_STREAMING:
+        return True
+    health = market_data_provider.snapshot_health()
+    if health.get("status") != STATUS_RUNNING:
+        return True
+    if getattr(market_data_provider, "fallback_active", False):
+        return True
+    return False
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
