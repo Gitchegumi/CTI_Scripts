@@ -34,6 +34,9 @@ from tradegumi.indicators import (
     candles_to_df,
 )
 
+CONTINUATION_STRATEGY_VERSION = "CTI-v1.1-continuation-test"
+PULLBACK_STRATEGY_VERSION = "CTI-v1.2-pullback"
+
 
 def _chop_diagnostic_criterion(
     chop_type: str,
@@ -220,6 +223,10 @@ class Signal:
     entry_tolerance: Optional[float] = None
     setup_condition_first_true_at: Optional[str] = None
     recent_candles: Optional[list[Candle]] = None
+    pullback_trigger: Optional[str] = None
+    pullback_bridge_status: Optional[str] = None
+    pullback_rejection_reason: Optional[str] = None
+    shock_blocked_signal: bool = False
 
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
@@ -262,6 +269,8 @@ class SignalDiagnostic:
     threshold_version: str = "unknown"
     trend_decision: Optional[dict] = None
     signal_type: str = "pullback"  # "pullback" or "continuation"
+    strategy: str = "CTI-v1"
+    shock_blocked_signal: bool = False
 
     def to_opportunity(self, mode: str) -> EvaluatedOpportunity:
         return EvaluatedOpportunity(
@@ -276,6 +285,8 @@ class SignalDiagnostic:
             confidence=self.confidence,
             data_quality_notes=self.data_quality_notes or [],
             threshold_version=self.threshold_version,
+            strategy=self.strategy,
+            signal_type=self.signal_type,
             criteria=self.criteria or [],
             trend_decision=self.trend_decision,
             # Volatility shock + filtered LR fields
@@ -324,6 +335,24 @@ def get_threshold_version() -> str:
         "pullback_kc_proximity_atr": config.PULLBACK_KC_PROXIMITY_ATR,
         "pullback_stoch_rsi_relaxed": config.PULLBACK_STOCH_RSI_RELAXED,
         "continuation_trend_require_5m": config.CONTINUATION_TREND_REQUIRE_5M,
+        "pullback_enabled": config.PULLBACK_ENABLED,
+        "pullback_15m_memory_candles": config.PULLBACK_15M_MEMORY_CANDLES,
+        "pullback_15m_strong_opposite_multiplier": config.PULLBACK_15M_STRONG_OPPOSITE_MULTIPLIER,
+        "pullback_require_1h_alignment": config.PULLBACK_REQUIRE_1H_ALIGNMENT,
+        "pullback_structure_lookback_bars": config.PULLBACK_STRUCTURE_LOOKBACK_BARS,
+        "pullback_kc_break_lookback_bars": config.PULLBACK_KC_BREAK_LOOKBACK_BARS,
+        "pullback_kc_midline_tolerance_atr": config.PULLBACK_KC_MIDLINE_TOLERANCE_ATR,
+        "pullback_kc_midline_tolerance_channel_width": config.PULLBACK_KC_MIDLINE_TOLERANCE_CHANNEL_WIDTH,
+        "pullback_stoch_oversold": config.PULLBACK_STOCH_OVERSOLD,
+        "pullback_stoch_oversold_recent": config.PULLBACK_STOCH_OVERSOLD_RECENT,
+        "pullback_stoch_overbought": config.PULLBACK_STOCH_OVERBOUGHT,
+        "pullback_stoch_overbought_recent": config.PULLBACK_STOCH_OVERBOUGHT_RECENT,
+        "shock_m5_true_range_atr_multiple": config.SHOCK_M5_TRUE_RANGE_ATR_MULTIPLE,
+        "shock_m15_true_range_atr_multiple": config.SHOCK_M15_TRUE_RANGE_ATR_MULTIPLE,
+        "shock_body_atr_multiple": config.SHOCK_BODY_ATR_MULTIPLE,
+        "shock_body_range_atr_multiple": config.SHOCK_BODY_RANGE_ATR_MULTIPLE,
+        "shock_m5_suppression_candles": config.SHOCK_M5_SUPPRESSION_CANDLES,
+        "shock_m15_suppression_candles": config.SHOCK_M15_SUPPRESSION_CANDLES,
         # Chop / regime filter thresholds
         "chop_filter_enabled": config.CHOP_FILTER_ENABLED,
         "chop_opposite_signal_suppression_candles": config.CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES,
@@ -390,6 +419,204 @@ def _lr_direction(value: object) -> str:
     if numeric < 0:
         return "down"
     return "flat"
+
+
+def classify_pullback_trend_bridge(
+    lr_1h: object,
+    current_lr_15m: object,
+    recent_lr_15m: Sequence[object],
+    trend: str,
+    threshold_1h: float,
+    threshold_15m: float,
+    *,
+    memory_candles: int,
+    strong_opposite_multiplier: float,
+) -> dict:
+    """Evaluate whether recent M15 memory bridges a current pullback flattening.
+
+    Pullback entries need the H1 anchor to remain aligned while allowing the
+    current M15 LR to flatten. A current M15 reading that is strongly opposite
+    the desired direction rejects the bridge even if older memory was aligned.
+    """
+    desired = "up" if trend == "Uptrend" else "down"
+    opposite = "down" if desired == "up" else "up"
+    try:
+        h1 = float(lr_1h)
+        m15 = float(current_lr_15m)
+    except (TypeError, ValueError):
+        return {"passed": False, "status": "pullback_1h_anchor_failed", "reason": "invalid_lr"}
+
+    h1_aligned = _lr_direction(h1) == desired and abs(h1) >= threshold_1h
+    if config.PULLBACK_REQUIRE_1H_ALIGNMENT and not h1_aligned:
+        return {
+            "passed": False,
+            "status": "pullback_1h_anchor_failed",
+            "lr_1h": h1,
+            "threshold_1h": threshold_1h,
+        }
+
+    strong_opposite_threshold = threshold_15m * strong_opposite_multiplier
+    current_direction = _lr_direction(m15)
+    if current_direction == opposite and abs(m15) >= strong_opposite_threshold:
+        return {
+            "passed": False,
+            "status": "pullback_15m_bridge_strong_opposite",
+            "lr_15m": m15,
+            "strong_opposite_threshold": strong_opposite_threshold,
+        }
+
+    memory_window = list(recent_lr_15m)[-memory_candles:]
+    aligned_memory = []
+    for value in memory_window:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if _lr_direction(numeric) == desired and abs(numeric) >= threshold_15m:
+            aligned_memory.append(numeric)
+
+    if not aligned_memory:
+        return {
+            "passed": False,
+            "status": "pullback_15m_bridge_no_memory",
+            "recent_lr_15m": memory_window,
+            "threshold_15m": threshold_15m,
+        }
+
+    return {
+        "passed": True,
+        "status": "pullback_15m_bridge_allowed",
+        "lr_1h": h1,
+        "lr_15m": m15,
+        "recent_aligned_count": len(aligned_memory),
+        "recent_lr_15m": memory_window,
+    }
+
+
+def _pullback_structure(df: pd.DataFrame, trend: str) -> dict:
+    """Validate recent M5 structure and protected swing for a pullback."""
+    lookback = max(4, min(config.PULLBACK_STRUCTURE_LOOKBACK_BARS, len(df)))
+    window = df.iloc[-lookback:]
+    highs = [float(v) for v in window["h"].tolist()]
+    lows = [float(v) for v in window["l"].tolist()]
+    last_low = lows[-1]
+    last_high = highs[-1]
+
+    if trend == "Uptrend":
+        prior_lows = lows[:-1]
+        protected_low = min(prior_lows) if prior_lows else last_low
+        has_higher_high = highs[-1] > min(highs[:-1]) if len(highs) > 1 else False
+        has_higher_low = last_low >= protected_low
+        passed = has_higher_high and has_higher_low
+        reason = "pullback_structure_ok" if passed else "pullback_structure_failed"
+        return {
+            "passed": passed,
+            "reason": reason,
+            "protected_level": protected_low,
+            "recent_highs": highs,
+            "recent_lows": lows,
+        }
+
+    prior_highs = highs[:-1]
+    protected_high = max(prior_highs) if prior_highs else last_high
+    has_lower_low = lows[-1] < max(lows[:-1]) if len(lows) > 1 else False
+    has_lower_high = last_high <= protected_high
+    passed = has_lower_low and has_lower_high
+    reason = "pullback_structure_ok" if passed else "pullback_structure_failed"
+    return {
+        "passed": passed,
+        "reason": reason,
+        "protected_level": protected_high,
+        "recent_highs": highs,
+        "recent_lows": lows,
+    }
+
+
+def _pullback_keltner_sequence(
+    df: pd.DataFrame,
+    kc: pd.DataFrame,
+    trend: str,
+    atr: float,
+    kc_upper_col: str,
+    kc_lower_col: str,
+    kc_mid_col: str,
+) -> dict:
+    """Validate prior outer-band break followed by a midline pullback."""
+    lookback = max(2, min(config.PULLBACK_KC_BREAK_LOOKBACK_BARS, len(df)))
+    price_window = df.iloc[-lookback:]
+    kc_window = kc.iloc[-lookback:]
+    midline = float(kc[kc_mid_col].iloc[-1])
+    upper = float(kc[kc_upper_col].iloc[-1])
+    lower = float(kc[kc_lower_col].iloc[-1])
+    channel_width = abs(upper - lower)
+    tolerance = max(
+        float(atr) * config.PULLBACK_KC_MIDLINE_TOLERANCE_ATR,
+        channel_width * config.PULLBACK_KC_MIDLINE_TOLERANCE_CHANNEL_WIDTH,
+    )
+    trigger_close = float(df["c"].iloc[-1])
+    near_midline = abs(trigger_close - midline) <= tolerance
+
+    if trend == "Uptrend":
+        highs = price_window["h"].iloc[:-1].to_numpy()
+        upper_band = kc_window[kc_upper_col].iloc[:-1].to_numpy()
+        prior_break = bool((highs >= upper_band).any())
+    else:
+        lows = price_window["l"].iloc[:-1].to_numpy()
+        lower_band = kc_window[kc_lower_col].iloc[:-1].to_numpy()
+        prior_break = bool((lows <= lower_band).any())
+
+    passed = prior_break and near_midline
+    return {
+        "passed": passed,
+        "reason": "pullback_kc_sequence_ok" if passed else "pullback_kc_sequence_failed",
+        "prior_break": prior_break,
+        "near_midline": near_midline,
+        "trigger_close": trigger_close,
+        "midline": midline,
+        "tolerance": tolerance,
+    }
+
+
+def _pullback_trigger(patterns: pd.DataFrame, trend: str) -> dict:
+    """Return the approved direction-specific pullback trigger candle, if any."""
+    if patterns.empty:
+        return {"passed": False, "trigger": None, "reason": "pullback_trigger_candle_failed"}
+    last = patterns.iloc[-1]
+    value = lambda name: last.get(name, 0) if hasattr(last, "get") else 0
+    if trend == "Uptrend":
+        if value("CDL_HAMMER") != 0:
+            return {"passed": True, "trigger": "hammer", "reason": "pullback_trigger_hammer"}
+        if value("CDL_ENGULFING") < 0:
+            return {"passed": True, "trigger": "bullish_engulfing", "reason": "pullback_trigger_bullish_engulfing"}
+    else:
+        if value("CDL_SHOOTINGSTAR") != 0:
+            return {"passed": True, "trigger": "shooting_star", "reason": "pullback_trigger_shooting_star"}
+        if value("CDL_ENGULFING") > 0:
+            return {"passed": True, "trigger": "bearish_engulfing", "reason": "pullback_trigger_bearish_engulfing"}
+    return {"passed": False, "trigger": None, "reason": "pullback_trigger_candle_failed"}
+
+
+def _pullback_stoch_rsi(k: float, d: float, k_values: pd.Series, trend: str) -> dict:
+    """Evaluate Stoch RSI exhaustion for a direction-specific pullback."""
+    recent = k_values.iloc[-4:] if len(k_values) >= 4 else k_values
+    if trend == "Uptrend":
+        recent_low = float(recent.min())
+        rising = len(recent) >= 2 and float(recent.iloc[-1]) > float(recent.iloc[-2])
+        passed = (
+            k <= config.PULLBACK_STOCH_OVERSOLD
+            or d <= config.PULLBACK_STOCH_OVERSOLD
+            or (recent_low <= config.PULLBACK_STOCH_OVERSOLD_RECENT and (k > d or rising))
+        )
+        return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_low": recent_low, "k": float(k), "d": float(d)}
+
+    recent_high = float(recent.max())
+    falling = len(recent) >= 2 and float(recent.iloc[-1]) < float(recent.iloc[-2])
+    passed = (
+        k >= config.PULLBACK_STOCH_OVERBOUGHT
+        or d >= config.PULLBACK_STOCH_OVERBOUGHT
+        or (recent_high >= config.PULLBACK_STOCH_OVERBOUGHT_RECENT and (k < d or falling))
+    )
+    return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_high": recent_high, "k": float(k), "d": float(d)}
 
 
 def _timeframe_seconds(timeframe: str) -> int:
@@ -1187,6 +1414,8 @@ class SignalEngine:
         filtered_lr_5m: float = 0.0,
         trend_changed_after_filter: bool = False,
         shock_result: Optional[ShockDetectionResult] = None,
+        allow_continuation: bool = True,
+        pullback_bridge_status: Optional[str] = None,
     ) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
         """Run the 4-layer signal stack on 5m candles.
 
@@ -1539,7 +1768,7 @@ class SignalEngine:
             _criterion("trend_5m", "signal_stack", raw_lr_5m, "aligned with bias" if config.CONTINUATION_TREND_REQUIRE_5M else "optional", bool(trend_5m_aligned), abs(raw_lr_5m), required=config.CONTINUATION_TREND_REQUIRE_5M),
         ])
 
-        if continuation_all_pass:
+        if allow_continuation and continuation_all_pass:
             log.debug("%s continuation signal passed: macd=%s kc=%s structure=%s 5m=%s",
                       symbol, macd_continuation_ok, kc_continuation_ok, structure_ok, trend_5m_aligned)
             # Build continuation signal
@@ -1601,7 +1830,7 @@ class SignalEngine:
                     breakdown=breakdown,
                     trend_direction=trend,
                     patterns_found=[],
-                    strategy="CTI-v1.1-continuation-test",
+                    strategy=CONTINUATION_STRATEGY_VERSION,
                     signal_type="continuation",
                     # Indicator snapshot
                     stochrsi_k=0.0,
@@ -1642,25 +1871,39 @@ class SignalEngine:
                 ), continuation_criteria, "emitted", confidence
 
         # ── Pullback Path ────────────────────────────────────────────────────
-        # Fall through to existing pullback logic (relaxed Keltner + StochRSI)
+        if not config.PULLBACK_ENABLED:
+            return None, criteria, "criteria_failed", None
+
+        structure_result = _pullback_structure(df, trend)
+        keltner_result = _pullback_keltner_sequence(
+            df, kc, trend, float(atr), kc_upper_col, kc_lower_col, kc_mid_col
+        )
+        trigger_result = _pullback_trigger(patterns_df, trend)
+        stoch_result = _pullback_stoch_rsi(float(k), float(d), stoch[k_col], trend)
+        macd_soft_context = {
+            "histogram": float(macd_current),
+            "line": float(macd_line),
+            "signal": float(macd_signal_val),
+            "hard_blocker": False,
+        }
         criteria.extend([
-            _criterion("stoch_rsi", "signal_stack", {"k": float(k), "d": float(d)}, "pullback+cross", bool(stoch_ok), stoch_margin),
-            _criterion("macd", "signal_stack", float(macd_current), "histogram improves", bool(macd_ok), macd_margin),
-            _criterion("keltner", "signal_stack", {"last5_low": float(last5_low), "last5_high": float(last5_high)}, "band breach", bool(kc_ok), kc_margin),
-            _criterion("candlestick", "confirmation", identified, "optional pattern", bool(candle_ok), None, required=False),
+            _criterion("stoch_rsi", "signal_stack", {"k": float(k), "d": float(d), **stoch_result}, "pullback exhaustion", bool(stoch_result["passed"]), stoch_margin, reason=stoch_result["reason"], context=stoch_result),
+            _criterion("macd_soft_score", "signal_stack", macd_soft_context, "soft confidence only", bool(macd_ok), macd_margin, required=False, reason="pullback_macd_soft_score", context=macd_soft_context),
+            _criterion("keltner_pullback_sequence", "signal_stack", keltner_result, "prior outer break plus midline pullback", bool(keltner_result["passed"]), None, reason=keltner_result["reason"], context=keltner_result),
+            _criterion("pullback_structure", "signal_stack", structure_result, "HH/HL or LH/LL protected structure", bool(structure_result["passed"]), None, reason=structure_result["reason"], context=structure_result),
+            _criterion("pullback_trigger_candle", "confirmation", trigger_result, "approved pullback trigger", bool(trigger_result["passed"]), None, reason=trigger_result["reason"], context=trigger_result),
         ])
 
-        # StochRSI, MACD, KC must all pass; candle is optional confirmation
-        all_pass = stoch_ok and macd_ok and kc_ok
+        all_pass = stoch_result["passed"] and keltner_result["passed"] and structure_result["passed"] and trigger_result["passed"]
         if not all_pass:
-            log.debug("%s pullback signal blocked: stoch=%s macd=%s kc=%s",
-                      symbol, stoch_ok, macd_ok, kc_ok)
+            log.debug("%s pullback signal blocked: stoch=%s kc=%s structure=%s trigger=%s",
+                      symbol, stoch_result["passed"], keltner_result["passed"], structure_result["passed"], trigger_result["passed"])
             return None, criteria, "criteria_failed", None
 
         # Layer 2 score breakdown
         breakdown = {
             "stoch_rsi": stoch_strength,
-            "macd": macd_strength,
+            "macd": max(0.0, macd_strength),
             "keltner": keltner_strength,
             "candlestick": candle_strength,
         }
@@ -1737,8 +1980,11 @@ class SignalEngine:
             breakdown=breakdown,
             trend_direction=trend,
             patterns_found=identified,
-            strategy="CTI-v1.1-continuation-test",
+            strategy=PULLBACK_STRATEGY_VERSION,
             signal_type="pullback",
+            pullback_trigger=trigger_result["trigger"],
+            pullback_bridge_status=pullback_bridge_status,
+            pullback_rejection_reason=None,
             # Indicator snapshot
             stochrsi_k=k,
             stochrsi_d=d,
@@ -1916,21 +2162,64 @@ class SignalEngine:
         lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
         lr_15 = filtered_lr_15 if self.shock_filter.enabled else raw_lr_15
         lr_5 = filtered_lr_5 if self.shock_filter.enabled else raw_lr_5
+        pullback_bridge_result: Optional[dict] = None
+
+        clean_trend_unusable = trend_decision.get("no_trend_reason") == "insufficient_clean_data"
+        if trend is None and config.PULLBACK_ENABLED and not clean_trend_unusable:
+            try:
+                df_15_for_bridge = candles_to_df(candles_15m)
+                lr_15_series = calculate_linear_regression(df_15_for_bridge, length=25)
+                recent_lr_15 = lr_15_series.dropna().iloc[-config.PULLBACK_15M_MEMORY_CANDLES:].tolist()
+            except (IndexError, KeyError, ValueError):
+                recent_lr_15 = []
+            for candidate_trend in ("Uptrend", "Downtrend"):
+                bridge = classify_pullback_trend_bridge(
+                    lr_1h,
+                    lr_15,
+                    recent_lr_15,
+                    candidate_trend,
+                    self.LR_1H_THRESHOLD,
+                    self.LR_15M_THRESHOLD,
+                    memory_candles=config.PULLBACK_15M_MEMORY_CANDLES,
+                    strong_opposite_multiplier=config.PULLBACK_15M_STRONG_OPPOSITE_MULTIPLIER,
+                )
+                if bridge["passed"]:
+                    trend = candidate_trend
+                    pullback_bridge_result = bridge
+                    trend_decision = {
+                        **trend_decision,
+                        "pullback_bridge": bridge,
+                        "trend_result": "up" if trend == "Uptrend" else "down",
+                        "final_direction": "BUY" if trend == "Uptrend" else "SELL",
+                    }
+                    break
 
         trend_criteria = [
             _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, abs(lr_1h) >= self.LR_1H_THRESHOLD, abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),
             _criterion("trend_15m", "trend", lr_15, self.LR_15M_THRESHOLD, abs(lr_15) >= self.LR_15M_THRESHOLD, abs(lr_15) - self.LR_15M_THRESHOLD, "abs_gte"),
             _criterion("trend_5m", "trend", lr_5, self.LR_5M_THRESHOLD, abs(lr_5) >= self.LR_5M_THRESHOLD, abs(lr_5) - self.LR_5M_THRESHOLD, "abs_gte"),
         ]
+        if pullback_bridge_result is not None:
+            trend_criteria.append(_criterion(
+                "pullback_15m_bridge",
+                "trend",
+                pullback_bridge_result,
+                "recent aligned M15 memory",
+                True,
+                None,
+                reason=pullback_bridge_result["status"],
+                context=pullback_bridge_result,
+            ))
 
         if shock_suppressed:
-            # CTI-v1.1: Only suppress if shock changed the trend AND shock direction matches signal direction
-            # This preserves continuation signals when shock direction conflicts with trend direction
-            signal_direction = "up" if trend == "Uptrend" else "down"
-            if trend_changed_after_filter and active_shock and active_shock.direction == signal_direction:
-                log.debug("%s suppressed by volatility shock (direction=%s, changed_trend=%s), skipping signal stack",
-                          symbol, active_shock.direction, trend_changed_after_filter)
-                diag = SignalDiagnostic(
+            # Active news-like shock suppression blocks all new entries for the symbol.
+            log.debug(
+                "%s suppressed by volatility shock (direction=%s, changed_trend=%s), skipping signal stack",
+                symbol,
+                active_shock.direction,
+                trend_changed_after_filter,
+            )
+            diag = SignalDiagnostic(
                 symbol=symbol,
                 evaluated_at=datetime.now().astimezone().isoformat(),
                 trend=trend,
@@ -1962,8 +2251,9 @@ class SignalEngine:
                 criteria=trend_criteria + shock_criteria,
                 threshold_version=get_threshold_version(),
                 trend_decision=trend_decision,
+                shock_blocked_signal=True,
             )
-                return None, trend, lr_1h, lr_15, lr_5, diag
+            return None, trend, lr_1h, lr_15, lr_5, diag
             # else: shock detected but direction mismatch or trend not changed → proceed with signal stack
 
         if trend is None:
@@ -2084,6 +2374,8 @@ class SignalEngine:
                 filtered_lr_1h=filtered_lr_1h, filtered_lr_15m=filtered_lr_15, filtered_lr_5m=filtered_lr_5,
                 trend_changed_after_filter=trend_changed_after_filter,
                 shock_result=active_shock,
+                allow_continuation=pullback_bridge_result is None,
+                pullback_bridge_status=(pullback_bridge_result or {}).get("status"),
             )
         except ProviderRequestError as exc:
             context = _provider_request_issue_context(exc, stage="signal_stack")
@@ -2179,6 +2471,8 @@ class SignalEngine:
             criteria=trend_criteria + criteria,
             threshold_version=get_threshold_version(),
             trend_decision=trend_decision,
+            strategy=signal.strategy if signal else "CTI-v1",
+            signal_type=signal.signal_type if signal else "pullback",
         )
         return signal, trend, lr_1h, lr_15, lr_5, diag
 

@@ -414,6 +414,7 @@ def check_and_execute(
             "direction": signal_obj.direction,
             "confidence": signal_obj.confidence,
             "strategy": signal_obj.strategy,
+            "signal_type": signal_obj.signal_type,
             "mode": config.TRADEGUMI_MODE,
             "blocked": reason,
         })
@@ -427,6 +428,7 @@ def check_and_execute(
         "direction": signal_obj.direction,
         "confidence": signal_obj.confidence,
         "strategy": signal_obj.strategy,
+        "signal_type": signal_obj.signal_type,
         "lr_1h": lr_1h,
         "lr_15": lr_15,
         "lr_5": lr_5,

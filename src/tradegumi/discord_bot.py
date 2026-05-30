@@ -163,10 +163,11 @@ def post_signal_dm(signal, rr: Optional[float] = None) -> Optional[str]:
     dir_emoji = "📈" if signal.direction == "BUY" else "📉"
     rr_str = f"{rr:.1f}" if rr is not None else "—"
     strategy = getattr(signal, "strategy", "CTI-v1")
+    signal_type = getattr(signal, "signal_type", "pullback")
 
     lines = [
         f"{dir_emoji} **{signal.symbol} — {signal.direction}**",
-        f"Strategy: **{strategy}** | Confidence: **{round(signal.confidence * 100)}%**",
+        f"Strategy: **{strategy}** | Type: **{signal_type}** | Confidence: **{round(signal.confidence * 100)}%**",
         f"Entry: `{signal.entry_price}` | SL: `{signal.stop_loss}` | TP: `{signal.take_profit}`",
         f"Units: `{signal.lot_size:,.0f}` | ATR: `{round(signal.atr, 5)}` | R:R: `{rr_str}`",
     ]

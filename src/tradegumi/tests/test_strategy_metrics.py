@@ -120,6 +120,15 @@ def test_threshold_version_is_stable():
     assert len(get_threshold_version()) == 12
 
 
+def test_threshold_version_includes_pullback_thresholds(monkeypatch):
+    import tradegumi.config as config_module
+
+    before = get_threshold_version()
+    monkeypatch.setattr(config_module, "PULLBACK_15M_MEMORY_CANDLES", config_module.PULLBACK_15M_MEMORY_CANDLES + 1, raising=False)
+
+    assert get_threshold_version() != before
+
+
 def test_additive_pipeline_fields_round_trip_and_json_compatible():
     db = temp_db()
     cr = CriterionResult(
@@ -905,3 +914,40 @@ class TestShockAndFilteredLRFields:
         assert exported["trend_changed_after_filter"] is True
         assert exported["raw_lr_5m"] == 0.001
         assert exported["filtered_lr_5m"] == 0.0005
+
+
+def test_strategy_and_signal_type_counts_are_summarized():
+    db = temp_db()
+    record_opportunity(
+        EvaluatedOpportunity(
+            id="continuation",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            strategy="CTI-v1.1-continuation-test",
+            signal_type="continuation",
+            final_decision="emitted",
+            decision_reason="emitted",
+            threshold_version="v1",
+        ),
+        db,
+    )
+    record_opportunity(
+        EvaluatedOpportunity(
+            id="pullback",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            strategy="CTI-v1.2-pullback",
+            signal_type="pullback",
+            final_decision="emitted",
+            decision_reason="emitted",
+            threshold_version="v1",
+        ),
+        db,
+    )
+
+    summary = get_summary(iso(-1), iso(1), db_path=db)
+
+    assert summary["strategy_counts"]["CTI-v1.1-continuation-test"] == 1
+    assert summary["strategy_counts"]["CTI-v1.2-pullback"] == 1
+    assert summary["signal_type_counts"]["continuation"] == 1
+    assert summary["signal_type_counts"]["pullback"] == 1

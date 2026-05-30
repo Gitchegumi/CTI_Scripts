@@ -235,6 +235,8 @@ class DiagnosticSummary:
     all_blockers: list[str] = field(default_factory=list)  # all blocking criterion_names
     blocking_layer: Optional[str] = None  # layer of the first blocker
     threshold_version_counts: dict[str, int] = field(default_factory=dict)
+    strategy_counts: dict[str, int] = field(default_factory=dict)
+    signal_type_counts: dict[str, int] = field(default_factory=dict)
     threshold_version_unknown_reasons: dict[str, int] = field(default_factory=dict)
     near_miss_reason_counts: dict[str, int] = field(default_factory=dict)
     pipeline_funnel: dict[str, int] = field(default_factory=dict)
@@ -648,8 +650,30 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
             ),
         )
         conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
-        for criterion in opportunity.criteria:
-            conn.execute(
+        criterion_rows = [
+            (
+                opportunity.id,
+                _canonical_criterion_name(criterion.criterion_name),
+                criterion.layer,
+                json.dumps(criterion.measured_value),
+                json.dumps(criterion.threshold_value),
+                criterion.threshold_operator,
+                None if criterion.passed is None else int(criterion.passed),
+                None if criterion.expected_pass is None else int(criterion.expected_pass),
+                int(criterion.pass_mismatch),
+                criterion.margin,
+                criterion.normalized_margin,
+                int(criterion.required),
+                int(criterion.blocked_signal),
+                criterion.data_quality,
+                criterion.diagnostic_state,
+                criterion.reason,
+                json.dumps(criterion.context),
+            )
+            for criterion in opportunity.criteria
+        ]
+        if criterion_rows:
+            conn.executemany(
                 """
                 INSERT INTO criterion_results (
                     opportunity_id, criterion_name, layer, measured_value, threshold_value,
@@ -658,25 +682,7 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
                     reason, context
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    opportunity.id,
-                    _canonical_criterion_name(criterion.criterion_name),
-                    criterion.layer,
-                    json.dumps(criterion.measured_value),
-                    json.dumps(criterion.threshold_value),
-                    criterion.threshold_operator,
-                    None if criterion.passed is None else int(criterion.passed),
-                    None if criterion.expected_pass is None else int(criterion.expected_pass),
-                    int(criterion.pass_mismatch),
-                    criterion.margin,
-                    criterion.normalized_margin,
-                    int(criterion.required),
-                    int(criterion.blocked_signal),
-                    criterion.data_quality,
-                    criterion.diagnostic_state,
-                    criterion.reason,
-                    json.dumps(criterion.context),
-                ),
+                criterion_rows,
             )
         conn.commit()
     _prune_retention_if_due(db_path=db_path)
@@ -715,6 +721,7 @@ def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> Ev
         timeframe=row["timeframe"],
         mode=row["mode"],
         strategy=row["strategy"],
+        signal_type=row["signal_type"] if "signal_type" in row.keys() else "pullback",
         direction=row["direction"],
         trend=row["trend"],
         final_decision=row["final_decision"],
@@ -1092,6 +1099,7 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             f"""
             SELECT id, final_decision, decision_reason, near_miss, near_miss_reason,
                    data_complete, threshold_version, threshold_version_unknown_reason,
+                   strategy, signal_type,
                    first_blocker, all_blockers, blocking_layer, pipeline_state,
                    usable_for_strategy_stats, stats_exclusion_reason
             FROM evaluated_opportunities
@@ -1116,6 +1124,8 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
                 reason = row["stats_exclusion_reason"] or "unknown"
                 stats_exclusion_counts[reason] = stats_exclusion_counts.get(reason, 0) + 1
         threshold_version_counts: dict[str, int] = {}
+        strategy_counts: dict[str, int] = {}
+        signal_type_counts: dict[str, int] = {}
         threshold_version_unknown_reasons: dict[str, int] = {}
         near_miss_reason_counts: dict[str, int] = {}
         all_blockers: list[str] = []
@@ -1124,6 +1134,10 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
         for row in rows:
             version = row["threshold_version"] or "unknown"
             threshold_version_counts[version] = threshold_version_counts.get(version, 0) + 1
+            strategy = row["strategy"] or "unknown"
+            signal_type = row["signal_type"] or "unknown"
+            strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
+            signal_type_counts[signal_type] = signal_type_counts.get(signal_type, 0) + 1
             if version == "unknown":
                 unknown_reason = row["threshold_version_unknown_reason"] or "legacy_or_missing_threshold_version"
                 threshold_version_unknown_reasons[unknown_reason] = threshold_version_unknown_reasons.get(unknown_reason, 0) + 1
@@ -1177,6 +1191,8 @@ def get_summary(start: str, end: str, symbol: Optional[str] = None, db_path: Pat
             all_blockers=sorted(set(all_blockers)),
             blocking_layer=blocking_layer,
             threshold_version_counts=threshold_version_counts,
+            strategy_counts=strategy_counts,
+            signal_type_counts=signal_type_counts,
             threshold_version_unknown_reasons=threshold_version_unknown_reasons,
             near_miss_reason_counts=near_miss_reason_counts,
             pipeline_funnel=_pipeline_funnel(rows, criterion_rows),
