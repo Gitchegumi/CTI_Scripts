@@ -1,22 +1,22 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: 1.2.0 -> 1.3.0 (MINOR: code quality and Python docstring
-  requirements added as mandatory governance)
+  Version change: 1.3.0 -> 1.3.1 (PATCH: Pull Request Policy clarified to require
+  every GitHub comment to start with "Dock,")
   Modified principles:
-    - Development Workflow -> Development Workflow (expanded with code quality gate)
-  Added sections:
-    - Code Quality & Documentation
+    - Pull Request Policy -> Pull Request Policy (expanded with GitHub comment
+      salutation requirement)
+  Added sections: None
   Removed sections: None
   Templates requiring updates:
-    - Updated: .specify/templates/plan-template.md (added Code Quality & Documentation
-      to required Constitution Check gates)
+    - Updated: .specify/templates/plan-template.md (Pull Request Policy gate now
+      includes DockeGumi reviewer and GitHub comment salutation requirements)
     - Reviewed: .specify/templates/spec-template.md (no impact; requirements stay
       product-focused)
-    - Updated: .specify/templates/tasks-template.md (added self-documenting code and
-      Python docstring tasks)
-    - Updated: .specify/templates/checklist-template.md (added quality checklist
-      sample items)
+    - Updated: .specify/templates/tasks-template.md (final PR task now includes the
+      DockeGumi reviewer and GitHub comment salutation requirements)
+    - Updated: .specify/templates/checklist-template.md (added Pull Request Policy
+      checklist sample item)
     - Reviewed: .specify/templates/commands/ (no command files present)
     - Reviewed: README.md and docs/private-strategies.md (no runtime guidance update
       required)
@@ -206,8 +206,13 @@ MUST pass the Constitution Check gate in `plan.md` before Phase 0 research begin
 All PRs MUST request **DockeGumi** as a reviewer before merging. No PR may be merged
 without DockeGumi's review approval.
 
+Every GitHub comment authored for this repository MUST start with `Dock,` exactly. This
+applies to PR comments, issue comments, review replies, CI/debug comments, and any other
+GitHub conversation text posted by maintainers, agents, or automation acting on the
+project's behalf.
+
 Every task list generated for a feature MUST include **"Submit PR with DockeGumi as
 reviewer"** as the final task. This task is non-optional and MUST appear in the Polish
 phase of every `tasks.md`.
 
-**Version**: 1.3.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-05-01
+**Version**: 1.3.1 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-05-30

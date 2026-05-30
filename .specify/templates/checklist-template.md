@@ -38,6 +38,10 @@
 - [ ] CHKXXX Python changes include proper docstrings for modules, public classes, public functions, public methods, and non-trivial helpers
 - [ ] CHKXXX Comments explain non-obvious rationale, constraints, or algorithms rather than restating code
 
+## Pull Request Policy
+
+- [ ] CHKXXX PR requests DockeGumi as reviewer and every GitHub comment starts with `Dock,`
+
 ## Notes
 
 - Check items off as completed: `[x]`
