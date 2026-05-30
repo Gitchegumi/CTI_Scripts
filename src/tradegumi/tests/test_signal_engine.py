@@ -279,7 +279,7 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     )
     monkeypatch.setattr(
         "tradegumi.signal_engine.calculate_candlestick_patterns",
-        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [100]}),
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
     monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
     monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
@@ -331,7 +331,7 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
     )
     monkeypatch.setattr(
         "tradegumi.signal_engine.calculate_candlestick_patterns",
-        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [100]}),
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
     monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
     monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)

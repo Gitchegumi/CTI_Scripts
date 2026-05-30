@@ -268,8 +268,8 @@ class SignalDiagnostic:
     data_quality_notes: list[str] = None
     threshold_version: str = "unknown"
     trend_decision: Optional[dict] = None
-    signal_type: str = "pullback"  # "pullback" or "continuation"
-    strategy: str = "CTI-v1"
+    signal_type: str = ""        # "pullback", "continuation", or "" if not yet set
+    strategy: str = ""
     shock_blocked_signal: bool = False
 
     def to_opportunity(self, mode: str) -> EvaluatedOpportunity:
@@ -437,6 +437,9 @@ def classify_pullback_trend_bridge(
     Pullback entries need the H1 anchor to remain aligned while allowing the
     current M15 LR to flatten. A current M15 reading that is strongly opposite
     the desired direction rejects the bridge even if older memory was aligned.
+
+    Note: trend=None is intentionally not handled here — callers that pass a flat/
+    unknown trend should not be building pullback bridges at all.
     """
     desired = "up" if trend == "Uptrend" else "down"
     opposite = "down" if desired == "up" else "up"
@@ -2471,8 +2474,8 @@ class SignalEngine:
             criteria=trend_criteria + criteria,
             threshold_version=get_threshold_version(),
             trend_decision=trend_decision,
-            strategy=signal.strategy if signal else "CTI-v1",
-            signal_type=signal.signal_type if signal else "pullback",
+            strategy=signal.strategy if signal else "",
+            signal_type=signal.signal_type if signal else "",
         )
         return signal, trend, lr_1h, lr_15, lr_5, diag
 
