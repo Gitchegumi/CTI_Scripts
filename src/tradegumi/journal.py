@@ -179,6 +179,10 @@ EXPORT_FIELDS = [
     "trend_changed_after_filter",
     "market_validity_state",
     "market_validity_reason",
+    "pullback_trigger",
+    "pullback_bridge_status",
+    "pullback_rejection_reason",
+    "shock_blocked_signal",
 ]
 OPTIONAL_EXPORT_FILTERS = {
     "symbol": ("symbol",),
@@ -807,6 +811,10 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
         "lr_1h": getattr(signal, "lr_1h", 0.0),
         "lr_15m": getattr(signal, "lr_15m", 0.0),
         "lr_5m": getattr(signal, "lr_5m", 0.0),
+        "pullback_trigger": getattr(signal, "pullback_trigger", None),
+        "pullback_bridge_status": getattr(signal, "pullback_bridge_status", None),
+        "pullback_rejection_reason": getattr(signal, "pullback_rejection_reason", None),
+        "shock_blocked_signal": getattr(signal, "shock_blocked_signal", False),
     }
 
     with _lock:

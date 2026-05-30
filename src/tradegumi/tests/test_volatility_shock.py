@@ -417,6 +417,62 @@ class TestSuppression:
         assert is_suppressed is False
         assert active_shock is None
 
+    def test_m5_uses_4x_true_range_threshold(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        prev_close = candles[-2].c
+        candles[-1] = _candle(candles[-1].time, prev_close, prev_close + 0.0021, prev_close - 0.0020, prev_close)
+        monkeypatch.setattr("tradegumi.volatility_shock.calculate_atr", lambda df, length=14: _fixed_atr_series(0.0010, len(df)))
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        result = f.detect(candles, "M5")
+
+        assert result.detected is True
+        assert result.rule == "single_candle_tr"
+        assert result.atr_multiple >= 4.0
+
+    def test_m5_below_4x_true_range_does_not_suppress(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        prev_close = candles[-2].c
+        candles[-1] = _candle(candles[-1].time, prev_close, prev_close + 0.0019, prev_close - 0.0019, prev_close)
+        monkeypatch.setattr("tradegumi.volatility_shock.calculate_atr", lambda df, length=14: _fixed_atr_series(0.0010, len(df)))
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        result = f.detect(candles, "M5")
+
+        assert result.detected is False
+
+    def test_m15_uses_3_5x_true_range_threshold_and_suppression_window(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        prev_close = candles[-2].c
+        candles[-1] = _candle(candles[-1].time, prev_close, prev_close + 0.0018, prev_close - 0.0018, prev_close)
+        monkeypatch.setattr("tradegumi.volatility_shock.calculate_atr", lambda df, length=14: _fixed_atr_series(0.0010, len(df)))
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        is_suppressed, active, _ = f.check_symbol("EURUSD", {"M15": candles})
+
+        assert is_suppressed is True
+        assert active.timeframe == "M15"
+        assert active.suppression_candles_remaining == 3
+
+    def test_body_and_range_rule_suppresses_entries(self, monkeypatch):
+        base = datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc)
+        candles = _candles_normal(40, base, price=1.1000)
+        candles[-1] = _candle(candles[-1].time, 1.1000, 1.1036, 1.1000, 1.1031)
+        monkeypatch.setattr("tradegumi.volatility_shock.calculate_atr", lambda df, length=14: _fixed_atr_series(0.0010, len(df)))
+
+        f = VolatilityShockFilter()
+        f.enabled = True
+        result = f.detect(candles, "M5")
+
+        assert result.detected is True
+        assert result.rule == "body_and_range"
+
 
 class TestFilteredLR:
     def test_shock_candles_excluded_from_lr_window(self, monkeypatch):

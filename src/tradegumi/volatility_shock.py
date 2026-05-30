@@ -71,18 +71,58 @@ class VolatilityShockFilter:
     """
 
     def __init__(self):
+        self._initializing = True
         self.enabled = getattr(config, "VOLATILITY_SHOCK_ENABLED", True)
         self.candle_multiple = getattr(config, "SHOCK_CANDLE_ATR_MULTIPLE", 3.0)
         self.bar2_multiple = getattr(config, "SHOCK_2_BAR_ATR_MULTIPLE", 4.0)
         self.bar3_multiple = getattr(config, "SHOCK_3_BAR_ATR_MULTIPLE", 5.0)
-        self.suppression_candles = getattr(config, "SHOCK_SUPPRESSION_CANDLES", 3)
+        self._suppression_candles = getattr(config, "SHOCK_SUPPRESSION_CANDLES", 3)
+        self._legacy_suppression_override: Optional[int] = None
         self.lookback_candles = getattr(config, "SHOCK_LOOKBACK_CANDLES", 3)
+        self.m5_true_range_multiple = getattr(config, "SHOCK_M5_TRUE_RANGE_ATR_MULTIPLE", 4.0)
+        self.m15_true_range_multiple = getattr(config, "SHOCK_M15_TRUE_RANGE_ATR_MULTIPLE", 3.5)
+        self.body_multiple = getattr(config, "SHOCK_BODY_ATR_MULTIPLE", 3.0)
+        self.body_range_multiple = getattr(config, "SHOCK_BODY_RANGE_ATR_MULTIPLE", 3.5)
+        self.m5_suppression_candles = getattr(config, "SHOCK_M5_SUPPRESSION_CANDLES", 4)
+        self.m15_suppression_candles = getattr(config, "SHOCK_M15_SUPPRESSION_CANDLES", 3)
         # Per-symbol state: symbol -> VolatilityShockState
         self._state: dict[str, VolatilityShockState] = {}
+        self._initializing = False
+
+    @property
+    def suppression_candles(self) -> int:
+        """Legacy suppression window used for non-M5/M15 and explicit overrides."""
+        return self._suppression_candles
+
+    @suppression_candles.setter
+    def suppression_candles(self, value: int) -> None:
+        self._suppression_candles = int(value)
+        if not getattr(self, "_initializing", False):
+            self._legacy_suppression_override = int(value)
 
     def _true_range(self, high: float, low: float, prev_close: float) -> float:
         """Return the true range for a single bar."""
         return max(high - low, abs(high - prev_close), abs(low - prev_close))
+
+    def _true_range_multiple_for_timeframe(self, timeframe: str) -> float:
+        """Return the timeframe-specific true-range shock threshold."""
+        normalized = timeframe.upper()
+        if normalized == "M5":
+            return self.m5_true_range_multiple
+        if normalized == "M15":
+            return self.m15_true_range_multiple
+        return self.candle_multiple
+
+    def _suppression_candles_for_timeframe(self, timeframe: str) -> int:
+        """Return the configured suppression candle count for a shock timeframe."""
+        if self._legacy_suppression_override is not None:
+            return self._legacy_suppression_override
+        normalized = timeframe.upper()
+        if normalized == "M5":
+            return self.m5_suppression_candles
+        if normalized == "M15":
+            return self.m15_suppression_candles
+        return self.suppression_candles
 
     def _detect_shock_single_candle(
         self,
@@ -105,7 +145,8 @@ class VolatilityShockFilter:
                 continue
             tr = self._true_range(high, low, prev_close)
             multiple = tr / atr
-            if multiple >= self.candle_multiple:
+            threshold = self._true_range_multiple_for_timeframe(df.attrs.get("timeframe", "unknown"))
+            if multiple >= threshold:
                 direction = "up" if df["c"].iloc[i] > prev_close else "down"
                 return ShockDetectionResult(
                     detected=True,
@@ -117,6 +158,39 @@ class VolatilityShockFilter:
                     lookback_bars=abs(i),
                     direction=direction,
                     rule="single_candle_tr",
+                )
+        return None
+
+    def _detect_shock_body_and_range(
+        self,
+        df: pd.DataFrame,
+        atr_series: pd.Series,
+    ) -> Optional[ShockDetectionResult]:
+        """Rule 1b: candle body and range are both extreme versus prior ATR."""
+        shifted_atr = atr_series.shift(1)
+        for i in range(-self.lookback_candles, 0):
+            if i < -len(df) + 1:
+                continue
+            atr = shifted_atr.iloc[i]
+            if pd.isna(atr) or atr <= 0:
+                continue
+            body = abs(df["c"].iloc[i] - df["o"].iloc[i])
+            prev_close = df["c"].iloc[i - 1]
+            tr = self._true_range(df["h"].iloc[i], df["l"].iloc[i], prev_close)
+            body_multiple = body / atr
+            range_multiple = tr / atr
+            if body_multiple >= self.body_multiple and range_multiple >= self.body_range_multiple:
+                direction = "up" if df["c"].iloc[i] > df["o"].iloc[i] else "down"
+                return ShockDetectionResult(
+                    detected=True,
+                    timeframe=df.attrs.get("timeframe", "unknown"),
+                    candle_time=str(df.index[i]),
+                    true_range=round(tr, 6),
+                    atr=round(atr, 6),
+                    atr_multiple=round(range_multiple, 2),
+                    lookback_bars=abs(i),
+                    direction=direction,
+                    rule="body_and_range",
                 )
         return None
 
@@ -216,6 +290,9 @@ class VolatilityShockFilter:
         r1 = self._detect_shock_single_candle(df, atr_series)
         if r1:
             results.append(r1)
+        r_body = self._detect_shock_body_and_range(df, atr_series)
+        if r_body:
+            results.append(r_body)
         r2 = self._detect_shock_2_bar(df, atr_series)
         if r2:
             results.append(r2)
@@ -276,16 +353,17 @@ class VolatilityShockFilter:
                 if s.candle_time
                 else datetime.min.replace(tzinfo=timezone.utc),
             )
-            # Suppression lasts SHOCK_SUPPRESSION_CANDLES * timeframe_seconds
+            # Suppression lasts the timeframe-specific candle count.
             tf_seconds = _timeframe_seconds(most_recent.timeframe)
-            suppression_seconds = tf_seconds * self.suppression_candles
+            suppression_candles = self._suppression_candles_for_timeframe(most_recent.timeframe)
+            suppression_seconds = tf_seconds * suppression_candles
             suppressed_until = now + pd.Timedelta(seconds=suppression_seconds)
             state.suppressed_until = suppressed_until
             state.shock_results = shocks
 
             for shock in shocks:
                 shock.suppression_until = suppressed_until.isoformat()
-                shock.suppression_candles_remaining = self.suppression_candles
+                shock.suppression_candles_remaining = self._suppression_candles_for_timeframe(shock.timeframe)
 
             return True, most_recent, shocks
 

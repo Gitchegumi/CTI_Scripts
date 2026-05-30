@@ -34,7 +34,9 @@
 [Generated plans MUST evaluate each applicable constitution gate with PASS/FAIL/PENDING
 status and concrete notes. Required gates include Signal Integrity, Execution Layer
 Abstraction, Risk-First, Observable by Default, Configuration-Driven Operations,
-Security & Credential Hygiene, Code Quality & Documentation, and Pull Request Policy.]
+Security & Credential Hygiene, Code Quality & Documentation, and Pull Request Policy.
+Pull Request Policy notes MUST confirm DockeGumi reviewer handling and that every GitHub
+comment will start with `Dock,`.]
 
 ## Project Structure
 

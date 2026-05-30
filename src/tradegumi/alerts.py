@@ -139,6 +139,7 @@ def save_signal(signal: Signal) -> None:
             "direction": signal.direction,
             "confidence": round(signal.confidence, 3),
             "strategy": getattr(signal, "strategy", "CTI-v1"),
+            "signal_type": getattr(signal, "signal_type", "pullback"),
             "entry_price": signal.entry_price,
             "stop_loss": signal.stop_loss,
             "take_profit": signal.take_profit,

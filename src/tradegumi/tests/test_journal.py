@@ -17,6 +17,11 @@ class FakeSignal:
         confidence=0.8,
         entry_price=1.1000,
         signal_price=None,
+        signal_type="pullback",
+        pullback_trigger=None,
+        pullback_bridge_status=None,
+        pullback_rejection_reason=None,
+        shock_blocked_signal=False,
         atr=0.0010,
         setup_condition_first_true_at=None,
         prime_outcome_candles=None,
@@ -24,6 +29,7 @@ class FakeSignal:
         self.symbol = symbol
         self.direction = direction
         self.strategy = strategy
+        self.signal_type = signal_type
         self.confidence = confidence
         self.entry_price = entry_price
         self.signal_price = signal_price if signal_price is not None else entry_price
@@ -35,6 +41,10 @@ class FakeSignal:
             self.take_profit = entry_price + 0.0040
         self.lot_size = 1.0
         self.atr = atr
+        self.pullback_trigger = pullback_trigger
+        self.pullback_bridge_status = pullback_bridge_status
+        self.pullback_rejection_reason = pullback_rejection_reason
+        self.shock_blocked_signal = shock_blocked_signal
         self.setup_condition_first_true_at = setup_condition_first_true_at
         self.prime_outcome_candles = prime_outcome_candles or []
 
@@ -560,6 +570,24 @@ def test_export_journal_csv_includes_prime_fields(journal_file):
     assert "prime_closed_reason" in rows[0]
     assert "prime_closed_at" in rows[0]
     assert "prime_close_ambiguous" in rows[0]
+
+
+def test_journal_exports_pullback_and_shock_review_fields(journal_file):
+    journal.append_signal(FakeSignal(
+        strategy="CTI-v1.2-pullback",
+        signal_type="pullback",
+        pullback_trigger="hammer",
+        pullback_bridge_status="pullback_15m_bridge_allowed",
+        shock_blocked_signal=False,
+    ))
+
+    rows = list(csv.DictReader(StringIO(journal.export_journal_csv())))
+
+    assert rows[0]["strategy"] == "CTI-v1.2-pullback"
+    assert rows[0]["signal_type"] == "pullback"
+    assert rows[0]["pullback_trigger"] == "hammer"
+    assert rows[0]["pullback_bridge_status"] == "pullback_15m_bridge_allowed"
+    assert rows[0]["shock_blocked_signal"] == "False"
 
 
 def test_manual_grade_and_invalidation_deactivate_prime(journal_file):

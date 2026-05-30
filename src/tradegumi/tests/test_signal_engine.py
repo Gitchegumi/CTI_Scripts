@@ -7,7 +7,9 @@ from tradegumi.signal_engine import (
     SignalEngine,
     _live_trigger_price,
     _last_closed_candle_window,
+    _pullback_trigger,
     classify_trend_decision,
+    classify_pullback_trend_bridge,
 )
 from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
@@ -56,6 +58,12 @@ def closed_candles(count: int, now: datetime) -> list[Candle]:
     """Return count candles whose final candle closed shortly before now."""
     first_open = now - timedelta(minutes=5 * count, seconds=5)
     return [candle_at(first_open + timedelta(minutes=5 * index), 1.1 + index * 0.0001) for index in range(count)]
+
+
+def trend_candles(count: int, now: datetime, *, start: float = 1.1000, step: float = 0.0004) -> list[Candle]:
+    """Return candles with configurable directional drift for structure tests."""
+    first_open = now - timedelta(minutes=5 * count, seconds=5)
+    return [candle_at(first_open + timedelta(minutes=5 * index), start + index * step) for index in range(count)]
 
 
 def test_live_trigger_price_uses_latest_shared_observation():
@@ -271,7 +279,7 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     )
     monkeypatch.setattr(
         "tradegumi.signal_engine.calculate_candlestick_patterns",
-        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [100]}),
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
     monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
     monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
@@ -323,7 +331,7 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
     )
     monkeypatch.setattr(
         "tradegumi.signal_engine.calculate_candlestick_patterns",
-        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [100]}),
+        lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
     monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
     monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
@@ -650,17 +658,17 @@ class TestDualPathSignals:
         assert reason == "emitted"
         assert signal.signal_type == "continuation"
 
-    def test_pullback_signal_still_works_with_relaxed_keltner(self, monkeypatch):
-        """Pullback path: price near (not necessarily breaching) Keltner outer band."""
+    def test_pullback_signal_uses_prior_break_and_midline_retrace(self, monkeypatch):
+        """Pullback path: prior Keltner break plus current midline retrace."""
         now = datetime.now(timezone.utc)
         count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
-        candles = closed_candles(count, now)
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
         engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
 
         last_price = candles[-1].c
-        # Price just inside lower band (within proximity threshold)
-        lower_band = last_price - 0.0002  # close to band but not breaching
-        mid_val = last_price + 0.002
+        mid_val = last_price
+        upper = [last_price + 0.003] * count
+        upper[-8] = last_price - 0.001
         monkeypatch.setattr(
             "tradegumi.signal_engine.calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": [25.0] * (count - 1) + [35.0], "d": [30.0] * count}),
@@ -676,14 +684,14 @@ class TestDualPathSignals:
         monkeypatch.setattr(
             "tradegumi.signal_engine.calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
-                "upper": [mid_val + 0.003] * count,
+                "upper": upper,
                 "mid": [mid_val] * count,
-                "lower": [lower_band] * count,
+                "lower": [last_price - 0.006] * count,
             }),
         )
         monkeypatch.setattr(
             "tradegumi.signal_engine.calculate_candlestick_patterns",
-            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
         )
         monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
         monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
@@ -693,9 +701,9 @@ class TestDualPathSignals:
         monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
         monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
 
-        signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
+        signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
 
-        # Pullback signal should fire with relaxed Keltner
+        # Pullback signal should fire from a prior outer-band break plus midline retrace.
         assert signal is not None, f"Expected pullback signal but got reason={reason}"
         assert reason == "emitted"
         assert signal.signal_type == "pullback"
@@ -853,6 +861,235 @@ class TestSignalTypeField:
             confidence=0.75, breakdown={}, trend_direction="Uptrend", patterns_found=[],
         )
         assert sig.signal_type == "pullback"
+
+
+class TestPullbackBridgeAndVersioning:
+    """CTI-v1.2 pullback bridge, trigger, and version behavior."""
+
+    def _patch_pullback_indicators(
+        self,
+        monkeypatch,
+        count,
+        *,
+        trend="Uptrend",
+        trigger="CDL_HAMMER",
+        stoch_ok=True,
+        macd_blocks=False,
+        prior_break=True,
+    ):
+        if trend == "Uptrend":
+            k_values = ([22.0] * (count - 1) + [24.0]) if stoch_ok else [55.0] * count
+            d_values = ([26.0] * (count - 1) + [20.0]) if stoch_ok else [50.0] * count
+            hist_values = [-0.002] * (count - 1) + ([-0.003] if macd_blocks else [-0.001])
+            mid = 1.1030
+            upper = [1.1100] * count
+            if prior_break:
+                upper[-8] = 1.1000
+            lower = [1.0960] * count
+            pattern_value = -1
+        else:
+            k_values = ([78.0] * (count - 1) + [76.0]) if stoch_ok else [45.0] * count
+            d_values = ([74.0] * (count - 1) + [82.0]) if stoch_ok else [50.0] * count
+            hist_values = [0.002] * (count - 1) + ([0.003] if macd_blocks else [0.001])
+            mid = 1.0970
+            upper = [1.1040] * count
+            lower = [1.0900] * count
+            if prior_break:
+                lower[-8] = 1.1000
+            pattern_value = 1
+
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_stoch_rsi",
+            lambda df, length, k, d: pd.DataFrame({"k": k_values, "d": d_values}),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": hist_values,
+                "signal": [0.0] * count,
+                "histogram": hist_values,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            lambda df: pd.DataFrame({trigger: [0] * (count - 1) + [pattern_value]}),
+        )
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
+        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.0 if macd_blocks else 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 1.0)
+        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+
+    def test_pullback_bridge_allows_current_15m_flat_with_recent_memory(self):
+        result = classify_pullback_trend_bridge(
+            0.007,
+            0.0001,
+            [0.009, 0.010, 0.011, 0.0001],
+            "Uptrend",
+            0.005,
+            0.008,
+            memory_candles=4,
+            strong_opposite_multiplier=1.25,
+        )
+
+        assert result["passed"] is True
+        assert result["status"] == "pullback_15m_bridge_allowed"
+
+    def test_pullback_bridge_rejects_current_15m_strongly_opposite(self):
+        result = classify_pullback_trend_bridge(
+            0.007,
+            -0.011,
+            [0.009, 0.010, 0.011, -0.011],
+            "Uptrend",
+            0.005,
+            0.008,
+            memory_candles=4,
+            strong_opposite_multiplier=1.25,
+        )
+
+        assert result["passed"] is False
+        assert result["status"] == "pullback_15m_bridge_strong_opposite"
+
+    def test_long_pullback_hammer_emits_cti_v12_pullback(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, trigger="CDL_HAMMER")
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.strategy == "CTI-v1.2-pullback"
+        assert signal.signal_type == "pullback"
+        assert signal.pullback_trigger == "hammer"
+        assert any(c.reason == "pullback_trigger_hammer" for c in criteria)
+
+    def test_long_pullback_bullish_engulfing_emits_cti_v12_pullback(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, trigger="CDL_ENGULFING")
+
+        signal, _, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.strategy == "CTI-v1.2-pullback"
+        assert signal.pullback_trigger == "bullish_engulfing"
+
+    def test_short_pullback_shooting_star_emits_cti_v12_pullback(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1100, step=-0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, trend="Downtrend", trigger="CDL_SHOOTINGSTAR")
+
+        signal, _, reason, _ = engine._get_signal("EURUSD", "Downtrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.strategy == "CTI-v1.2-pullback"
+        assert signal.pullback_trigger == "shooting_star"
+
+    def test_short_pullback_bearish_engulfing_emits_cti_v12_pullback(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1100, step=-0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, trend="Downtrend", trigger="CDL_ENGULFING")
+
+        signal, _, reason, _ = engine._get_signal("EURUSD", "Downtrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.strategy == "CTI-v1.2-pullback"
+        assert signal.pullback_trigger == "bearish_engulfing"
+
+    def test_pullback_trigger_rejects_wrong_direction_hammer_and_shooting_star(self):
+        bullish_shooting_star = pd.DataFrame({"CDL_SHOOTINGSTAR": [-1], "CDL_HAMMER": [0]})
+        bearish_hammer = pd.DataFrame({"CDL_HAMMER": [1], "CDL_SHOOTINGSTAR": [0]})
+
+        long_result = _pullback_trigger(bearish_hammer, "Uptrend")
+        short_result = _pullback_trigger(bullish_shooting_star, "Downtrend")
+
+        assert long_result["passed"] is False
+        assert long_result["reason"] == "pullback_trigger_candle_failed"
+        assert short_result["passed"] is False
+        assert short_result["reason"] == "pullback_trigger_candle_failed"
+
+    def test_pullback_rejects_generic_candlestick_confirmation(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, trigger="CDL_SPINNINGTOP")
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+        assert any(c.reason == "pullback_trigger_candle_failed" and c.blocked_signal for c in criteria)
+
+    def test_pullback_rejects_missing_prior_kc_break(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, prior_break=False)
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+        assert any(c.reason == "pullback_kc_sequence_failed" for c in criteria)
+
+    def test_pullback_rejects_structure_violation(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1000, step=-0.0001)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count)
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+        assert any(c.reason == "pullback_structure_failed" for c in criteria)
+
+    def test_pullback_rejects_without_stoch_exhaustion(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, stoch_ok=False)
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+        assert any(c.reason == "pullback_stoch_rsi_failed" for c in criteria)
+
+    def test_pullback_macd_is_soft_score_only(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, macd_blocks=True)
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        macd = next(c for c in criteria if c.criterion_name == "macd_soft_score")
+        assert macd.required is False
+        assert macd.blocked_signal is False
 
 
 class TestClassifyTrendBias:
