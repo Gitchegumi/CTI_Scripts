@@ -7,6 +7,7 @@ from tradegumi.signal_engine import (
     SignalEngine,
     _live_trigger_price,
     _last_closed_candle_window,
+    _pullback_trigger,
     classify_trend_decision,
     classify_pullback_trend_bridge,
 )
@@ -690,7 +691,7 @@ class TestDualPathSignals:
         )
         monkeypatch.setattr(
             "tradegumi.signal_engine.calculate_candlestick_patterns",
-            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [1]}),
+            lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
         )
         monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
         monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
@@ -1011,6 +1012,18 @@ class TestPullbackBridgeAndVersioning:
         assert signal is not None, reason
         assert signal.strategy == "CTI-v1.2-pullback"
         assert signal.pullback_trigger == "bearish_engulfing"
+
+    def test_pullback_trigger_rejects_wrong_direction_hammer_and_shooting_star(self):
+        bullish_shooting_star = pd.DataFrame({"CDL_SHOOTINGSTAR": [-1], "CDL_HAMMER": [0]})
+        bearish_hammer = pd.DataFrame({"CDL_HAMMER": [1], "CDL_SHOOTINGSTAR": [0]})
+
+        long_result = _pullback_trigger(bearish_hammer, "Uptrend")
+        short_result = _pullback_trigger(bullish_shooting_star, "Downtrend")
+
+        assert long_result["passed"] is False
+        assert long_result["reason"] == "pullback_trigger_candle_failed"
+        assert short_result["passed"] is False
+        assert short_result["reason"] == "pullback_trigger_candle_failed"
 
     def test_pullback_rejects_generic_candlestick_confirmation(self, monkeypatch):
         now = datetime.now(timezone.utc)

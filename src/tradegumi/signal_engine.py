@@ -584,12 +584,12 @@ def _pullback_trigger(patterns: pd.DataFrame, trend: str) -> dict:
     last = patterns.iloc[-1]
     value = lambda name: last.get(name, 0) if hasattr(last, "get") else 0
     if trend == "Uptrend":
-        if value("CDL_HAMMER") != 0:
+        if value("CDL_HAMMER") < 0:
             return {"passed": True, "trigger": "hammer", "reason": "pullback_trigger_hammer"}
         if value("CDL_ENGULFING") < 0:
             return {"passed": True, "trigger": "bullish_engulfing", "reason": "pullback_trigger_bullish_engulfing"}
     else:
-        if value("CDL_SHOOTINGSTAR") != 0:
+        if value("CDL_SHOOTINGSTAR") > 0:
             return {"passed": True, "trigger": "shooting_star", "reason": "pullback_trigger_shooting_star"}
         if value("CDL_ENGULFING") > 0:
             return {"passed": True, "trigger": "bearish_engulfing", "reason": "pullback_trigger_bearish_engulfing"}
