@@ -284,6 +284,41 @@ def test_date_only_end_includes_selected_day_and_excludes_following_day():
     assert [opp["id"] for opp in exported["opportunities"]] == ["opp-1"]
 
 
+def test_metrics_filters_and_offset_pagination():
+    db = temp_db()
+    first = opportunity(1, decision="rejected")
+    first.strategy = "CTI-v1"
+    first.signal_type = "pullback"
+    first.evaluated_at = "2026-05-06T12:00:00+00:00"
+    second = opportunity(2, decision="rejected")
+    second.strategy = "CTI-v2"
+    second.signal_type = "continuation"
+    second.evaluated_at = "2026-05-06T12:01:00+00:00"
+    third = opportunity(3, decision="emitted", failed=0)
+    third.strategy = "CTI-v2"
+    third.signal_type = "continuation"
+    third.evaluated_at = "2026-05-06T12:02:00+00:00"
+    record_opportunity(first, db)
+    record_opportunity(second, db)
+    record_opportunity(third, db)
+
+    summary = get_summary(
+        "2026-05-06",
+        "2026-05-06",
+        strategy="CTI-v2",
+        signal_type="continuation",
+        decision="rejected",
+        first_blocker="stoch_rsi",
+        db_path=db,
+    )
+    page = get_opportunities("2026-05-06", "2026-05-06", limit=1, offset=1, db_path=db)
+
+    assert summary["total_evaluated"] == 1
+    assert summary["strategy_counts"] == {"CTI-v2": 1}
+    assert summary["signal_type_counts"] == {"continuation": 1}
+    assert page[0]["id"] == "opp-2"
+
+
 def test_seeded_summary_performance():
     db = temp_db()
     start = datetime.now(timezone.utc)
@@ -440,6 +475,52 @@ class TestTopBlockers:
         summary = get_summary(iso(-1), iso(1), db_path=db)
         assert len(summary["top_blockers"]) > 0
         assert summary["top_blockers"][0]["criterion_name"] == "trend_1h"
+
+    def test_top_blocker_quality_component_uses_other_required_criteria(self):
+        db = temp_db()
+        init_schema(db)
+        opp = EvaluatedOpportunity(
+            id="opp-quality",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="rejected",
+            decision_reason="criteria_failed",
+            criteria=[
+                CriterionResult(
+                    criterion_name="stoch_rsi",
+                    layer="signal_stack",
+                    measured_value=10,
+                    threshold_value=20,
+                    threshold_operator="gte",
+                    passed=False,
+                    normalized_margin=0.25,
+                    required=True,
+                ),
+                CriterionResult(
+                    criterion_name="macd",
+                    layer="signal_stack",
+                    measured_value=0.1,
+                    threshold_value="histogram improves",
+                    passed=True,
+                    required=True,
+                ),
+                CriterionResult(
+                    criterion_name="keltner",
+                    layer="signal_stack",
+                    measured_value=1.1,
+                    threshold_value="band breach",
+                    passed=True,
+                    required=True,
+                ),
+            ],
+        )
+        record_opportunity(opp, db)
+
+        blocker = get_summary(iso(-1), iso(1), db_path=db)["top_blockers"][0]
+
+        assert blocker["criterion_name"] == "stoch_rsi"
+        assert blocker["quality_component"] == 1.0
+        assert blocker["combined_score"] > 0.7
 
     def test_blockers_require_rejected_decision(self):
         db = temp_db()

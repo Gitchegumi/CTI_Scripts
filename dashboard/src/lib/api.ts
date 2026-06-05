@@ -143,6 +143,10 @@ export async function getStrategyMetricsSummary(params: {
   start: string;
   end: string;
   symbol?: string;
+  strategy?: string;
+  signal_type?: string;
+  decision?: string;
+  first_blocker?: string;
 }): Promise<StrategyMetricsSummary> {
   return apiFetch<StrategyMetricsSummary>(`/api/strategy-metrics/summary?${query(params)}`);
 }
@@ -152,8 +156,12 @@ export async function getStrategyMetricOpportunities(params: {
   end: string;
   symbol?: string;
   decision?: string;
+  strategy?: string;
+  signal_type?: string;
+  first_blocker?: string;
   near_miss?: boolean;
   limit?: number;
+  offset?: number;
 }): Promise<StrategyMetricOpportunity[]> {
   return apiFetch<StrategyMetricOpportunity[]>(`/api/strategy-metrics/opportunities?${query(params)}`);
 }
@@ -172,6 +180,10 @@ export async function exportStrategyMetrics(params: {
   start: string;
   end: string;
   symbol?: string;
+  strategy?: string;
+  signal_type?: string;
+  decision?: string;
+  first_blocker?: string;
   include_opportunities?: boolean;
 }): Promise<unknown> {
   return apiFetch<unknown>(`/api/strategy-metrics/export?${query(params)}`);

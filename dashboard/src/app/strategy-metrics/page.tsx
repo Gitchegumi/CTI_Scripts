@@ -126,7 +126,7 @@ export default function StrategyMetricsPage() {
   const [baseStart, setBaseStart] = useState(defaultStart(14));
   const [baseEnd, setBaseEnd] = useState(defaultStart(7));
   const summaryParams = useMemo(() => ({ start, end, symbol: symbol || undefined }), [start, end, symbol]);
-  const { summary, opportunities, error, loading, refresh } = useStrategyMetricsSummary(summaryParams);
+  const { summary, opportunities, error, loading, loadingMore, loadMore, refresh } = useStrategyMetricsSummary(summaryParams);
   const comparisonParams = useMemo(() => ({
     base_start: baseStart,
     base_end: baseEnd,
@@ -223,6 +223,15 @@ export default function StrategyMetricsPage() {
                 <div className="text-sm text-slate-500 py-8 border border-slate-800 rounded text-center">
                   No evaluated opportunities for this range.
                 </div>
+              )}
+              {summary && opportunities.length < summary.total_evaluated && (
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="w-full border border-slate-700 rounded px-3 py-2 text-sm text-slate-300 hover:border-slate-500 disabled:opacity-50"
+                >
+                  {loadingMore ? "Loading" : `Load more (${opportunities.length}/${summary.total_evaluated})`}
+                </button>
               )}
             </div>
           </section>
