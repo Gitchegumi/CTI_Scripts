@@ -436,6 +436,23 @@ def test_prime_suppresses_later_buy_without_new_row(journal_file, monkeypatch):
     assert entries[0]["prime_suppressed_signal_outcomes"][0]["outcome_source"] == "system_prime_filter"
 
 
+def test_prime_suppressed_pullback_outcome_keeps_strategy_visibility(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(strategy="CTI-v1.2-pullback", signal_type="pullback", pullback_trigger="hammer_rejection"))
+    journal.append_signal(FakeSignal(strategy="CTI-v1.2-pullback", signal_type="pullback", pullback_trigger="hammer_rejection"))
+    entry = journal.read_journal()[0]
+    outcome = entry["prime_suppressed_signal_outcomes"][0]
+
+    assert outcome["strategy"] == "CTI-v1.2-pullback"
+    assert outcome["signal_type"] == "pullback"
+    assert outcome["pullback_trigger"] == "hammer_rejection"
+    csv_text = journal.export_journal_csv()
+    assert "CTI-v1.2-pullback" in csv_text
+    assert "hammer_rejection" in csv_text
+
+
 def test_prime_suppresses_later_sell_without_new_row(journal_file, monkeypatch):
     times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:12:00+00:00"])
     monkeypatch.setattr(journal, "_now_iso", lambda: next(times))

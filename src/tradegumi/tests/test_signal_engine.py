@@ -7,6 +7,8 @@ from tradegumi.signal_engine import (
     SignalEngine,
     _live_trigger_price,
     _last_closed_candle_window,
+    _pullback_keltner_sequence,
+    _pullback_stoch_rsi,
     _pullback_trigger,
     classify_trend_decision,
     classify_pullback_trend_bridge,
@@ -656,6 +658,7 @@ class TestDualPathSignals:
         # Continuation signal should fire (Keltner midline check + MACD + structure)
         assert signal is not None, f"Expected continuation signal but got reason={reason}"
         assert reason == "emitted"
+        assert signal.strategy == "CTI-v1.1-continuation-test"
         assert signal.signal_type == "continuation"
 
     def test_pullback_signal_uses_prior_break_and_midline_retrace(self, monkeypatch):
@@ -959,6 +962,21 @@ class TestPullbackBridgeAndVersioning:
         assert result["passed"] is False
         assert result["status"] == "pullback_15m_bridge_strong_opposite"
 
+    def test_pullback_bridge_rejects_missing_larger_trend_memory(self):
+        result = classify_pullback_trend_bridge(
+            0.007,
+            0.0001,
+            [0.0002, -0.0001, 0.0003, 0.0001],
+            "Uptrend",
+            0.005,
+            0.008,
+            memory_candles=4,
+            strong_opposite_multiplier=1.25,
+        )
+
+        assert result["passed"] is False
+        assert result["status"] == "pullback_15m_bridge_no_memory"
+
     def test_long_pullback_hammer_emits_cti_v12_pullback(self, monkeypatch):
         now = datetime.now(timezone.utc)
         count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
@@ -1025,6 +1043,60 @@ class TestPullbackBridgeAndVersioning:
         assert short_result["passed"] is False
         assert short_result["reason"] == "pullback_trigger_candle_failed"
 
+    def test_pullback_trigger_accepts_small_body_lower_wick_rejection(self):
+        patterns = pd.DataFrame({"CDL_HAMMER": [-1]})
+        candles = pd.DataFrame([{"o": 1.1020, "h": 1.1025, "l": 1.1000, "c": 1.1022}])
+
+        result = _pullback_trigger(patterns, "Uptrend", candles, 1.1010, 0.0015)
+
+        assert result["passed"] is True
+        assert result["trigger"] == "hammer"
+        assert result["reason"] == "pullback_trigger_hammer"
+        assert result["body_to_range"] < 0.33
+        assert result["lower_wick"] > result["upper_wick"]
+        assert result["value_area_relation"]["wick_through"] is True
+
+    def test_pullback_trigger_rejects_large_body_or_wrong_wick_shape(self):
+        patterns = pd.DataFrame({"CDL_HAMMER": [-1]})
+        large_body = pd.DataFrame([{"o": 1.1000, "h": 1.1030, "l": 1.0998, "c": 1.1028}])
+        wrong_wick = pd.DataFrame([{"o": 1.1010, "h": 1.1035, "l": 1.1009, "c": 1.1012}])
+
+        assert _pullback_trigger(patterns, "Uptrend", large_body)["passed"] is False
+        assert _pullback_trigger(patterns, "Uptrend", wrong_wick)["passed"] is False
+
+    def test_pullback_keltner_sequence_reports_tolerance_components(self):
+        df = pd.DataFrame({
+            "h": [1.1020, 1.1060, 1.1040, 1.1012],
+            "l": [1.0980, 1.1010, 1.1000, 1.1005],
+            "c": [1.1010, 1.1050, 1.1020, 1.1010],
+        })
+        kc = pd.DataFrame({
+            "upper": [1.1050, 1.1050, 1.1050, 1.1050],
+            "mid": [1.1010, 1.1010, 1.1010, 1.1010],
+            "lower": [1.0970, 1.0970, 1.0970, 1.0970],
+        })
+
+        result = _pullback_keltner_sequence(df, kc, "Uptrend", 0.001, "upper", "lower", "mid")
+
+        assert result["passed"] is True
+        assert result["prior_break"] is True
+        assert result["near_midline"] is True
+        assert result["distance_to_midline"] == 0
+        assert result["tolerance_atr_component"] > 0
+        assert result["tolerance_channel_component"] > 0
+
+    def test_pullback_stoch_rsi_uses_configurable_memory_bars(self, monkeypatch):
+        import tradegumi.config as config_module
+
+        monkeypatch.setattr(config_module, "PULLBACK_STOCH_MEMORY_BARS", 3, raising=False)
+        k_values = pd.Series([10.0, 55.0, 58.0, 60.0])
+
+        result = _pullback_stoch_rsi(60.0, 58.0, k_values, "Uptrend")
+
+        assert result["passed"] is False
+        assert result["memory_bars"] == 3
+        assert result["recent_low"] == 55.0
+
     def test_pullback_rejects_generic_candlestick_confirmation(self, monkeypatch):
         now = datetime.now(timezone.utc)
         count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
@@ -1062,7 +1134,9 @@ class TestPullbackBridgeAndVersioning:
 
         assert signal is None
         assert reason == "criteria_failed"
-        assert any(c.reason == "pullback_structure_failed" for c in criteria)
+        structure = next(c for c in criteria if c.criterion_name == "pullback_structure")
+        assert structure.reason == "pullback_structure_failed"
+        assert structure.blocked_signal is True
 
     def test_pullback_rejects_without_stoch_exhaustion(self, monkeypatch):
         now = datetime.now(timezone.utc)
@@ -1090,6 +1164,25 @@ class TestPullbackBridgeAndVersioning:
         macd = next(c for c in criteria if c.criterion_name == "macd_soft_score")
         assert macd.required is False
         assert macd.blocked_signal is False
+
+    def test_pullback_macd_hard_block_is_explicitly_configurable(self, monkeypatch):
+        import tradegumi.config as config_module
+
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        self._patch_pullback_indicators(monkeypatch, count, macd_blocks=True)
+        monkeypatch.setattr(config_module, "PULLBACK_MACD_HARD_BLOCK_ENABLED", True, raising=False)
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+        hard_block = next(c for c in criteria if c.criterion_name == "pullback_macd_hard_block")
+        assert hard_block.required is True
+        assert hard_block.blocked_signal is True
+        assert hard_block.reason == "pullback_macd_hard_block_failed"
 
 
 class TestClassifyTrendBias:

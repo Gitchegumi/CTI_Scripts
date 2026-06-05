@@ -75,3 +75,14 @@ npm run build
 - Confirm the tuned run improves the three measured choke points without weakening structure: trigger candle 7.17% pass baseline, Keltner pullback sequence 18.20% pass baseline, Stoch RSI 35.25% pass baseline, and pullback structure 94.64% pass baseline.
 - Confirm improvements come from valid pullback fixtures and representative replay data, not from accepting weak or structure-broken setups.
 - Confirm continuation rows remain labeled and reportable separately from pullback rows.
+
+## Implementation Validation Notes
+
+- 2026-06-05 quickstart tests passed:
+  - `pytest src/tradegumi/tests/test_signal_engine.py -q` -> 57 passed.
+  - `pytest src/tradegumi/tests/test_strategy_metrics.py -q` -> 55 passed.
+  - `pytest src/tradegumi/tests/test_journal.py -q` -> 38 passed.
+  - `pytest src/tradegumi/tests/test_alerts.py -q` -> 1 passed.
+- Attached June 1-5 baseline was rechecked from the provided files: 128,966 evaluated opportunities, 466 emitted, 18,710 rejected, 2,267 near misses, 371 prime-suppressed signals, 92 journal rows, 0 journaled pullbacks, 92 journaled continuations, 1,542 `signal_type=pullback` opportunities, 464 `signal_type=continuation` opportunities, and 2 `CTI-v1.2-pullback` strategy rows.
+- Fixture validation now covers valid BUY/SELL pullback emission, invalid trigger/Keltner/Stoch/structure blockers, MACD soft-default and explicit hard-block behavior, continuation identity preservation, pullback summary metrics, journaled pullback identity, and prime-suppressed pullback visibility.
+- Representative live replay was not run in this implementation pass; the comparison above is against the attached baseline data and deterministic fixtures.

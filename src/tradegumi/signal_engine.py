@@ -347,6 +347,11 @@ def get_threshold_version() -> str:
         "pullback_stoch_oversold_recent": config.PULLBACK_STOCH_OVERSOLD_RECENT,
         "pullback_stoch_overbought": config.PULLBACK_STOCH_OVERBOUGHT,
         "pullback_stoch_overbought_recent": config.PULLBACK_STOCH_OVERBOUGHT_RECENT,
+        "pullback_trigger_max_body_range_ratio": config.PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO,
+        "pullback_trigger_min_rejection_wick_range_ratio": config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO,
+        "pullback_trigger_min_rejection_wick_body_ratio": config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO,
+        "pullback_stoch_memory_bars": config.PULLBACK_STOCH_MEMORY_BARS,
+        "pullback_macd_hard_block_enabled": config.PULLBACK_MACD_HARD_BLOCK_ENABLED,
         "shock_m5_true_range_atr_multiple": config.SHOCK_M5_TRUE_RANGE_ATR_MULTIPLE,
         "shock_m15_true_range_atr_multiple": config.SHOCK_M15_TRUE_RANGE_ATR_MULTIPLE,
         "shock_body_atr_multiple": config.SHOCK_BODY_ATR_MULTIPLE,
@@ -552,12 +557,12 @@ def _pullback_keltner_sequence(
     upper = float(kc[kc_upper_col].iloc[-1])
     lower = float(kc[kc_lower_col].iloc[-1])
     channel_width = abs(upper - lower)
-    tolerance = max(
-        float(atr) * config.PULLBACK_KC_MIDLINE_TOLERANCE_ATR,
-        channel_width * config.PULLBACK_KC_MIDLINE_TOLERANCE_CHANNEL_WIDTH,
-    )
+    tolerance_atr_component = float(atr) * config.PULLBACK_KC_MIDLINE_TOLERANCE_ATR
+    tolerance_channel_component = channel_width * config.PULLBACK_KC_MIDLINE_TOLERANCE_CHANNEL_WIDTH
+    tolerance = max(tolerance_atr_component, tolerance_channel_component)
     trigger_close = float(df["c"].iloc[-1])
-    near_midline = abs(trigger_close - midline) <= tolerance
+    distance_to_midline = abs(trigger_close - midline)
+    near_midline = distance_to_midline <= tolerance
 
     if trend == "Uptrend":
         highs = price_window["h"].iloc[:-1].to_numpy()
@@ -576,32 +581,113 @@ def _pullback_keltner_sequence(
         "near_midline": near_midline,
         "trigger_close": trigger_close,
         "midline": midline,
+        "distance_to_midline": distance_to_midline,
         "tolerance": tolerance,
+        "tolerance_atr_component": tolerance_atr_component,
+        "tolerance_channel_component": tolerance_channel_component,
     }
 
 
-def _pullback_trigger(patterns: pd.DataFrame, trend: str) -> dict:
-    """Return the approved direction-specific pullback trigger candle, if any."""
+def _pullback_trigger(
+    patterns: pd.DataFrame,
+    trend: str,
+    candles: Optional[pd.DataFrame] = None,
+    value_area_midline: Optional[float] = None,
+    value_area_tolerance: Optional[float] = None,
+) -> dict:
+    """Return approved direction-specific pullback trigger candle diagnostics."""
+    base = {
+        "passed": False,
+        "trigger": None,
+        "reason": "pullback_trigger_candle_failed",
+        "pattern": None,
+        "body_to_range": None,
+        "upper_wick": None,
+        "lower_wick": None,
+        "rejection_wick_ratio": None,
+        "rejection_wick_body_ratio": None,
+        "close_position": None,
+        "value_area_relation": None,
+    }
     if patterns.empty:
-        return {"passed": False, "trigger": None, "reason": "pullback_trigger_candle_failed"}
+        return base
     last = patterns.iloc[-1]
     value = lambda name: last.get(name, 0) if hasattr(last, "get") else 0
+    trigger: Optional[str] = None
+    pattern: Optional[str] = None
     if trend == "Uptrend":
         if value("CDL_HAMMER") < 0:
-            return {"passed": True, "trigger": "hammer", "reason": "pullback_trigger_hammer"}
-        if value("CDL_ENGULFING") < 0:
-            return {"passed": True, "trigger": "bullish_engulfing", "reason": "pullback_trigger_bullish_engulfing"}
+            trigger = "hammer"
+            pattern = "CDL_HAMMER"
+        elif value("CDL_ENGULFING") < 0:
+            trigger = "bullish_engulfing"
+            pattern = "CDL_ENGULFING"
     else:
         if value("CDL_SHOOTINGSTAR") > 0:
-            return {"passed": True, "trigger": "shooting_star", "reason": "pullback_trigger_shooting_star"}
-        if value("CDL_ENGULFING") > 0:
-            return {"passed": True, "trigger": "bearish_engulfing", "reason": "pullback_trigger_bearish_engulfing"}
-    return {"passed": False, "trigger": None, "reason": "pullback_trigger_candle_failed"}
+            trigger = "shooting_star"
+            pattern = "CDL_SHOOTINGSTAR"
+        elif value("CDL_ENGULFING") > 0:
+            trigger = "bearish_engulfing"
+            pattern = "CDL_ENGULFING"
+    if trigger is None:
+        return base
+
+    context = {**base, "trigger": trigger, "pattern": pattern}
+    if candles is None or candles.empty:
+        context.update({"passed": True, "reason": f"pullback_trigger_{trigger}"})
+        return context
+
+    candle = candles.iloc[-1]
+    open_price = float(candle["o"])
+    high = float(candle["h"])
+    low = float(candle["l"])
+    close = float(candle["c"])
+    full_range = max(0.0, high - low)
+    body_size = abs(close - open_price)
+    if full_range <= 0:
+        return context
+
+    upper_wick = max(0.0, high - max(open_price, close))
+    lower_wick = max(0.0, min(open_price, close) - low)
+    rejection_wick = lower_wick if trend == "Uptrend" else upper_wick
+    body_to_range = body_size / full_range
+    rejection_wick_ratio = rejection_wick / full_range
+    rejection_wick_body_ratio = rejection_wick / body_size if body_size > 0 else math.inf
+    close_position = (close - low) / full_range
+    value_area_relation = None
+    if value_area_midline is not None and value_area_tolerance is not None:
+        wick_price = low if trend == "Uptrend" else high
+        close_near = abs(close - float(value_area_midline)) <= float(value_area_tolerance)
+        wick_near = abs(wick_price - float(value_area_midline)) <= float(value_area_tolerance)
+        wick_through = wick_price <= value_area_midline if trend == "Uptrend" else wick_price >= value_area_midline
+        value_area_relation = {
+            "close_near": close_near,
+            "wick_near": wick_near,
+            "wick_through": wick_through,
+        }
+    shape_ok = (
+        body_to_range <= config.PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO
+        and rejection_wick_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO
+        and rejection_wick_body_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO
+    )
+    context.update({
+        "passed": bool(shape_ok),
+        "reason": f"pullback_trigger_{trigger}" if shape_ok else "pullback_trigger_candle_failed",
+        "body_to_range": body_to_range,
+        "upper_wick": upper_wick,
+        "lower_wick": lower_wick,
+        "rejection_wick_ratio": rejection_wick_ratio,
+        "rejection_wick_body_ratio": rejection_wick_body_ratio,
+        "close_position": close_position,
+        "value_area_relation": value_area_relation,
+    })
+    return context
 
 
 def _pullback_stoch_rsi(k: float, d: float, k_values: pd.Series, trend: str) -> dict:
     """Evaluate Stoch RSI exhaustion for a direction-specific pullback."""
-    recent = k_values.iloc[-4:] if len(k_values) >= 4 else k_values
+    memory_bars = max(1, int(config.PULLBACK_STOCH_MEMORY_BARS))
+    recent = k_values.iloc[-memory_bars:] if len(k_values) >= memory_bars else k_values
     if trend == "Uptrend":
         recent_low = float(recent.min())
         rising = len(recent) >= 2 and float(recent.iloc[-1]) > float(recent.iloc[-2])
@@ -610,7 +696,7 @@ def _pullback_stoch_rsi(k: float, d: float, k_values: pd.Series, trend: str) -> 
             or d <= config.PULLBACK_STOCH_OVERSOLD
             or (recent_low <= config.PULLBACK_STOCH_OVERSOLD_RECENT and (k > d or rising))
         )
-        return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_low": recent_low, "k": float(k), "d": float(d)}
+        return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_low": recent_low, "k": float(k), "d": float(d), "memory_bars": memory_bars, "recovery_or_roll_down": bool(k > d or rising)}
 
     recent_high = float(recent.max())
     falling = len(recent) >= 2 and float(recent.iloc[-1]) < float(recent.iloc[-2])
@@ -619,7 +705,7 @@ def _pullback_stoch_rsi(k: float, d: float, k_values: pd.Series, trend: str) -> 
         or d >= config.PULLBACK_STOCH_OVERBOUGHT
         or (recent_high >= config.PULLBACK_STOCH_OVERBOUGHT_RECENT and (k < d or falling))
     )
-    return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_high": recent_high, "k": float(k), "d": float(d)}
+    return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_high": recent_high, "k": float(k), "d": float(d), "memory_bars": memory_bars, "recovery_or_roll_down": bool(k < d or falling)}
 
 
 def _timeframe_seconds(timeframe: str) -> int:
@@ -1881,23 +1967,49 @@ class SignalEngine:
         keltner_result = _pullback_keltner_sequence(
             df, kc, trend, float(atr), kc_upper_col, kc_lower_col, kc_mid_col
         )
-        trigger_result = _pullback_trigger(patterns_df, trend)
+        trigger_result = _pullback_trigger(
+            patterns_df,
+            trend,
+            df,
+            value_area_midline=keltner_result.get("midline"),
+            value_area_tolerance=keltner_result.get("tolerance"),
+        )
         stoch_result = _pullback_stoch_rsi(float(k), float(d), stoch[k_col], trend)
         macd_soft_context = {
             "histogram": float(macd_current),
             "line": float(macd_line),
             "signal": float(macd_signal_val),
-            "hard_blocker": False,
+            "hard_blocker": bool(config.PULLBACK_MACD_HARD_BLOCK_ENABLED),
         }
-        criteria.extend([
+        pullback_criteria = [
             _criterion("stoch_rsi", "signal_stack", {"k": float(k), "d": float(d), **stoch_result}, "pullback exhaustion", bool(stoch_result["passed"]), stoch_margin, reason=stoch_result["reason"], context=stoch_result),
             _criterion("macd_soft_score", "signal_stack", macd_soft_context, "soft confidence only", bool(macd_ok), macd_margin, required=False, reason="pullback_macd_soft_score", context=macd_soft_context),
             _criterion("keltner_pullback_sequence", "signal_stack", keltner_result, "prior outer break plus midline pullback", bool(keltner_result["passed"]), None, reason=keltner_result["reason"], context=keltner_result),
             _criterion("pullback_structure", "signal_stack", structure_result, "HH/HL or LH/LL protected structure", bool(structure_result["passed"]), None, reason=structure_result["reason"], context=structure_result),
             _criterion("pullback_trigger_candle", "confirmation", trigger_result, "approved pullback trigger", bool(trigger_result["passed"]), None, reason=trigger_result["reason"], context=trigger_result),
-        ])
+        ]
+        if config.PULLBACK_MACD_HARD_BLOCK_ENABLED:
+            pullback_criteria.append(
+                _criterion(
+                    "pullback_macd_hard_block",
+                    "signal_stack",
+                    macd_soft_context,
+                    "macd supports pullback direction",
+                    bool(macd_ok),
+                    macd_margin,
+                    reason="pullback_macd_hard_block_ok" if macd_ok else "pullback_macd_hard_block_failed",
+                    context=macd_soft_context,
+                )
+            )
+        criteria.extend(pullback_criteria)
 
-        all_pass = stoch_result["passed"] and keltner_result["passed"] and structure_result["passed"] and trigger_result["passed"]
+        all_pass = (
+            stoch_result["passed"]
+            and keltner_result["passed"]
+            and structure_result["passed"]
+            and trigger_result["passed"]
+            and (not config.PULLBACK_MACD_HARD_BLOCK_ENABLED or macd_ok)
+        )
         if not all_pass:
             log.debug("%s pullback signal blocked: stoch=%s kc=%s structure=%s trigger=%s",
                       symbol, stoch_result["passed"], keltner_result["passed"], structure_result["passed"], trigger_result["passed"])

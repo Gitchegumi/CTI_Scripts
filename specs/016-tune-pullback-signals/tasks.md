@@ -17,10 +17,10 @@
 
 **Purpose**: Confirm the active feature context and baseline surfaces before changing signal behavior.
 
-- [ ] T001 Verify the active feature pointer, branch context, and attached baseline data references in `.specify/feature.json`, `AGENTS.md`, and `specs/016-tune-pullback-signals/plan.md`
-- [ ] T002 Review current pullback helper, strategy version, and diagnostic behavior in `src/tradegumi/signal_engine.py`
-- [ ] T003 [P] Review current strategy metrics summary, near-miss, and prime-suppression behavior in `src/tradegumi/strategy_metrics.py`
-- [ ] T004 [P] Review current Signal Journal pullback export and Discord payload fields in `src/tradegumi/journal.py` and `src/tradegumi/alerts.py`
+- [X] T001 Verify the active feature pointer, branch context, and attached baseline data references in `.specify/feature.json`, `AGENTS.md`, and `specs/016-tune-pullback-signals/plan.md`
+- [X] T002 Review current pullback helper, strategy version, and diagnostic behavior in `src/tradegumi/signal_engine.py`
+- [X] T003 [P] Review current strategy metrics summary, near-miss, and prime-suppression behavior in `src/tradegumi/strategy_metrics.py`
+- [X] T004 [P] Review current Signal Journal pullback export and Discord payload fields in `src/tradegumi/journal.py` and `src/tradegumi/alerts.py`
 
 ---
 
@@ -30,12 +30,12 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Add config tests for pullback trigger shape settings, Stoch memory bars, MACD hard-block mode, and threshold-version changes in `src/tradegumi/tests/test_strategy_metrics.py`
-- [ ] T006 Add `PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO`, `PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO`, `PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO`, `PULLBACK_STOCH_MEMORY_BARS`, and `PULLBACK_MACD_HARD_BLOCK_ENABLED` in `src/tradegumi/config.py`
-- [ ] T007 Document new pullback tuning environment variables with conservative defaults in `.env.example`
-- [ ] T008 Include every new signal-affecting pullback setting in threshold-version hashing in `src/tradegumi/signal_engine.py`
-- [ ] T009 Run the config and threshold-version test selection in `src/tradegumi/tests/test_strategy_metrics.py`
-- [ ] T010 Capture the June 1-5 baseline counts from `C:/Users/User/Downloads/tradegumi 20260605/strategy-metrics-2026-06-01-to-2026-06-05.json` and `C:/Users/User/Downloads/tradegumi 20260605/signal-journal-all-2026-06-05.csv` in `specs/016-tune-pullback-signals/quickstart.md`
+- [X] T005 Add config tests for pullback trigger shape settings, Stoch memory bars, MACD hard-block mode, and threshold-version changes in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T006 Add `PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO`, `PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO`, `PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO`, `PULLBACK_STOCH_MEMORY_BARS`, and `PULLBACK_MACD_HARD_BLOCK_ENABLED` in `src/tradegumi/config.py`
+- [X] T007 Document new pullback tuning environment variables with conservative defaults in `.env.example`
+- [X] T008 Include every new signal-affecting pullback setting in threshold-version hashing in `src/tradegumi/signal_engine.py`
+- [X] T009 Run the config and threshold-version test selection in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T010 Capture the June 1-5 baseline counts from `C:/Users/User/Downloads/tradegumi 20260605/strategy-metrics-2026-06-01-to-2026-06-05.json` and `C:/Users/User/Downloads/tradegumi 20260605/signal-journal-all-2026-06-05.csv` in `specs/016-tune-pullback-signals/quickstart.md`
 
 **Checkpoint**: Foundation ready; user story implementation can now begin.
 
@@ -49,17 +49,17 @@
 
 ### Tests for User Story 1
 
-- [ ] T011 [US1] Add valid BUY pullback fixture test with lower-wick rejection, value-area pullback, exhaustion evidence, and emitted `CTI-v1.2-pullback` signal in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T012 [US1] Add valid SELL pullback fixture test with upper-wick rejection, value-area pullback, exhaustion evidence, and emitted `CTI-v1.2-pullback` signal in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T013 [P] [US1] Add Signal Journal export test proving emitted pullback alerts create `signal_type=pullback` rows in `src/tradegumi/tests/test_journal.py`
-- [ ] T014 [P] [US1] Create operator alert payload test proving pullback strategy and signal type remain visible in `src/tradegumi/tests/test_alerts.py`
+- [X] T011 [US1] Add valid BUY pullback fixture test with lower-wick rejection, value-area pullback, exhaustion evidence, and emitted `CTI-v1.2-pullback` signal in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T012 [US1] Add valid SELL pullback fixture test with upper-wick rejection, value-area pullback, exhaustion evidence, and emitted `CTI-v1.2-pullback` signal in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T013 [P] [US1] Add Signal Journal export test proving emitted pullback alerts create `signal_type=pullback` rows in `src/tradegumi/tests/test_journal.py`
+- [X] T014 [P] [US1] Create operator alert payload test proving pullback strategy and signal type remain visible in `src/tradegumi/tests/test_alerts.py`
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Update pullback signal emission to preserve `CTI-v1.2-pullback`, `signal_type=pullback`, trigger context, and bridge status in `src/tradegumi/signal_engine.py`
-- [ ] T016 [US1] Ensure Signal Journal append and export paths retain emitted pullback identity and trigger fields in `src/tradegumi/journal.py`
-- [ ] T017 [US1] Ensure Discord/operator alert payloads preserve pullback signal type and strategy identity in `src/tradegumi/alerts.py`
-- [ ] T018 [US1] Run the US1 test selection in `src/tradegumi/tests/test_signal_engine.py`, `src/tradegumi/tests/test_journal.py`, and `src/tradegumi/tests/test_alerts.py`
+- [X] T015 [US1] Update pullback signal emission to preserve `CTI-v1.2-pullback`, `signal_type=pullback`, trigger context, and bridge status in `src/tradegumi/signal_engine.py`
+- [X] T016 [US1] Ensure Signal Journal append and export paths retain emitted pullback identity and trigger fields in `src/tradegumi/journal.py`
+- [X] T017 [US1] Ensure Discord/operator alert payloads preserve pullback signal type and strategy identity in `src/tradegumi/alerts.py`
+- [X] T018 [US1] Run the US1 test selection in `src/tradegumi/tests/test_signal_engine.py`, `src/tradegumi/tests/test_journal.py`, and `src/tradegumi/tests/test_alerts.py`
 
 **Checkpoint**: US1 is independently functional when valid BUY/SELL pullbacks emit and journal as pullbacks.
 
@@ -73,19 +73,19 @@
 
 ### Tests for User Story 2
 
-- [ ] T019 [US2] Add pullback trigger shape tests for body-to-range, rejection wick, wrong wick direction, and generic pattern rejection in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T020 [US2] Add Keltner value-area tests for prior outer-band break, normalized tolerance, no exact-touch requirement, and missing prior-break rejection in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T021 [US2] Add Stoch RSI exhaustion memory tests for BUY recovery, SELL roll-down, stale exhaustion rejection, and configured memory bars in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T022 [US2] Add MACD soft-default and explicit hard-block tests for pullback entries in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T019 [US2] Add pullback trigger shape tests for body-to-range, rejection wick, wrong wick direction, and generic pattern rejection in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T020 [US2] Add Keltner value-area tests for prior outer-band break, normalized tolerance, no exact-touch requirement, and missing prior-break rejection in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T021 [US2] Add Stoch RSI exhaustion memory tests for BUY recovery, SELL roll-down, stale exhaustion rejection, and configured memory bars in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T022 [US2] Add MACD soft-default and explicit hard-block tests for pullback entries in `src/tradegumi/tests/test_signal_engine.py`
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] Implement candle body/range and rejection-wick calculations for pullback trigger evaluation in `src/tradegumi/signal_engine.py`
-- [ ] T024 [US2] Update `_pullback_trigger` diagnostics to include trigger context fields from `contracts/signal-diagnostics.md` in `src/tradegumi/signal_engine.py`
-- [ ] T025 [US2] Update `_pullback_keltner_sequence` to expose normalized value-area tolerance components and distance context in `src/tradegumi/signal_engine.py`
-- [ ] T026 [US2] Update `_pullback_stoch_rsi` to use configurable exhaustion memory bars and expose recovery or roll-down context in `src/tradegumi/signal_engine.py`
-- [ ] T027 [US2] Implement optional `PULLBACK_MACD_HARD_BLOCK_ENABLED` behavior while keeping MACD soft by default in `src/tradegumi/signal_engine.py`
-- [ ] T028 [US2] Run the US2 signal-engine test selection in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T023 [US2] Implement candle body/range and rejection-wick calculations for pullback trigger evaluation in `src/tradegumi/signal_engine.py`
+- [X] T024 [US2] Update `_pullback_trigger` diagnostics to include trigger context fields from `contracts/signal-diagnostics.md` in `src/tradegumi/signal_engine.py`
+- [X] T025 [US2] Update `_pullback_keltner_sequence` to expose normalized value-area tolerance components and distance context in `src/tradegumi/signal_engine.py`
+- [X] T026 [US2] Update `_pullback_stoch_rsi` to use configurable exhaustion memory bars and expose recovery or roll-down context in `src/tradegumi/signal_engine.py`
+- [X] T027 [US2] Implement optional `PULLBACK_MACD_HARD_BLOCK_ENABLED` behavior while keeping MACD soft by default in `src/tradegumi/signal_engine.py`
+- [X] T028 [US2] Run the US2 signal-engine test selection in `src/tradegumi/tests/test_signal_engine.py`
 
 **Checkpoint**: US2 is independently functional when tuned gates pass realistic pullbacks and reject invalid fixtures with stable blockers.
 
@@ -99,16 +99,16 @@
 
 ### Tests for User Story 3
 
-- [ ] T029 [US3] Add metrics summary tests for pullback evaluated, rejected-by-gate, near-miss, emitted, journaled, and prime-suppressed counts using the attached June 1-5 baseline shape in `src/tradegumi/tests/test_strategy_metrics.py`
-- [ ] T030 [US3] Add opportunity-row tests for pullback criterion context fields, threshold version, strategy, signal type, and first blocker names in `src/tradegumi/tests/test_strategy_metrics.py`
-- [ ] T031 [P] [US3] Add Signal Journal export tests for journaled pullback rows and prime-suppressed pullback visibility in `src/tradegumi/tests/test_journal.py`
+- [X] T029 [US3] Add metrics summary tests for pullback evaluated, rejected-by-gate, near-miss, emitted, journaled, and prime-suppressed counts using the attached June 1-5 baseline shape in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T030 [US3] Add opportunity-row tests for pullback criterion context fields, threshold version, strategy, signal type, and first blocker names in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T031 [P] [US3] Add Signal Journal export tests for journaled pullback rows and prime-suppressed pullback visibility in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] Add or verify pullback-specific aggregate counts and blocker grouping in `src/tradegumi/strategy_metrics.py`
-- [ ] T033 [US3] Preserve pullback diagnostic context fields when persisting evaluated opportunities and criterion rows in `src/tradegumi/strategy_metrics.py`
-- [ ] T034 [US3] Ensure journaled and prime-suppressed pullback counts can be correlated from journal fields in `src/tradegumi/journal.py`
-- [ ] T035 [US3] Run the US3 metrics and journal test selection in `src/tradegumi/tests/test_strategy_metrics.py` and `src/tradegumi/tests/test_journal.py`
+- [X] T032 [US3] Add or verify pullback-specific aggregate counts and blocker grouping in `src/tradegumi/strategy_metrics.py`
+- [X] T033 [US3] Preserve pullback diagnostic context fields when persisting evaluated opportunities and criterion rows in `src/tradegumi/strategy_metrics.py`
+- [X] T034 [US3] Ensure journaled and prime-suppressed pullback counts can be correlated from journal fields in `src/tradegumi/journal.py`
+- [X] T035 [US3] Run the US3 metrics and journal test selection in `src/tradegumi/tests/test_strategy_metrics.py` and `src/tradegumi/tests/test_journal.py`
 
 **Checkpoint**: US3 is independently functional when reports explain pullback outcomes without reading raw logs.
 
@@ -122,16 +122,16 @@
 
 ### Tests for User Story 4
 
-- [ ] T036 [US4] Add continuation regression tests proving continuation strategy and `signal_type=continuation` remain distinct in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T037 [US4] Add pullback protection tests for missing larger-trend context and broken higher-low/lower-high structure in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T038 [P] [US4] Add prime-suppression regression tests proving suppressed pullbacks are counted separately from gate failures in `src/tradegumi/tests/test_journal.py`
+- [X] T036 [US4] Add continuation regression tests proving continuation strategy and `signal_type=continuation` remain distinct in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T037 [US4] Add pullback protection tests for missing larger-trend context and broken higher-low/lower-high structure in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T038 [P] [US4] Add prime-suppression regression tests proving suppressed pullbacks are counted separately from gate failures in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] Preserve larger-trend bridge and structure rejection behavior while integrating tuned pullback gates in `src/tradegumi/signal_engine.py`
-- [ ] T040 [US4] Preserve continuation strategy labels, continuation criteria, and continuation diagnostics while integrating tuned pullback behavior in `src/tradegumi/signal_engine.py`
-- [ ] T041 [US4] Preserve prime-signal suppression behavior and suppression counters for pullback follow-on alerts in `src/tradegumi/journal.py`
-- [ ] T042 [US4] Run the US4 regression test selection in `src/tradegumi/tests/test_signal_engine.py` and `src/tradegumi/tests/test_journal.py`
+- [X] T039 [US4] Preserve larger-trend bridge and structure rejection behavior while integrating tuned pullback gates in `src/tradegumi/signal_engine.py`
+- [X] T040 [US4] Preserve continuation strategy labels, continuation criteria, and continuation diagnostics while integrating tuned pullback behavior in `src/tradegumi/signal_engine.py`
+- [X] T041 [US4] Preserve prime-signal suppression behavior and suppression counters for pullback follow-on alerts in `src/tradegumi/journal.py`
+- [X] T042 [US4] Run the US4 regression test selection in `src/tradegumi/tests/test_signal_engine.py` and `src/tradegumi/tests/test_journal.py`
 
 **Checkpoint**: US4 is independently functional when protections still block weak or duplicate setups and continuation remains distinct.
 
@@ -141,13 +141,13 @@
 
 **Purpose**: Final validation, code quality, documentation, and PR readiness.
 
-- [ ] T043 Run full targeted validation from quickstart in `specs/016-tune-pullback-signals/quickstart.md`
-- [ ] T044 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and no broker-specific signal logic in `src/tradegumi/`
-- [ ] T045 Add or update docstrings for new or modified modules, public classes, public functions, public methods, and non-trivial helpers in `src/tradegumi/`
-- [ ] T046 [P] Update operator-facing documentation if new metric/export fields need explanation in `docs/signal-journal.md`
-- [ ] T047 [P] Run dashboard lint/build only if dashboard metrics types or UI changed in `dashboard/`
-- [ ] T048 Compare representative replay or simulation metrics against the attached June 1-5 baseline and record findings in `specs/016-tune-pullback-signals/quickstart.md`
-- [ ] T049 Submit PR with GitcheGumi as reviewer and use `specs/016-tune-pullback-signals/tasks.md` as the completion checklist
+- [X] T043 Run full targeted validation from quickstart in `specs/016-tune-pullback-signals/quickstart.md`
+- [X] T044 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and no broker-specific signal logic in `src/tradegumi/`
+- [X] T045 Add or update docstrings for new or modified modules, public classes, public functions, public methods, and non-trivial helpers in `src/tradegumi/`
+- [X] T046 [P] Update operator-facing documentation if new metric/export fields need explanation in `docs/signal-journal.md`
+- [X] T047 [P] Run dashboard lint/build only if dashboard metrics types or UI changed in `dashboard/`
+- [X] T048 Compare representative replay or simulation metrics against the attached June 1-5 baseline and record findings in `specs/016-tune-pullback-signals/quickstart.md`
+- [X] T049 Submit PR with GitcheGumi as reviewer and use `specs/016-tune-pullback-signals/tasks.md` as the completion checklist
 
 ---
 
