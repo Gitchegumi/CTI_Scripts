@@ -35,8 +35,8 @@
 status and concrete notes. Required gates include Signal Integrity, Execution Layer
 Abstraction, Risk-First, Observable by Default, Configuration-Driven Operations,
 Security & Credential Hygiene, Code Quality & Documentation, and Pull Request Policy.
-Pull Request Policy notes MUST confirm DockeGumi reviewer handling and that every GitHub
-comment will start with `Dock,`.]
+Pull Request Policy notes MUST confirm reviewer handling based on user input, feature
+context, or an explicit ask-back before PR creation.]
 
 ## Project Structure
 

@@ -159,7 +159,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
 - [ ] TXXX Run quickstart.md validation
-- [ ] TXXX Submit PR with DockeGumi as reviewer and start every GitHub comment with `Dock,`
+- [ ] TXXX Submit PR with the user/context-identified reviewer, or ask the user to identify the reviewer before opening the PR
 
 ---
 
