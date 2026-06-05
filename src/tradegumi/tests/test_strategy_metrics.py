@@ -284,6 +284,41 @@ def test_date_only_end_includes_selected_day_and_excludes_following_day():
     assert [opp["id"] for opp in exported["opportunities"]] == ["opp-1"]
 
 
+def test_metrics_filters_and_offset_pagination():
+    db = temp_db()
+    first = opportunity(1, decision="rejected")
+    first.strategy = "CTI-v1"
+    first.signal_type = "pullback"
+    first.evaluated_at = "2026-05-06T12:00:00+00:00"
+    second = opportunity(2, decision="rejected")
+    second.strategy = "CTI-v2"
+    second.signal_type = "continuation"
+    second.evaluated_at = "2026-05-06T12:01:00+00:00"
+    third = opportunity(3, decision="emitted", failed=0)
+    third.strategy = "CTI-v2"
+    third.signal_type = "continuation"
+    third.evaluated_at = "2026-05-06T12:02:00+00:00"
+    record_opportunity(first, db)
+    record_opportunity(second, db)
+    record_opportunity(third, db)
+
+    summary = get_summary(
+        "2026-05-06",
+        "2026-05-06",
+        strategy="CTI-v2",
+        signal_type="continuation",
+        decision="rejected",
+        first_blocker="stoch_rsi",
+        db_path=db,
+    )
+    page = get_opportunities("2026-05-06", "2026-05-06", limit=1, offset=1, db_path=db)
+
+    assert summary["total_evaluated"] == 1
+    assert summary["strategy_counts"] == {"CTI-v2": 1}
+    assert summary["signal_type_counts"] == {"continuation": 1}
+    assert page[0]["id"] == "opp-2"
+
+
 def test_seeded_summary_performance():
     db = temp_db()
     start = datetime.now(timezone.utc)

@@ -268,6 +268,8 @@ export function useStrategyMetricsSummary(params: {
   const [opportunities, setOpportunities] = useState<StrategyMetricOpportunity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const pageSize = 200;
 
   const refresh = useCallback(async () => {
     if (!params.start || !params.end) return;
@@ -276,7 +278,7 @@ export function useStrategyMetricsSummary(params: {
       const { getStrategyMetricOpportunities, getStrategyMetricsSummary } = await import("@/lib/api");
       const [summaryData, opportunityData] = await Promise.all([
         getStrategyMetricsSummary(params),
-        getStrategyMetricOpportunities({ ...params, limit: 200 }),
+        getStrategyMetricOpportunities({ ...params, limit: pageSize }),
       ]);
       setSummary(summaryData);
       setOpportunities(opportunityData);
@@ -288,14 +290,33 @@ export function useStrategyMetricsSummary(params: {
     } finally {
       setLoading(false);
     }
-  }, [params]);
+  }, [params, pageSize]);
+
+  const loadMore = useCallback(async () => {
+    if (!params.start || !params.end || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const { getStrategyMetricOpportunities } = await import("@/lib/api");
+      const next = await getStrategyMetricOpportunities({
+        ...params,
+        limit: pageSize,
+        offset: opportunities.length,
+      });
+      setOpportunities((current) => [...current, ...next]);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load strategy metrics");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, opportunities.length, params, pageSize]);
 
   useEffect(() => {
     const id = window.setTimeout(() => { void refresh(); }, 0);
     return () => window.clearTimeout(id);
   }, [refresh]);
 
-  return { summary, opportunities, error, loading, refresh };
+  return { summary, opportunities, error, loading, loadingMore, loadMore, refresh };
 }
 
 export function useStrategyMetricsComparison(params: {

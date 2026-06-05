@@ -196,10 +196,22 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 start = self._get_query_param("start")
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
+                strategy = self._get_query_param("strategy")
+                signal_type = self._get_query_param("signal_type")
+                decision = self._get_query_param("decision")
+                first_blocker = self._get_query_param("first_blocker")
                 if not start or not end:
                     self._send_json({"error": "start and end are required"}, 400)
                     return
-                self._send_json(get_summary(start, end, symbol=symbol or None))
+                self._send_json(get_summary(
+                    start,
+                    end,
+                    symbol=symbol or None,
+                    strategy=strategy or None,
+                    signal_type=signal_type or None,
+                    decision=decision or None,
+                    first_blocker=first_blocker or None,
+                ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
             except Exception as e:
@@ -213,8 +225,12 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
                 decision = self._get_query_param("decision")
+                strategy = self._get_query_param("strategy")
+                signal_type = self._get_query_param("signal_type")
+                first_blocker = self._get_query_param("first_blocker")
                 near_miss_param = self._get_query_param("near_miss")
                 limit = int(self._get_query_param("limit") or 100)
+                offset = int(self._get_query_param("offset") or 0)
                 near_miss = None
                 if near_miss_param is not None:
                     near_miss = near_miss_param.lower() == "true"
@@ -226,8 +242,12 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     end,
                     symbol=symbol or None,
                     decision=decision or None,
+                    strategy=strategy or None,
+                    signal_type=signal_type or None,
+                    first_blocker=first_blocker or None,
                     near_miss=near_miss,
                     limit=limit,
+                    offset=offset,
                 ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
@@ -259,11 +279,24 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 start = self._get_query_param("start")
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
+                strategy = self._get_query_param("strategy")
+                signal_type = self._get_query_param("signal_type")
+                decision = self._get_query_param("decision")
+                first_blocker = self._get_query_param("first_blocker")
                 include = (self._get_query_param("include_opportunities") or "false").lower() == "true"
                 if not start or not end:
                     self._send_json({"error": "start and end are required"}, 400)
                     return
-                self._send_json(export_summary(start, end, symbol=symbol or None, include_opportunities=include))
+                self._send_json(export_summary(
+                    start,
+                    end,
+                    symbol=symbol or None,
+                    strategy=strategy or None,
+                    signal_type=signal_type or None,
+                    decision=decision or None,
+                    first_blocker=first_blocker or None,
+                    include_opportunities=include,
+                ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
             except Exception as e:
