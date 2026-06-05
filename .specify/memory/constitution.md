@@ -1,22 +1,24 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: 1.3.0 -> 1.3.1 (PATCH: Pull Request Policy clarified to require
-  every GitHub comment to start with "Dock,")
+  Version change: 1.3.1 -> 2.0.0 (MAJOR: Signal Integrity and Pull Request Policy
+  enforcement relaxed through explicit, documented exception paths)
   Modified principles:
-    - Pull Request Policy -> Pull Request Policy (expanded with GitHub comment
-      salutation requirement)
+    - Signal Integrity -> Signal Integrity (allows approved strategy-version
+      specifications to redefine indicator role while documenting the exception)
+    - Pull Request Policy -> Pull Request Policy (reviewer must be identified by the
+      user or feature context; fixed reviewer and comment salutation requirements removed)
   Added sections: None
   Removed sections: None
   Templates requiring updates:
     - Updated: .specify/templates/plan-template.md (Pull Request Policy gate now
-      includes DockeGumi reviewer and GitHub comment salutation requirements)
+      requires user/context-identified reviewer handling)
     - Reviewed: .specify/templates/spec-template.md (no impact; requirements stay
       product-focused)
-    - Updated: .specify/templates/tasks-template.md (final PR task now includes the
-      DockeGumi reviewer and GitHub comment salutation requirements)
-    - Updated: .specify/templates/checklist-template.md (added Pull Request Policy
-      checklist sample item)
+    - Updated: .specify/templates/tasks-template.md (final PR task now asks for the
+      user/context-identified reviewer)
+    - Updated: .specify/templates/checklist-template.md (Pull Request Policy sample
+      now checks user/context-identified reviewer handling)
     - Reviewed: .specify/templates/commands/ (no command files present)
     - Reviewed: README.md and docs/private-strategies.md (no runtime guidance update
       required)
@@ -41,8 +43,12 @@ Layer execution order is fixed:
 - **Layer 0 - Trend Filter**: 15m + 5m LR slopes must agree on direction.
 - **Layer 1 - Pre-Session Scanner**: Symbol must be Tier 1 (or explicitly Tier 2 with
   justification). Below-threshold symbols MUST be skipped.
-- **Layer 2 - Signal Stack**: StochRSI + MACD + Keltner Channel must all confirm.
-  Candlestick confirmation is optional but counted in confidence scoring.
+- **Layer 2 - Signal Stack**: StochRSI + MACD + Keltner Channel must all confirm by
+  default. An approved strategy-version specification MAY define a narrower role for an
+  indicator, such as soft-scoring MACD for pullback entries, only when the spec and plan
+  document the exception, provide compensating required gates, and include test coverage
+  proving signal integrity is preserved. Candlestick confirmation is optional unless a
+  strategy-version specification makes it a required gate.
 - **Layer 3 - Risk Management**: Position size, daily loss limit, and max drawdown checks
   must pass before an order is placed.
 
@@ -203,16 +209,15 @@ MUST pass the Constitution Check gate in `plan.md` before Phase 0 research begin
 
 ### Pull Request Policy
 
-All PRs MUST request **DockeGumi** as a reviewer before merging. No PR may be merged
-without DockeGumi's review approval.
+All PRs MUST request a reviewer before merging. The reviewer MUST be identified by the
+user, the feature specification, the task list, or another explicit project-context
+instruction before the PR is opened. No PR may be merged without the requested review
+approval.
 
-Every GitHub comment authored for this repository MUST start with `Dock,` exactly. This
-applies to PR comments, issue comments, review replies, CI/debug comments, and any other
-GitHub conversation text posted by maintainers, agents, or automation acting on the
-project's behalf.
+Every task list generated for a feature MUST include a final task to submit the PR with
+the identified reviewer. If no reviewer has been identified by the time tasks are
+generated, the final task MUST state that the implementer must ask the user to identify
+the reviewer before opening the PR. This task is non-optional and MUST appear in the
+Polish phase of every `tasks.md`.
 
-Every task list generated for a feature MUST include **"Submit PR with DockeGumi as
-reviewer"** as the final task. This task is non-optional and MUST appear in the Polish
-phase of every `tasks.md`.
-
-**Version**: 1.3.1 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-05-30
+**Version**: 2.0.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-06-05

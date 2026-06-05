@@ -79,6 +79,8 @@ def format_signal_message(signal: Signal) -> dict:
         title = f"{'🟢' if dirn == 'BUY' else '🔴'} {sym} {dirn}"
         desc  = f"Confidence: **{conf_pct}%** | Risk: {signal.risk_pct:.2f}%"
         fields = [
+            {"name": "Strategy", "value": getattr(signal, "strategy", "CTI-v1"), "inline": True},
+            {"name": "Signal Type", "value": getattr(signal, "signal_type", "pullback"), "inline": True},
             {"name": "Buy Price",   "value": str(signal.entry_price), "inline": True},
             {"name": "Stop Loss",   "value": str(signal.stop_loss), "inline": True},
             {"name": "Take Profit", "value": str(signal.take_profit), "inline": True},

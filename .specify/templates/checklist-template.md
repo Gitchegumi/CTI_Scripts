@@ -40,7 +40,7 @@
 
 ## Pull Request Policy
 
-- [ ] CHKXXX PR requests DockeGumi as reviewer and every GitHub comment starts with `Dock,`
+- [ ] CHKXXX PR requests the user/context-identified reviewer before merge
 
 ## Notes
 

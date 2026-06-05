@@ -237,6 +237,7 @@ class DiagnosticSummary:
     threshold_version_counts: dict[str, int] = field(default_factory=dict)
     strategy_counts: dict[str, int] = field(default_factory=dict)
     signal_type_counts: dict[str, int] = field(default_factory=dict)
+    pullback_summary: dict[str, Any] = field(default_factory=dict)
     threshold_version_unknown_reasons: dict[str, int] = field(default_factory=dict)
     near_miss_reason_counts: dict[str, int] = field(default_factory=dict)
     pipeline_funnel: dict[str, int] = field(default_factory=dict)
@@ -1123,6 +1124,106 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
     }
 
 
+def _is_pullback_identity(strategy: Any, signal_type: Any) -> bool:
+    """Return whether a strategy/signal identity represents a pullback setup."""
+    strategy_name = str(strategy or "").lower()
+    signal_type_name = str(signal_type or "").lower()
+    return signal_type_name == "pullback" or "pullback" in strategy_name
+
+
+def _journaled_pullback_summary(start_iso: str, end_iso: str, symbol: Optional[str] = None) -> dict[str, int]:
+    """Count journaled and prime-suppressed pullbacks from Signal Journal rows."""
+    try:
+        from tradegumi import journal as signal_journal
+
+        with signal_journal._lock:
+            entries = signal_journal._read_entries_oldest_first()
+    except Exception:
+        return {"journaled_count": 0, "prime_suppressed_count": 0}
+
+    start_dt = _parse_dt(start_iso)
+    end_dt = _parse_dt(end_iso)
+    symbol_key = symbol.upper() if symbol else None
+    journaled_count = 0
+    prime_suppressed_count = 0
+
+    for entry in entries:
+        entry_symbol = str(entry.get("symbol") or "").upper()
+        if symbol_key and entry_symbol != symbol_key:
+            continue
+        timestamp = _journal_timestamp(entry)
+        if timestamp is not None and not (start_dt <= timestamp < end_dt):
+            continue
+        if _is_pullback_identity(entry.get("strategy"), entry.get("signal_type")):
+            journaled_count += 1
+        suppressed_outcomes = entry.get("prime_suppressed_signal_outcomes")
+        if not isinstance(suppressed_outcomes, list):
+            continue
+        for outcome in suppressed_outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            outcome_symbol = str(outcome.get("symbol") or entry_symbol).upper()
+            if symbol_key and outcome_symbol != symbol_key:
+                continue
+            if _is_pullback_identity(outcome.get("strategy"), outcome.get("signal_type")):
+                prime_suppressed_count += 1
+
+    return {"journaled_count": journaled_count, "prime_suppressed_count": prime_suppressed_count}
+
+
+def _pullback_summary(conn: sqlite3.Connection, where_sql: str, params: list[Any], start_iso: str, end_iso: str, symbol: Optional[str]) -> dict[str, Any]:
+    """Aggregate pullback outcomes and stable blockers for operator reports."""
+    pullback_criteria = (
+        "pullback_trigger_candle",
+        "keltner_pullback_sequence",
+        "pullback_structure",
+        "pullback_15m_bridge",
+        "pullback_macd_hard_block",
+    )
+    placeholders = ", ".join("?" for _ in pullback_criteria)
+    pullback_sql = (
+        f"{where_sql} AND ("
+        "o.signal_type = 'pullback' OR LOWER(o.strategy) LIKE '%pullback%' OR "
+        f"EXISTS (SELECT 1 FROM criterion_results pc WHERE pc.opportunity_id = o.id AND pc.criterion_name IN ({placeholders}))"
+        ")"
+    )
+    pullback_params = [*params, *pullback_criteria]
+    totals = conn.execute(
+        f"""
+        SELECT
+            COUNT(*) AS evaluated_count,
+            SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+            SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS emitted_count,
+            SUM(CASE WHEN o.near_miss = 1 THEN 1 ELSE 0 END) AS near_miss_count
+        FROM evaluated_opportunities o
+        WHERE {pullback_sql}
+        """,
+        pullback_params,
+    ).fetchone()
+    blocker_rows = conn.execute(
+        f"""
+        SELECT CAST(blocker.value AS TEXT) AS blocker, COUNT(DISTINCT o.id) AS count
+        FROM evaluated_opportunities o
+        JOIN json_each(o.all_blockers) blocker
+        WHERE {pullback_sql}
+          AND o.final_decision = 'rejected'
+        GROUP BY CAST(blocker.value AS TEXT)
+        ORDER BY count DESC, blocker ASC
+        """,
+        pullback_params,
+    ).fetchall()
+    journal_counts = _journaled_pullback_summary(start_iso, end_iso, symbol)
+    return {
+        "evaluated_count": int(totals["evaluated_count"] or 0) if totals else 0,
+        "rejected_count": int(totals["rejected_count"] or 0) if totals else 0,
+        "emitted_count": int(totals["emitted_count"] or 0) if totals else 0,
+        "near_miss_count": int(totals["near_miss_count"] or 0) if totals else 0,
+        "journaled_count": journal_counts["journaled_count"],
+        "prime_suppressed_count": journal_counts["prime_suppressed_count"],
+        "rejected_by_gate": {str(row["blocker"]): int(row["count"] or 0) for row in blocker_rows if row["blocker"]},
+    }
+
+
 def _count_by(conn: sqlite3.Connection, column: str, where_sql: str, params: list[Any], *, fallback: str = "unknown") -> dict[str, int]:
     rows = conn.execute(
         f"""
@@ -1298,6 +1399,7 @@ def get_summary(
             threshold_version_counts=threshold_version_counts,
             strategy_counts=strategy_counts,
             signal_type_counts=signal_type_counts,
+            pullback_summary=_pullback_summary(conn, where_sql, params, start_iso, end_iso, symbol),
             threshold_version_unknown_reasons=threshold_version_unknown_reasons,
             near_miss_reason_counts=near_miss_reason_counts,
             pipeline_funnel=_pipeline_funnel(conn, where_sql, params, total),

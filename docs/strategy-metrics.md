@@ -52,6 +52,12 @@ Required criteria that cannot evaluate because data is missing or malformed also
 
 `rejected` does not include opportunities that are merely waiting for a candle to close or unable to evaluate because required data is missing. Those are classified as skipped or indeterminate according to the blocker.
 
+## Pullback Summary
+
+`pullback_summary` provides a strategy-specific rollup for `CTI-v1.2-pullback` diagnostics. It counts evaluated, rejected, near-miss, emitted, journaled, and prime-suppressed pullbacks, and groups rejected pullbacks by stable gate blocker names such as `pullback_trigger_candle_failed`, `pullback_kc_sequence_failed`, `pullback_stoch_rsi_failed`, and `pullback_structure_failed`.
+
+The rollup uses explicit `signal_type=pullback`, pullback strategy names, or persisted pullback criterion names so legacy diagnostic rows remain reportable when possible.
+
 ## Signal Engine Data
 
 `signal_engine_data` describes whether the signal stack had enough data to evaluate a directional trend candidate. Missing inputs keep the final decision indeterminate and use stable blockers such as `signal_engine_data:missing`.

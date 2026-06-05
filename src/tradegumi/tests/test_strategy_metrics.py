@@ -129,6 +129,37 @@ def test_threshold_version_includes_pullback_thresholds(monkeypatch):
     assert get_threshold_version() != before
 
 
+def test_threshold_version_includes_pullback_trigger_and_macd_settings(monkeypatch):
+    import tradegumi.config as config_module
+
+    before = get_threshold_version()
+    monkeypatch.setattr(
+        config_module,
+        "PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO",
+        config_module.PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO + 0.01,
+        raising=False,
+    )
+    assert get_threshold_version() != before
+
+    before = get_threshold_version()
+    monkeypatch.setattr(
+        config_module,
+        "PULLBACK_STOCH_MEMORY_BARS",
+        config_module.PULLBACK_STOCH_MEMORY_BARS + 1,
+        raising=False,
+    )
+    assert get_threshold_version() != before
+
+    before = get_threshold_version()
+    monkeypatch.setattr(
+        config_module,
+        "PULLBACK_MACD_HARD_BLOCK_ENABLED",
+        not config_module.PULLBACK_MACD_HARD_BLOCK_ENABLED,
+        raising=False,
+    )
+    assert get_threshold_version() != before
+
+
 def test_additive_pipeline_fields_round_trip_and_json_compatible():
     db = temp_db()
     cr = CriterionResult(
@@ -1032,3 +1063,130 @@ def test_strategy_and_signal_type_counts_are_summarized():
     assert summary["strategy_counts"]["CTI-v1.2-pullback"] == 1
     assert summary["signal_type_counts"]["continuation"] == 1
     assert summary["signal_type_counts"]["pullback"] == 1
+
+
+def test_pullback_summary_counts_outcomes_blockers_and_journal_visibility(tmp_path, monkeypatch):
+    db = temp_db()
+    journal_file = tmp_path / "signal_journal.jsonl"
+    monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
+    journal_file.write_text(
+        "\n".join(
+            [
+                (
+                    '{"signal_id":"journaled-pullback","symbol":"EURUSD","strategy":"CTI-v1.2-pullback",'
+                    '"signal_type":"pullback","signal_timestamp":"2026-06-03T12:00:00+00:00"}'
+                ),
+                (
+                    '{"signal_id":"prime","symbol":"EURUSD","strategy":"CTI-v1.2-pullback","signal_type":"pullback",'
+                    '"signal_timestamp":"2026-06-03T12:05:00+00:00","prime_suppressed_signal_count":1,'
+                    '"prime_suppressed_signal_outcomes":[{"signal_id":"suppressed-pullback","symbol":"EURUSD",'
+                    '"strategy":"CTI-v1.2-pullback","signal_type":"pullback","outcome":"invalidated_by_prime"}]}'
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record_opportunity(
+        EvaluatedOpportunity(
+            id="pullback-rejected",
+            evaluated_at="2026-06-03T12:00:00+00:00",
+            symbol="EURUSD",
+            strategy="CTI-v1.2-pullback",
+            signal_type="pullback",
+            final_decision="rejected",
+            decision_reason="criteria_failed",
+            threshold_version="pullback-v1",
+            criteria=[
+                CriterionResult(
+                    criterion_name="pullback_trigger_candle",
+                    layer="signal_stack",
+                    measured_value={"body_to_range": 0.72},
+                    threshold_value={"max_body_to_range": 0.55},
+                    passed=False,
+                    required=True,
+                    reason="pullback_trigger_candle_failed",
+                    context={"pattern": "hammer", "rejection_wick_ratio": 0.18},
+                )
+            ],
+        ),
+        db,
+    )
+    record_opportunity(
+        EvaluatedOpportunity(
+            id="pullback-emitted",
+            evaluated_at="2026-06-03T12:10:00+00:00",
+            symbol="EURUSD",
+            strategy="CTI-v1.2-pullback",
+            signal_type="pullback",
+            final_decision="emitted",
+            decision_reason="emitted",
+            threshold_version="pullback-v1",
+            criteria=[
+                CriterionResult(
+                    criterion_name="pullback_trigger_candle",
+                    layer="signal_stack",
+                    measured_value={"body_to_range": 0.2},
+                    threshold_value={"max_body_to_range": 0.55},
+                    passed=True,
+                    required=True,
+                    context={"pattern": "hammer", "rejection_wick_ratio": 0.72},
+                )
+            ],
+        ),
+        db,
+    )
+
+    summary = get_summary("2026-06-01", "2026-06-05", db_path=db)
+
+    assert summary["pullback_summary"]["evaluated_count"] == 2
+    assert summary["pullback_summary"]["rejected_count"] == 1
+    assert summary["pullback_summary"]["near_miss_count"] == 1
+    assert summary["pullback_summary"]["emitted_count"] == 1
+    assert summary["pullback_summary"]["journaled_count"] == 2
+    assert summary["pullback_summary"]["prime_suppressed_count"] == 1
+    assert summary["pullback_summary"]["rejected_by_gate"] == {"pullback_trigger_candle_failed": 1}
+
+
+def test_pullback_opportunity_rows_preserve_context_and_blockers():
+    db = temp_db()
+    record_opportunity(
+        EvaluatedOpportunity(
+            id="pullback-context",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            strategy="CTI-v1.2-pullback",
+            signal_type="pullback",
+            final_decision="rejected",
+            decision_reason="criteria_failed",
+            threshold_version="pullback-v2",
+            criteria=[
+                CriterionResult(
+                    criterion_name="pullback_trigger_candle",
+                    layer="signal_stack",
+                    measured_value={"body_to_range": 0.61},
+                    threshold_value={"max_body_to_range": 0.55},
+                    passed=False,
+                    required=True,
+                    reason="pullback_trigger_candle_failed",
+                    context={
+                        "pattern": "shooting_star",
+                        "body_to_range": 0.61,
+                        "value_area_relation": "above_midline",
+                    },
+                )
+            ],
+        ),
+        db,
+    )
+
+    row = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+
+    assert row["strategy"] == "CTI-v1.2-pullback"
+    assert row["signal_type"] == "pullback"
+    assert row["threshold_version"] == "pullback-v2"
+    assert row["first_blocker"] == "pullback_trigger_candle_failed"
+    assert row["all_blockers"] == ["pullback_trigger_candle_failed"]
+    assert row["criteria"][0]["context"]["pattern"] == "shooting_star"
+    assert row["criteria"][0]["context"]["value_area_relation"] == "above_midline"

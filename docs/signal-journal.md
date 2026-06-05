@@ -44,6 +44,7 @@ Prime records include:
 - `prime_suppressed_signal_count` counts follow-on signals suppressed by this prime.
 - `prime_suppressed_last_at` records the latest suppressed signal timestamp.
 - `prime_suppressed_same_direction_count` and `prime_suppressed_opposite_direction_count` summarize repeated firing and chop symptoms when available.
+- `prime_suppressed_signal_outcomes` preserves each suppressed signal's identity, including strategy, signal type, and pullback trigger context when available.
 - `prime_closed_reason`, `prime_closed_at`, and `prime_close_ambiguous` record inferred or manual prime resolution.
 
 Before suppressing a follow-on signal, the journal checks market candles carried by the emitted signal to infer whether the active prime touched its take profit or stop loss. BUY primes close by target when candle high reaches take profit and by stop when candle low reaches stop loss. SELL primes close by target when candle low reaches take profit and by stop when candle high reaches stop loss. If both are touched in the same candle, the journal records conservative stop-first closure and marks the close ambiguous.
