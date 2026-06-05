@@ -476,6 +476,52 @@ class TestTopBlockers:
         assert len(summary["top_blockers"]) > 0
         assert summary["top_blockers"][0]["criterion_name"] == "trend_1h"
 
+    def test_top_blocker_quality_component_uses_other_required_criteria(self):
+        db = temp_db()
+        init_schema(db)
+        opp = EvaluatedOpportunity(
+            id="opp-quality",
+            evaluated_at=iso(),
+            symbol="EURUSD",
+            final_decision="rejected",
+            decision_reason="criteria_failed",
+            criteria=[
+                CriterionResult(
+                    criterion_name="stoch_rsi",
+                    layer="signal_stack",
+                    measured_value=10,
+                    threshold_value=20,
+                    threshold_operator="gte",
+                    passed=False,
+                    normalized_margin=0.25,
+                    required=True,
+                ),
+                CriterionResult(
+                    criterion_name="macd",
+                    layer="signal_stack",
+                    measured_value=0.1,
+                    threshold_value="histogram improves",
+                    passed=True,
+                    required=True,
+                ),
+                CriterionResult(
+                    criterion_name="keltner",
+                    layer="signal_stack",
+                    measured_value=1.1,
+                    threshold_value="band breach",
+                    passed=True,
+                    required=True,
+                ),
+            ],
+        )
+        record_opportunity(opp, db)
+
+        blocker = get_summary(iso(-1), iso(1), db_path=db)["top_blockers"][0]
+
+        assert blocker["criterion_name"] == "stoch_rsi"
+        assert blocker["quality_component"] == 1.0
+        assert blocker["combined_score"] > 0.7
+
     def test_blockers_require_rejected_decision(self):
         db = temp_db()
         init_schema(db)

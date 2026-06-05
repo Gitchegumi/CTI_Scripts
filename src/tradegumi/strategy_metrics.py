@@ -931,12 +931,24 @@ def _blocker_summaries(conn: sqlite3.Connection, where_sql: str, params: list[An
                 WHEN ABS(c.normalized_margin) > 1.0 THEN 0.0
                 ELSE 1.0 - ABS(c.normalized_margin)
             END) AS margin_component,
+            AVG(CASE
+                WHEN req.total_required > 1 THEN CAST(req.passed_required AS REAL) / (req.total_required - 1)
+                ELSE 0.0
+            END) AS quality_component,
             GROUP_CONCAT(DISTINCT o.id) AS example_ids
         FROM evaluated_opportunities o
         JOIN json_each(o.all_blockers) blocker
         LEFT JOIN criterion_results c
             ON c.opportunity_id = o.id
            AND c.criterion_name = CAST(blocker.value AS TEXT)
+        LEFT JOIN (
+            SELECT opportunity_id,
+                   COUNT(*) AS total_required,
+                   SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) AS passed_required
+            FROM criterion_results
+            WHERE required = 1
+            GROUP BY opportunity_id
+        ) req ON req.opportunity_id = o.id
         WHERE {where_sql}
           AND o.all_blockers != '[]'
         GROUP BY CAST(blocker.value AS TEXT)
@@ -946,10 +958,10 @@ def _blocker_summaries(conn: sqlite3.Connection, where_sql: str, params: list[An
         params,
     ).fetchall()
     result = []
-    for name, blocked_count, margin_component, example_ids in rows:
+    for name, blocked_count, margin_component, quality_component, example_ids in rows:
         frequency = int(blocked_count or 0) / blocked_opportunity_count
         margin = 0.0 if margin_component is None else max(0.0, min(1.0, float(margin_component)))
-        quality = 0.0
+        quality = 0.0 if quality_component is None else max(0.0, min(1.0, float(quality_component)))
         combined = (frequency * 0.40) + (margin * 0.30) + (quality * 0.30)
         examples = sorted(str(example_ids or "").split(","))[:5]
         result.append(
