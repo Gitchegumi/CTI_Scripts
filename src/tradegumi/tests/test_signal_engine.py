@@ -1184,6 +1184,243 @@ class TestPullbackBridgeAndVersioning:
         assert hard_block.blocked_signal is True
         assert hard_block.reason == "pullback_macd_hard_block_failed"
 
+    def test_high_value_pullback_partial_retracement_buy(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Uptrend", trigger="CDL_HAMMER")
+        
+        mid = 1.0900
+        upper = [1.1000] * count
+        upper[-8] = 1.0920
+        lower = [1.0800] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.signal_type == "high_value_pullback"
+        assert signal.strategy == "CTI-v1.2-pullback"
+
+    def test_high_value_pullback_partial_retracement_sell(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1100, step=-0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Downtrend", trigger="CDL_SHOOTINGSTAR")
+        
+        mid = 1.1100
+        upper = [1.1200] * count
+        lower = [1.1000] * count
+        lower[-8] = 1.1080
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [-0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [-0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Downtrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.signal_type == "high_value_pullback"
+        assert signal.strategy == "CTI-v1.2-pullback"
+
+    def test_high_value_pullback_remains_outside_band_buy(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Uptrend", trigger="CDL_HAMMER")
+        
+        mid = 1.0800
+        upper = [1.0900] * count
+        lower = [1.0700] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.signal_type == "high_value_pullback"
+        assert signal.strategy == "CTI-v1.2-pullback"
+
+    def test_high_value_pullback_remains_outside_band_sell(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1100, step=-0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Downtrend", trigger="CDL_SHOOTINGSTAR")
+        
+        mid = 1.1200
+        upper = [1.1300] * count
+        lower = [1.1100] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [-0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [-0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Downtrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.signal_type == "high_value_pullback"
+        assert signal.strategy == "CTI-v1.2-pullback"
+
+    def test_high_value_pullback_rejected_by_macd_histogram_buy(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Uptrend", trigger="CDL_HAMMER")
+        
+        mid = 1.0800
+        upper = [1.0900] * count
+        lower = [1.0700] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [-0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [-0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+
+    def test_high_value_pullback_rejected_by_macd_histogram_sell(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.1100, step=-0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Downtrend", trigger="CDL_SHOOTINGSTAR")
+        
+        mid = 1.1200
+        upper = [1.1300] * count
+        lower = [1.1100] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+        
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_macd",
+            lambda df, fast, slow, signal: pd.DataFrame({
+                "macd": [0.001] * count,
+                "signal": [0.0] * count,
+                "histogram": [0.001] * count,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Downtrend", allow_continuation=False)
+
+        assert signal is None
+        assert reason == "criteria_failed"
+
+    def test_standard_midline_pullback_regression(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = trend_candles(count, now, start=1.0900, step=0.0004)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}))
+        
+        self._patch_pullback_indicators(monkeypatch, count, trend="Uptrend", trigger="CDL_HAMMER")
+        
+        mid = 1.1000
+        upper = [1.1150] * count
+        upper[-8] = 1.1020
+        lower = [1.0850] * count
+        monkeypatch.setattr(
+            "tradegumi.signal_engine.calculate_keltner_channels",
+            lambda df, length, multiplier, mamode: pd.DataFrame({
+                "upper": upper,
+                "mid": [mid] * count,
+                "lower": lower,
+            }),
+        )
+
+        signal, criteria, reason, _ = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
+
+        assert signal is not None, reason
+        assert signal.signal_type == "pullback"
+        assert signal.strategy == "CTI-v1.2-pullback"
+
 
 class TestClassifyTrendBias:
     """classify_trend_bias: 1H+15M define bias, 5M is timing only (not hard disqualification)."""
