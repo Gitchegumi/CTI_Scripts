@@ -548,8 +548,9 @@ def _pullback_keltner_sequence(
     kc_upper_col: str,
     kc_lower_col: str,
     kc_mid_col: str,
+    macd_current: Optional[float] = None,
 ) -> dict:
-    """Validate prior outer-band break followed by a midline pullback."""
+    """Validate prior outer-band break followed by a midline pullback or high-value pullback."""
     lookback = max(2, min(config.PULLBACK_KC_BREAK_LOOKBACK_BARS, len(df)))
     price_window = df.iloc[-lookback:]
     kc_window = kc.iloc[-lookback:]
@@ -573,12 +574,20 @@ def _pullback_keltner_sequence(
         lower_band = kc_window[kc_lower_col].iloc[:-1].to_numpy()
         prior_break = bool((lows <= lower_band).any())
 
-    passed = prior_break and near_midline
+    is_high_value = False
+    if macd_current is not None:
+        if trend == "Uptrend":
+            is_high_value = bool(prior_break and trigger_close > midline and macd_current > 0)
+        else:
+            is_high_value = bool(prior_break and trigger_close < midline and macd_current < 0)
+
+    passed = prior_break and (near_midline or is_high_value)
     return {
         "passed": passed,
         "reason": "pullback_kc_sequence_ok" if passed else "pullback_kc_sequence_failed",
         "prior_break": prior_break,
         "near_midline": near_midline,
+        "is_high_value": bool(is_high_value and not near_midline),
         "trigger_close": trigger_close,
         "midline": midline,
         "distance_to_midline": distance_to_midline,
@@ -1965,7 +1974,7 @@ class SignalEngine:
 
         structure_result = _pullback_structure(df, trend)
         keltner_result = _pullback_keltner_sequence(
-            df, kc, trend, float(atr), kc_upper_col, kc_lower_col, kc_mid_col
+            df, kc, trend, float(atr), kc_upper_col, kc_lower_col, kc_mid_col, macd_current=macd_current
         )
         trigger_result = _pullback_trigger(
             patterns_df,
@@ -2096,7 +2105,7 @@ class SignalEngine:
             trend_direction=trend,
             patterns_found=identified,
             strategy=PULLBACK_STRATEGY_VERSION,
-            signal_type="pullback",
+            signal_type="high_value_pullback" if keltner_result.get("is_high_value", False) else "pullback",
             pullback_trigger=trigger_result["trigger"],
             pullback_bridge_status=pullback_bridge_status,
             pullback_rejection_reason=None,

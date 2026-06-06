@@ -23,7 +23,7 @@
 
 **Purpose**: Verify dependencies and test environment readiness
 
-- [ ] T001 Verify virtual environment and dev dependencies (pytest) in src/pyproject.toml
+- [x] T001 Verify virtual environment and dev dependencies (pytest) in src/pyproject.toml
 
 ---
 
@@ -31,7 +31,7 @@
 
 **Purpose**: Ensure the existing test suite compiles and runs before changes
 
-- [ ] T002 Verify existing test suite runs successfully via pytest
+- [x] T002 Verify existing test suite runs successfully via pytest
 
 **Checkpoint**: Foundation ready - user story implementation can now begin
 
@@ -44,13 +44,13 @@
 **Independent Test**: Replay scenario where price breaks below lower band, retraces up to cross the band but turns back down before midline, with negative MACD histogram and bearish trigger. Verifies SELL `high_value_pullback` is emitted.
 
 ### Tests for User Story 1
-- [ ] T003 [P] [US1] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying BUY and SELL high_value_pullback signals for partial retracements inside outer band but before midline
-- [ ] T004 [US1] Verify T003 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
+- [x] T003 [P] [US1] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying BUY and SELL high_value_pullback signals for partial retracements inside outer band but before midline
+- [x] T004 [US1] Verify T003 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
 
 ### Implementation for User Story 1
-- [ ] T005 [US1] Update _pullback_keltner_sequence to accept macd_current parameter and evaluate high-value pullback conditions for partial retracements in src/tradegumi/signal_engine.py
-- [ ] T006 [US1] Update core pullback signal evaluation in _get_signal to pass macd_current to _pullback_keltner_sequence and classify signal_type as "high_value_pullback" in src/tradegumi/signal_engine.py
-- [ ] T007 [US1] Verify T003 tests pass after implementation in src/tradegumi/tests/test_signal_engine.py
+- [x] T005 [US1] Update _pullback_keltner_sequence to accept macd_current parameter and evaluate high-value pullback conditions for partial retracements in src/tradegumi/signal_engine.py
+- [x] T006 [US1] Update core pullback signal evaluation in _get_signal to pass macd_current to _pullback_keltner_sequence and classify signal_type as "high_value_pullback" in src/tradegumi/signal_engine.py
+- [x] T007 [US1] Verify T003 tests pass after implementation in src/tradegumi/tests/test_signal_engine.py
 
 **Checkpoint**: At this point, User Story 1 is fully functional and testable independently.
 
@@ -63,12 +63,12 @@
 **Independent Test**: Replay trend period where price breaks below lower KC band, forms trigger candle whose high remains below lower KC band, negative MACD histogram, verify SELL `high_value_pullback` is emitted.
 
 ### Tests for User Story 2
-- [ ] T008 [P] [US2] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying BUY and SELL high_value_pullback signals where price remains completely outside the outer KC band
-- [ ] T009 [US2] Verify T008 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
+- [x] T008 [P] [US2] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying BUY and SELL high_value_pullback signals where price remains completely outside the outer KC band
+- [x] T009 [US2] Verify T008 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
 
 ### Implementation for User Story 2
-- [ ] T010 [US2] Extend _pullback_keltner_sequence high-value sequence evaluation logic to cover the case where price remains outside the outer band in src/tradegumi/signal_engine.py
-- [ ] T011 [US2] Verify T008 tests pass successfully in src/tradegumi/tests/test_signal_engine.py
+- [x] T010 [US2] Extend _pullback_keltner_sequence high-value sequence evaluation logic to cover the case where price remains outside the outer band in src/tradegumi/signal_engine.py
+- [x] T011 [US2] Verify T008 tests pass successfully in src/tradegumi/tests/test_signal_engine.py
 
 **Checkpoint**: At this point, User Stories 1 and 2 work independently.
 
@@ -81,12 +81,12 @@
 **Independent Test**: Replay trend period where price remains outside outer band, but MACD histogram is >= 0 for a short. Verify no signal is emitted.
 
 ### Tests for User Story 3
-- [ ] T012 [P] [US3] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying that high-value pullback setups are rejected when the MACD histogram is not aligned with the trend direction
-- [ ] T013 [US3] Verify T012 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
+- [x] T012 [P] [US3] Write test cases in src/tradegumi/tests/test_signal_engine.py verifying that high-value pullback setups are rejected when the MACD histogram is not aligned with the trend direction
+- [x] T013 [US3] Verify T012 tests fail as expected without implementation in src/tradegumi/tests/test_signal_engine.py
 
 ### Implementation for User Story 3
-- [ ] T014 [US3] Ensure MACD histogram check is strictly enforced for the high_value_pullback path in src/tradegumi/signal_engine.py
-- [ ] T015 [US3] Verify T012 tests pass successfully in src/tradegumi/tests/test_signal_engine.py
+- [x] T014 [US3] Ensure MACD histogram check is strictly enforced for the high_value_pullback path in src/tradegumi/signal_engine.py
+- [x] T015 [US3] Verify T012 tests pass successfully in src/tradegumi/tests/test_signal_engine.py
 
 **Checkpoint**: Momentum verification logic is fully functional and testable.
 
@@ -99,8 +99,8 @@
 **Independent Test**: Replay standard midline pullback and verify it is classified as `signal_type="pullback"`.
 
 ### Tests and Implementation for User Story 4
-- [ ] T016 [P] [US4] Write regression tests in src/tradegumi/tests/test_signal_engine.py ensuring standard midline pullbacks are still classified with signal_type="pullback"
-- [ ] T017 [US4] Verify all regression tests pass successfully in src/tradegumi/tests/test_signal_engine.py
+- [x] T016 [P] [US4] Write regression tests in src/tradegumi/tests/test_signal_engine.py ensuring standard midline pullbacks are still classified with signal_type="pullback"
+- [x] T017 [US4] Verify all regression tests pass successfully in src/tradegumi/tests/test_signal_engine.py
 
 **Checkpoint**: All user stories are independently functional.
 
@@ -110,10 +110,10 @@
 
 **Purpose**: Code cleanup, documentation, and PR submission
 
-- [ ] T018 Review changed code in src/tradegumi/signal_engine.py for intention-revealing names, simple control flow, and no unexplained magic values
-- [ ] T019 Add or update Python docstrings for modified helper functions in src/tradegumi/signal_engine.py
-- [ ] T020 Run the entire test suite via pytest to verify no regression
-- [ ] T021 Submit PR with the user/context-identified reviewer, or ask the user to identify the reviewer before opening the PR
+- [x] T018 Review changed code in src/tradegumi/signal_engine.py for intention-revealing names, simple control flow, and no unexplained magic values
+- [x] T019 Add or update Python docstrings for modified helper functions in src/tradegumi/signal_engine.py
+- [x] T020 Run the entire test suite via pytest to verify no regression
+- [x] T021 Submit PR with GitcheGumi as reviewer, or ask the user to identify the reviewer before opening the PR
 
 ---
 
