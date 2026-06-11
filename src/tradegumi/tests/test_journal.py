@@ -406,6 +406,28 @@ def test_continuation_rejects_risk_increasing_sl_change(monkeypatch):
     assert decision.rejection_reason == journal.MANAGEMENT_REJECTED_RISK_INCREASE
 
 
+def test_continuation_rejects_zero_risk_context_without_division():
+    trade = {
+        "symbol": "EURUSD",
+        "direction": "BUY",
+        "entry_price": 1.1000,
+        "initial_stop_loss": 1.1000,
+        "current_stop_loss": 1.1000,
+        "current_take_profit": 1.1040,
+        "risk_at_entry": 0.0,
+        "management_events": [],
+    }
+
+    decision = journal._evaluate_management_event(
+        trade,
+        FakeSignal(signal_type="continuation", entry_price=1.1030, signal_price=1.1030),
+        "event-1",
+    )
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == "missing_management_context"
+
+
 def test_opposite_direction_continuation_records_warning(journal_file, monkeypatch):
     times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
     monkeypatch.setattr(journal, "_now_iso", lambda: next(times))

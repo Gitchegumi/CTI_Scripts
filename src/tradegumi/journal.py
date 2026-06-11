@@ -865,7 +865,7 @@ def _evaluate_management_event(trade: dict[str, Any], signal: Any, source_signal
         return TradeManagementDecision(False, MANAGEMENT_REJECTED_DISABLED, MANAGEMENT_REJECTED_DISABLED, old_sl, old_sl, old_tp, old_tp, price)
     if _management_event_seen(trade, source_signal_id):
         return TradeManagementDecision(False, MANAGEMENT_REJECTED_DUPLICATE_EVENT, MANAGEMENT_REJECTED_DUPLICATE_EVENT, old_sl, old_sl, old_tp, old_tp, price)
-    if old_sl is None or old_tp is None or entry_price is None or risk is None:
+    if old_sl is None or old_tp is None or entry_price is None or risk in (None, 0):
         return TradeManagementDecision(False, "missing_management_context", "missing_management_context", old_sl, old_sl, old_tp, old_tp, price)
     movement = _directional_movement(trade.get("direction"), entry_price, price)
     progress_r = None if movement is None else movement / risk
