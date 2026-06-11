@@ -39,6 +39,32 @@ function Warnings({ summary }: { summary: StrategyMetricsSummary | null }) {
   );
 }
 
+function ManagedLifecycleStats({ summary }: { summary: StrategyMetricsSummary | null }) {
+  const delta = summary?.managed_vs_original_result_delta;
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <Stat label="Pullback entries" value={summary?.pullback_entries_opened ?? 0} />
+      <Stat
+        label="Continuation events"
+        value={summary?.continuation_management_events_observed ?? 0}
+        sub={`${summary?.continuation_management_events_accepted ?? 0} accepted`}
+      />
+      <Stat label="Rejected mgmt" value={summary?.continuation_management_events_rejected ?? 0} />
+      <Stat
+        label="SL moves"
+        value={summary?.sl_tighten_count ?? 0}
+        sub={`${summary?.break_even_move_count ?? 0} break-even`}
+      />
+      <Stat label="TP extensions" value={summary?.tp_extension_count ?? 0} />
+      <Stat
+        label="Managed result"
+        value={`+${delta?.improved ?? 0} / -${delta?.worsened ?? 0}`}
+        sub={`avg R ${summary?.average_r_captured ?? "-"}`}
+      />
+    </div>
+  );
+}
+
 function Blockers({ blockers }: { blockers: StrategyBlockerSummary[] }) {
   if (!blockers.length) {
     return <div className="text-sm text-slate-500 py-6">No blockers ranked for this range.</div>;
@@ -215,6 +241,7 @@ export default function StrategyMetricsPage() {
               <Stat label="Near-miss" value={summary?.near_miss_count ?? 0} />
               <Stat label="Indeterminate" value={summary?.indeterminate_count ?? 0} />
             </div>
+            <ManagedLifecycleStats summary={summary} />
             <Blockers blockers={summary?.top_blockers ?? []} />
             <CriteriaTable summary={summary} />
             <div className="space-y-2">

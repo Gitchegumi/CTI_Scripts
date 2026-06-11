@@ -327,7 +327,7 @@ export default function SettingsPanel({ status }: SettingsPanelProps) {
                 ))}
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-slate-500">Type "purge" to confirm</label>
+                <label className="text-xs text-slate-500">Type &quot;purge&quot; to confirm</label>
                 <input
                   type="text"
                   value={purgeConfirmText}

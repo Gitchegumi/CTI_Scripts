@@ -11,6 +11,29 @@ from typing import Optional, Dict, Any
 import uuid
 
 
+def lifecycle_state_for_signal(signal: Any) -> Dict[str, Any]:
+    """Return dashboard JSON lifecycle fields for an emitted signal object.
+
+    The rolling `signals.json` file is intentionally lightweight, so this helper
+    mirrors the lifecycle role and managed price fields without performing
+    journal mutation or broker-specific work.
+    """
+    signal_type = str(getattr(signal, "signal_type", "pullback") or "pullback")
+    if signal_type == "continuation":
+        lifecycle_role = "management"
+    elif signal_type in {"pullback", "high_value_pullback"}:
+        lifecycle_role = "entry"
+    else:
+        lifecycle_role = "legacy_signal"
+    return {
+        "lifecycle_role": lifecycle_role,
+        "current_stop_loss": getattr(signal, "stop_loss", None),
+        "current_take_profit": getattr(signal, "take_profit", None),
+        "entry_signal_type": None if lifecycle_role == "management" else signal_type,
+        "source_signal_type": "continuation" if lifecycle_role == "management" else None,
+    }
+
+
 @dataclass
 class TradingSignal:
     """Validated trading signal from alert system."""

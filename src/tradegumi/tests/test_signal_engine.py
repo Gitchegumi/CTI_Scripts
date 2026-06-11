@@ -14,6 +14,9 @@ from tradegumi.signal_engine import (
     classify_pullback_trend_bridge,
 )
 from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
+from tradegumi import journal
+from tradegumi.signal_engine import Signal
+from tradegumi.signal_processor import lifecycle_state_for_signal
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 
 
@@ -75,6 +78,36 @@ def test_live_trigger_price_uses_latest_shared_observation():
 
     assert _live_trigger_price("ZZZUSD", "BUY", 1.0) == 1.2003
     assert _live_trigger_price("ZZZUSD", "SELL", 1.0) == 1.2
+
+
+def test_continuation_detection_state_is_preserved_without_entry_creation(tmp_path, monkeypatch):
+    journal_file = tmp_path / "signal_journal.jsonl"
+    monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-06-11T15:00:00+00:00")
+    signal = Signal(
+        symbol="EURUSD",
+        direction="BUY",
+        entry_price=1.1020,
+        stop_loss=1.1000,
+        take_profit=1.1080,
+        atr=0.0010,
+        lot_size=1.0,
+        risk_pct=1.0,
+        confidence=0.8,
+        breakdown={},
+        trend_direction="Uptrend",
+        patterns_found=[],
+        signal_type="continuation",
+    )
+
+    assert lifecycle_state_for_signal(signal)["lifecycle_role"] == "management"
+    journal.append_signal(signal)
+    entry = journal.read_journal()[0]
+
+    assert entry["signal_type"] == "continuation"
+    assert entry["lifecycle_role"] == journal.LIFECYCLE_MANAGEMENT
+    assert entry["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_NO_ACTIVE_TRADE
+    assert entry["usable_for_strategy_stats"] is False
 
 
 def test_signal_engine_data_with_insufficient_candles_reports_missing_window():

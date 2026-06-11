@@ -78,9 +78,12 @@ def format_signal_message(signal: Signal) -> dict:
         color = 0x00FF00 if dirn == "BUY" else 0xFF0000
         title = f"{'🟢' if dirn == 'BUY' else '🔴'} {sym} {dirn}"
         desc  = f"Confidence: **{conf_pct}%** | Risk: {signal.risk_pct:.2f}%"
+        signal_type = getattr(signal, "signal_type", "pullback")
+        lifecycle_hint = "Continuation management event" if signal_type == "continuation" else "Trade entry candidate"
         fields = [
             {"name": "Strategy", "value": getattr(signal, "strategy", "CTI-v1"), "inline": True},
-            {"name": "Signal Type", "value": getattr(signal, "signal_type", "pullback"), "inline": True},
+            {"name": "Signal Type", "value": signal_type, "inline": True},
+            {"name": "Lifecycle", "value": lifecycle_hint, "inline": True},
             {"name": "Buy Price",   "value": str(signal.entry_price), "inline": True},
             {"name": "Stop Loss",   "value": str(signal.stop_loss), "inline": True},
             {"name": "Take Profit", "value": str(signal.take_profit), "inline": True},
@@ -136,6 +139,12 @@ def save_signal(signal: Signal) -> None:
         except ZeroDivisionError:
             rr = None  # entry == stop_loss; undefined R:R
 
+        try:
+            from tradegumi.signal_processor import lifecycle_state_for_signal
+            lifecycle_state = lifecycle_state_for_signal(signal)
+        except Exception:
+            lifecycle_state = {}
+
         entry = {
             "symbol": signal.symbol,
             "direction": signal.direction,
@@ -161,6 +170,7 @@ def save_signal(signal: Signal) -> None:
             "lr_1h": getattr(signal, "lr_1h", 0.0),
             "lr_15m": getattr(signal, "lr_15m", 0.0),
             "lr_5m": getattr(signal, "lr_5m", 0.0),
+            **lifecycle_state,
         }
 
         existing.append(entry)

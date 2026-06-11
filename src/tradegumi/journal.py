@@ -71,6 +71,27 @@ OUTCOME_INVALIDATED_BY_PRIME = "invalidated_by_prime"
 OUTCOME_INVALIDATED_BY_SYSTEM = "invalidated_by_system"
 OUTCOME_SOURCE_MANUAL = "manual"
 OUTCOME_SOURCE_SYSTEM_PRIME_FILTER = "system_prime_filter"
+LIFECYCLE_ENTRY = "entry"
+LIFECYCLE_MANAGEMENT = "management"
+LIFECYCLE_OUTCOME = "outcome"
+LIFECYCLE_WARNING = "warning"
+LIFECYCLE_LEGACY_SIGNAL = "legacy_signal"
+MANAGEMENT_ACCEPTED = "accepted"
+MANAGEMENT_REJECTED_NO_ACTIVE_TRADE = "no_active_trade"
+MANAGEMENT_REJECTED_DISABLED = "management_disabled"
+MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS = "insufficient_progress"
+MANAGEMENT_REJECTED_RISK_INCREASE = "risk_increase"
+MANAGEMENT_REJECTED_EXTENSION_CAP = "extension_cap_reached"
+MANAGEMENT_REJECTED_DUPLICATE_EVENT = "duplicate_management_event"
+MANAGED_EXIT_TP_HIT = "tp_hit"
+MANAGED_EXIT_SL_LOSS = "sl_hit_with_loss"
+MANAGED_EXIT_SL_BE = "sl_hit_at_break_even"
+MANAGED_EXIT_SL_PROFIT = "sl_hit_with_profit"
+MANAGED_EXIT_MANUAL_PROFIT = "manual_close_profit"
+MANAGED_EXIT_MANUAL_LOSS = "manual_close_loss"
+MANAGED_RESULT_WIN = "win"
+MANAGED_RESULT_LOSS = "loss"
+MANAGED_RESULT_BREAKEVEN = "breakeven"
 PRIME_CLOSE_INFERRED_TP = "inferred_tp"
 PRIME_CLOSE_INFERRED_SL = "inferred_sl"
 PRIME_CLOSE_MANUAL_GRADE = "manual_grade"
@@ -140,6 +161,31 @@ EXPORT_FIELDS = [
     "prime_suppressed_opposite_direction_count",
     "prime_suppressed_signal_ids",
     "prime_suppressed_signal_outcomes",
+    "lifecycle_role",
+    "trade_id",
+    "entry_signal_id",
+    "entry_signal_type",
+    "management_event_id",
+    "source_signal_id",
+    "source_signal_type",
+    "management_accepted",
+    "management_reason",
+    "management_rejection_reason",
+    "price_at_event",
+    "old_stop_loss",
+    "new_stop_loss",
+    "old_take_profit",
+    "new_take_profit",
+    "current_stop_loss",
+    "current_take_profit",
+    "initial_stop_loss",
+    "initial_take_profit",
+    "risk_at_entry",
+    "managed_exit_reason",
+    "managed_result_category",
+    "captured_r",
+    "managed_original_tp_result",
+    "managed_result_delta",
     "trade_result",
     "outcome_status",
     "pnl",
@@ -231,6 +277,35 @@ class SignalJournalExportResult:
     def content_disposition(self) -> str:
         """Return the attachment header value for the generated CSV file."""
         return f'attachment; filename="{self.filename}"'
+
+
+@dataclass(frozen=True)
+class TradeEntryState:
+    """Managed state carried by a pullback-originated journal entry."""
+
+    trade_id: str
+    entry_signal_id: str
+    entry_signal_type: str
+    current_stop_loss: float
+    current_take_profit: float
+    risk_at_entry: float
+
+
+@dataclass(frozen=True)
+class TradeManagementDecision:
+    """Decision produced by evaluating one continuation against an active trade."""
+
+    accepted: bool
+    reason: str
+    rejection_reason: Optional[str]
+    old_stop_loss: Optional[float]
+    new_stop_loss: Optional[float]
+    old_take_profit: Optional[float]
+    new_take_profit: Optional[float]
+    price_at_event: Optional[float]
+    tp_extended: bool = False
+    sl_tightened: bool = False
+    break_even_moved: bool = False
 
 
 def _now_iso() -> str:
@@ -358,6 +433,34 @@ def _apply_outcome_defaults(entry: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("ambiguous_reason", None)
     normalized.setdefault("manually_overridden", False)
     normalized.setdefault("manual_override_reason", None)
+    normalized.setdefault("lifecycle_role", LIFECYCLE_LEGACY_SIGNAL)
+    for field in (
+        "trade_id",
+        "entry_signal_id",
+        "entry_signal_type",
+        "management_event_id",
+        "source_signal_id",
+        "source_signal_type",
+        "management_accepted",
+        "management_reason",
+        "management_rejection_reason",
+        "price_at_event",
+        "old_stop_loss",
+        "new_stop_loss",
+        "old_take_profit",
+        "new_take_profit",
+        "current_stop_loss",
+        "current_take_profit",
+        "initial_stop_loss",
+        "initial_take_profit",
+        "risk_at_entry",
+        "managed_exit_reason",
+        "managed_result_category",
+        "captured_r",
+        "managed_original_tp_result",
+        "managed_result_delta",
+    ):
+        normalized.setdefault(field, None)
     return normalized
 
 
@@ -624,6 +727,317 @@ def _direction_key(value: Any) -> str:
     return normalized
 
 
+def _is_pullback_identity(strategy: Any, signal_type: Any) -> bool:
+    """Return whether a signal identity can open a managed trade."""
+    strategy_name = str(strategy or "").lower()
+    signal_type_name = str(signal_type or "").lower()
+    return signal_type_name in {"pullback", "high_value_pullback"} or "pullback" in strategy_name
+
+
+def _is_continuation_identity(signal_type: Any) -> bool:
+    """Return whether a signal type should become management evidence."""
+    return str(signal_type or "").strip().lower() == "continuation"
+
+
+def _entry_trade_id(entry: dict[str, Any]) -> str:
+    """Return a stable lifecycle identifier for a journal entry."""
+    existing = str(entry.get("trade_id") or "").strip()
+    return existing or str(entry.get("signal_id") or "")
+
+
+def _risk_at_entry(entry_price: Any, stop_loss: Any) -> Optional[float]:
+    """Return the absolute initial risk distance for an entry."""
+    entry = _coerce_float(entry_price)
+    stop = _coerce_float(stop_loss)
+    if entry is None or stop is None:
+        return None
+    risk = abs(entry - stop)
+    return risk if risk > 0 else None
+
+
+def _managed_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
+    """Return initialized managed-trade fields for a pullback entry."""
+    return {
+        "lifecycle_role": LIFECYCLE_ENTRY,
+        "trade_id": _entry_trade_id(entry),
+        "entry_signal_id": entry.get("signal_id"),
+        "entry_signal_type": entry.get("signal_type"),
+        "initial_stop_loss": entry.get("stop_loss"),
+        "initial_take_profit": entry.get("take_profit"),
+        "current_stop_loss": entry.get("stop_loss"),
+        "current_take_profit": entry.get("take_profit"),
+        "risk_at_entry": _risk_at_entry(entry.get("entry_price"), entry.get("stop_loss")),
+        "management_events": [],
+        "tp_extension_count": 0,
+        "sl_tighten_count": 0,
+        "break_even_move_count": 0,
+        "opposite_direction_continuation_warning_count": 0,
+    }
+
+
+def _active_managed_trade_for_direction(
+    entries: list[dict[str, Any]],
+    symbol: Any,
+    direction: Any,
+) -> Optional[dict[str, Any]]:
+    """Return the newest active pullback-originated trade for symbol and direction."""
+    symbol_key = _normal_key(symbol)
+    direction_key = _direction_key(direction)
+    for entry in reversed(entries):
+        if _normal_key(entry.get("symbol")) != symbol_key:
+            continue
+        if _direction_key(entry.get("direction")) != direction_key:
+            continue
+        if entry.get("lifecycle_role") != LIFECYCLE_ENTRY:
+            continue
+        if str(entry.get("status") or "").lower() in {STATUS_CLOSED, STATUS_INVALIDATED, STATUS_EXPIRED}:
+            continue
+        if entry.get("prime_active") is False:
+            continue
+        return entry
+    return None
+
+
+def _active_managed_trade_for_symbol(entries: list[dict[str, Any]], symbol: Any) -> Optional[dict[str, Any]]:
+    """Return the newest active pullback-originated trade for a symbol."""
+    symbol_key = _normal_key(symbol)
+    for entry in reversed(entries):
+        if _normal_key(entry.get("symbol")) != symbol_key:
+            continue
+        if entry.get("lifecycle_role") != LIFECYCLE_ENTRY:
+            continue
+        if str(entry.get("status") or "").lower() in {STATUS_CLOSED, STATUS_INVALIDATED, STATUS_EXPIRED}:
+            continue
+        if entry.get("prime_active") is False:
+            continue
+        return entry
+    return None
+
+
+def _price_at_management_event(signal: Any, entry: dict[str, Any]) -> Optional[float]:
+    """Choose the price used for continuation management progress calculations."""
+    return _coerce_float(_signal_attr(signal, ("signal_price", "current_price", "market_price", "entry_price"), entry.get("entry_price")))
+
+
+def _directional_movement(direction: Any, entry_price: Any, price: Any) -> Optional[float]:
+    """Return favorable movement in price units for a direction."""
+    entry = _coerce_float(entry_price)
+    event_price = _coerce_float(price)
+    if entry is None or event_price is None:
+        return None
+    if _direction_key(direction) == "BUY":
+        return event_price - entry
+    if _direction_key(direction) == "SELL":
+        return entry - event_price
+    return None
+
+
+def _price_from_r(direction: Any, entry_price: float, risk: float, r_value: float) -> float:
+    """Return a direction-aware price offset from entry by an R multiple."""
+    return entry_price + (risk * r_value) if _direction_key(direction) == "BUY" else entry_price - (risk * r_value)
+
+
+def _would_increase_risk(direction: Any, entry_price: float, current_sl: float, proposed_sl: float) -> bool:
+    """Return whether a proposed SL is farther from entry than the current SL."""
+    if abs(entry_price - proposed_sl) > abs(entry_price - current_sl):
+        return True
+    if _direction_key(direction) == "BUY":
+        return proposed_sl < current_sl
+    return proposed_sl > current_sl
+
+
+def _management_event_seen(trade: dict[str, Any], source_signal_id: str) -> bool:
+    """Return whether a continuation signal already affected this managed trade."""
+    events = trade.get("management_events")
+    if not isinstance(events, list):
+        return False
+    return any(isinstance(event, dict) and event.get("source_signal_id") == source_signal_id for event in events)
+
+
+def _evaluate_management_event(trade: dict[str, Any], signal: Any, source_signal_id: str) -> TradeManagementDecision:
+    """Evaluate SL/TP management changes for one continuation signal."""
+    old_sl = _coerce_float(trade.get("current_stop_loss", trade.get("stop_loss")))
+    old_tp = _coerce_float(trade.get("current_take_profit", trade.get("take_profit")))
+    entry_price = _coerce_float(trade.get("entry_price"))
+    risk = _coerce_float(trade.get("risk_at_entry")) or _risk_at_entry(entry_price, trade.get("initial_stop_loss", trade.get("stop_loss")))
+    price = _price_at_management_event(signal, trade)
+    if not bool(config.CONTINUATION_MANAGEMENT_ENABLED):
+        return TradeManagementDecision(False, MANAGEMENT_REJECTED_DISABLED, MANAGEMENT_REJECTED_DISABLED, old_sl, old_sl, old_tp, old_tp, price)
+    if _management_event_seen(trade, source_signal_id):
+        return TradeManagementDecision(False, MANAGEMENT_REJECTED_DUPLICATE_EVENT, MANAGEMENT_REJECTED_DUPLICATE_EVENT, old_sl, old_sl, old_tp, old_tp, price)
+    if old_sl is None or old_tp is None or entry_price is None or risk in (None, 0):
+        return TradeManagementDecision(False, "missing_management_context", "missing_management_context", old_sl, old_sl, old_tp, old_tp, price)
+    movement = _directional_movement(trade.get("direction"), entry_price, price)
+    progress_r = None if movement is None else movement / risk
+    if progress_r is None or progress_r < float(config.CONTINUATION_MANAGEMENT_BE_TRIGGER_R):
+        return TradeManagementDecision(False, MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS, MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS, old_sl, old_sl, old_tp, old_tp, price)
+
+    direction = _direction_key(trade.get("direction"))
+    proposed_sl = old_sl
+    break_even_moved = False
+    sl_tightened = False
+    if progress_r >= float(config.CONTINUATION_MANAGEMENT_PROFIT_PROTECT_TRIGGER_R):
+        proposed_sl = _price_from_r(direction, entry_price, risk, float(config.CONTINUATION_MANAGEMENT_PROFIT_PROTECT_OFFSET_R))
+    elif progress_r >= float(config.CONTINUATION_MANAGEMENT_BE_TRIGGER_R):
+        proposed_sl = entry_price
+        break_even_moved = True
+    if _would_increase_risk(direction, entry_price, old_sl, proposed_sl):
+        return TradeManagementDecision(False, MANAGEMENT_REJECTED_RISK_INCREASE, MANAGEMENT_REJECTED_RISK_INCREASE, old_sl, old_sl, old_tp, old_tp, price)
+    if proposed_sl != old_sl:
+        sl_tightened = True
+
+    max_extensions = int(config.CONTINUATION_MANAGEMENT_MAX_TP_EXTENSIONS)
+    current_extensions = int(trade.get("tp_extension_count") or 0)
+    proposed_tp = old_tp
+    tp_extended = False
+    if current_extensions < max_extensions:
+        target_r = abs(old_tp - entry_price) / risk + float(config.CONTINUATION_MANAGEMENT_TP_EXTENSION_MULTIPLE_R)
+        target_r = min(target_r, float(config.CONTINUATION_MANAGEMENT_MAX_TARGET_R))
+        proposed_tp = _price_from_r(direction, entry_price, risk, target_r)
+        tp_extended = proposed_tp != old_tp
+    elif not sl_tightened:
+        return TradeManagementDecision(False, MANAGEMENT_REJECTED_EXTENSION_CAP, MANAGEMENT_REJECTED_EXTENSION_CAP, old_sl, old_sl, old_tp, old_tp, price)
+
+    accepted = sl_tightened or tp_extended
+    reason = MANAGEMENT_ACCEPTED if accepted else MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS
+    return TradeManagementDecision(
+        accepted,
+        reason,
+        None if accepted else reason,
+        old_sl,
+        proposed_sl,
+        old_tp,
+        proposed_tp,
+        price,
+        tp_extended=tp_extended,
+        sl_tightened=sl_tightened,
+        break_even_moved=break_even_moved,
+    )
+
+
+def _append_management_evidence(
+    entries: list[dict[str, Any]],
+    trade: Optional[dict[str, Any]],
+    signal: Any,
+    source_signal_id: str,
+    ts: str,
+    decision: TradeManagementDecision,
+    role: str = LIFECYCLE_MANAGEMENT,
+) -> None:
+    """Append a non-entry management evidence row and update linked trade state."""
+    management_event_id = f"mgmt:{source_signal_id}"
+    if trade is not None and decision.accepted:
+        trade["current_stop_loss"] = decision.new_stop_loss
+        trade["current_take_profit"] = decision.new_take_profit
+        if decision.sl_tightened:
+            trade["sl_tighten_count"] = int(trade.get("sl_tighten_count") or 0) + 1
+        if decision.break_even_moved:
+            trade["break_even_move_count"] = int(trade.get("break_even_move_count") or 0) + 1
+        if decision.tp_extended:
+            trade["tp_extension_count"] = int(trade.get("tp_extension_count") or 0) + 1
+        events = trade.get("management_events")
+        if not isinstance(events, list):
+            events = []
+        events.append(
+            {
+                "management_event_id": management_event_id,
+                "source_signal_id": source_signal_id,
+                "source_signal_type": "continuation",
+                "event_time": ts,
+                "accepted": decision.accepted,
+                "reason": decision.reason,
+                "rejection_reason": decision.rejection_reason,
+                "old_stop_loss": decision.old_stop_loss,
+                "new_stop_loss": decision.new_stop_loss,
+                "old_take_profit": decision.old_take_profit,
+                "new_take_profit": decision.new_take_profit,
+                "price_at_event": decision.price_at_event,
+            }
+        )
+        trade["management_events"] = events[-50:]
+    if trade is not None and role == LIFECYCLE_WARNING:
+        trade["opposite_direction_continuation_warning_count"] = int(trade.get("opposite_direction_continuation_warning_count") or 0) + 1
+
+    evidence = {
+        "signal_id": source_signal_id,
+        "symbol": signal.symbol,
+        "direction": signal.direction,
+        "strategy": getattr(signal, "strategy", "CTI-v1"),
+        "signal_type": getattr(signal, "signal_type", "continuation"),
+        "confidence": round(float(getattr(signal, "confidence", 0.0) or 0.0), 3),
+        "entry_price": getattr(signal, "entry_price", None),
+        "stop_loss": getattr(signal, "stop_loss", None),
+        "take_profit": getattr(signal, "take_profit", None),
+        "lot_size": getattr(signal, "lot_size", None),
+        "atr": getattr(signal, "atr", None),
+        "signal_timestamp": ts,
+        "created_at": ts,
+        "grade": PENDING_GRADE,
+        "trade_grade": "INVALID",
+        "status": STATUS_INVALIDATED,
+        "outcome": OUTCOME_NONE,
+        "outcome_source": None,
+        "usable_for_strategy_stats": False,
+        "stats_exclusion_reason": "continuation_management_event",
+        "lifecycle_role": role,
+        "trade_id": trade.get("trade_id") if trade else None,
+        "entry_signal_id": trade.get("entry_signal_id") if trade else None,
+        "entry_signal_type": trade.get("entry_signal_type") if trade else None,
+        "management_event_id": management_event_id,
+        "source_signal_id": source_signal_id,
+        "source_signal_type": "continuation",
+        "management_accepted": decision.accepted,
+        "management_reason": decision.reason,
+        "management_rejection_reason": decision.rejection_reason,
+        "price_at_event": decision.price_at_event,
+        "old_stop_loss": decision.old_stop_loss,
+        "new_stop_loss": decision.new_stop_loss,
+        "old_take_profit": decision.old_take_profit,
+        "new_take_profit": decision.new_take_profit,
+        "current_stop_loss": decision.new_stop_loss,
+        "current_take_profit": decision.new_take_profit,
+        "prime_active": False,
+        "prime_suppressed_signal_count": 0,
+    }
+    entries.append(evidence)
+
+
+def classify_managed_exit(entry: dict[str, Any], exit_price: Any, exit_kind: str) -> dict[str, Any]:
+    """Classify a managed trade exit relative to entry direction and 1R risk."""
+    direction = _direction_key(entry.get("direction"))
+    entry_price = _coerce_float(entry.get("entry_price"))
+    close_price = _coerce_float(exit_price)
+    risk = _coerce_float(entry.get("risk_at_entry")) or _risk_at_entry(entry_price, entry.get("initial_stop_loss", entry.get("stop_loss")))
+    if direction not in {"BUY", "SELL"} or entry_price is None or close_price is None:
+        return {"managed_exit_reason": None, "managed_result_category": None, "captured_r": None}
+    movement = close_price - entry_price if direction == "BUY" else entry_price - close_price
+    captured_r = None if risk in (None, 0) else movement / risk
+    if exit_kind == OUTCOME_TP:
+        reason = MANAGED_EXIT_TP_HIT
+        category = MANAGED_RESULT_WIN
+    elif exit_kind == OUTCOME_SL:
+        if movement > 0:
+            reason = MANAGED_EXIT_SL_PROFIT
+            category = MANAGED_RESULT_WIN
+        elif movement == 0:
+            reason = MANAGED_EXIT_SL_BE
+            category = MANAGED_RESULT_BREAKEVEN
+        else:
+            reason = MANAGED_EXIT_SL_LOSS
+            category = MANAGED_RESULT_LOSS
+    elif movement >= 0:
+        reason = MANAGED_EXIT_MANUAL_PROFIT
+        category = MANAGED_RESULT_WIN if movement > 0 else MANAGED_RESULT_BREAKEVEN
+    else:
+        reason = MANAGED_EXIT_MANUAL_LOSS
+        category = MANAGED_RESULT_LOSS
+    return {
+        "managed_exit_reason": reason,
+        "managed_result_category": category,
+        "captured_r": captured_r,
+    }
+
+
 def _is_unresolved_prime(entry: dict[str, Any]) -> bool:
     """Return whether a persisted journal entry can suppress same-symbol signals."""
     if entry.get("prime_active") is not True:
@@ -824,6 +1238,52 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
 
     with _lock:
         existing_entries = _read_entries_oldest_first()
+        if _is_continuation_identity(entry.get("signal_type")):
+            active_same_direction = _active_managed_trade_for_direction(existing_entries, entry.get("symbol"), entry.get("direction"))
+            active_same_symbol = _active_managed_trade_for_symbol(existing_entries, entry.get("symbol"))
+            if active_same_direction is not None:
+                decision = _evaluate_management_event(active_same_direction, signal, signal_id)
+                active_recheck = _active_managed_trade_for_direction(existing_entries, entry.get("symbol"), entry.get("direction"))
+                if active_recheck is None or active_recheck is not active_same_direction:
+                    decision = TradeManagementDecision(
+                        False,
+                        "trade_closed_before_management",
+                        "trade_closed_before_management",
+                        decision.old_stop_loss,
+                        decision.old_stop_loss,
+                        decision.old_take_profit,
+                        decision.old_take_profit,
+                        decision.price_at_event,
+                    )
+                    active_same_direction = active_recheck
+                _append_management_evidence(existing_entries, active_same_direction, signal, signal_id, ts, decision)
+            elif active_same_symbol is not None:
+                warning = TradeManagementDecision(
+                    False,
+                    "opposite_direction_continuation_warning",
+                    "opposite_direction_continuation_warning",
+                    _coerce_float(active_same_symbol.get("current_stop_loss", active_same_symbol.get("stop_loss"))),
+                    _coerce_float(active_same_symbol.get("current_stop_loss", active_same_symbol.get("stop_loss"))),
+                    _coerce_float(active_same_symbol.get("current_take_profit", active_same_symbol.get("take_profit"))),
+                    _coerce_float(active_same_symbol.get("current_take_profit", active_same_symbol.get("take_profit"))),
+                    _price_at_management_event(signal, active_same_symbol),
+                )
+                _append_management_evidence(existing_entries, active_same_symbol, signal, signal_id, ts, warning, LIFECYCLE_WARNING)
+            else:
+                rejected = TradeManagementDecision(
+                    False,
+                    MANAGEMENT_REJECTED_NO_ACTIVE_TRADE,
+                    MANAGEMENT_REJECTED_NO_ACTIVE_TRADE,
+                    None,
+                    None,
+                    None,
+                    None,
+                    _coerce_float(getattr(signal, "entry_price", None)),
+                )
+                _append_management_evidence(existing_entries, None, signal, signal_id, ts, rejected)
+            _write_entries(existing_entries)
+            return signal_id
+
         active_prime = _active_prime_for_symbol(existing_entries, entry.get("symbol"))
         signal_ts = _parse_journal_datetime(ts) or datetime.now(timezone.utc)
         inferred_close = _infer_prime_close(active_prime, _signal_prime_candles(signal), signal_ts) if active_prime else None
@@ -839,8 +1299,12 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
             _make_actionable_after_prime_close(entry, signal_ts)
         if entry.get("usable_for_strategy_stats") is True:
             entry.update(_prime_initial_fields())
+            if _is_pullback_identity(entry.get("strategy"), entry.get("signal_type")):
+                entry.update(_managed_entry_fields(entry))
+            else:
+                entry.setdefault("lifecycle_role", LIFECYCLE_LEGACY_SIGNAL)
         else:
-            entry.update({"prime_active": False, "prime_suppressed_signal_count": 0})
+            entry.update({"prime_active": False, "prime_suppressed_signal_count": 0, "lifecycle_role": LIFECYCLE_LEGACY_SIGNAL})
         existing_entries.append(entry)
         _write_entries(existing_entries)
 
@@ -884,6 +1348,16 @@ def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> 
                 entry["grade_timestamp"] = _now_iso()
                 entry["outcome_source"] = OUTCOME_SOURCE_MANUAL
                 entry["exit_time"] = entry["grade_timestamp"]
+                if entry.get("exit_price") is not None or grade == "MANUAL_CLOSE":
+                    manual_exit_price = entry.get("exit_price") if entry.get("exit_price") is not None else entry.get("entry_price")
+                    managed_exit = classify_managed_exit(entry, manual_exit_price, entry["outcome"])
+                    entry.update({key: value for key, value in managed_exit.items() if value is not None})
+                    if entry.get("managed_result_category") == MANAGED_RESULT_WIN:
+                        entry["trade_grade"] = "TP_HIT"
+                    elif entry.get("managed_result_category") == MANAGED_RESULT_BREAKEVEN:
+                        entry["trade_grade"] = "BE"
+                    elif entry.get("managed_result_category") == MANAGED_RESULT_LOSS:
+                        entry["trade_grade"] = "SL_HIT"
                 entry["outcome_checked_at"] = entry["grade_timestamp"]
                 entry["manually_overridden"] = True
                 entry["manual_override_reason"] = notes or None

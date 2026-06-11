@@ -122,6 +122,105 @@ def test_short_sl_hit_closes_with_ask(journal_file):
     assert entry["exit_price"] == pytest.approx(1.1021)
 
 
+@pytest.mark.parametrize(
+    ("direction", "price_fields", "tick", "expected_grade", "expected_reason", "expected_category"),
+    [
+        (
+            "BUY",
+            {"current_take_profit": 1.1060},
+            {"bid": 1.1062, "ask": 1.1064},
+            "TP_HIT",
+            journal.MANAGED_EXIT_TP_HIT,
+            journal.MANAGED_RESULT_WIN,
+        ),
+        (
+            "SELL",
+            {"current_take_profit": 1.0940, "stop_loss": 1.1020, "take_profit": 1.0960},
+            {"bid": 1.0937, "ask": 1.0939},
+            "TP_HIT",
+            journal.MANAGED_EXIT_TP_HIT,
+            journal.MANAGED_RESULT_WIN,
+        ),
+        (
+            "BUY",
+            {"current_stop_loss": 1.0970},
+            {"bid": 1.0969, "ask": 1.0971},
+            "SL_HIT",
+            journal.MANAGED_EXIT_SL_LOSS,
+            journal.MANAGED_RESULT_LOSS,
+        ),
+        (
+            "SELL",
+            {"current_stop_loss": 1.1030, "stop_loss": 1.1020, "take_profit": 1.0960},
+            {"bid": 1.1029, "ask": 1.1031},
+            "SL_HIT",
+            journal.MANAGED_EXIT_SL_LOSS,
+            journal.MANAGED_RESULT_LOSS,
+        ),
+        (
+            "BUY",
+            {"current_stop_loss": 1.1000},
+            {"bid": 1.0999, "ask": 1.1001},
+            "BE",
+            journal.MANAGED_EXIT_SL_BE,
+            journal.MANAGED_RESULT_BREAKEVEN,
+        ),
+        (
+            "SELL",
+            {"current_stop_loss": 1.1000, "stop_loss": 1.1020, "take_profit": 1.0960},
+            {"bid": 1.0999, "ask": 1.1001},
+            "BE",
+            journal.MANAGED_EXIT_SL_BE,
+            journal.MANAGED_RESULT_BREAKEVEN,
+        ),
+        (
+            "BUY",
+            {"current_stop_loss": 1.1010},
+            {"bid": 1.1009, "ask": 1.1011},
+            "TP_HIT",
+            journal.MANAGED_EXIT_SL_PROFIT,
+            journal.MANAGED_RESULT_WIN,
+        ),
+        (
+            "SELL",
+            {"current_stop_loss": 1.0990, "stop_loss": 1.1020, "take_profit": 1.0960},
+            {"bid": 1.0989, "ask": 1.0991},
+            "TP_HIT",
+            journal.MANAGED_EXIT_SL_PROFIT,
+            journal.MANAGED_RESULT_WIN,
+        ),
+    ],
+)
+def test_managed_exit_outcomes_use_current_levels(
+    journal_file,
+    direction,
+    price_fields,
+    tick,
+    expected_grade,
+    expected_reason,
+    expected_category,
+):
+    write_entries(
+        journal_file,
+        [
+            base_entry(
+                direction=direction,
+                initial_stop_loss=price_fields.get("stop_loss", 1.0980),
+                risk_at_entry=0.0020,
+                **price_fields,
+            )
+        ],
+    )
+
+    evaluate_price_observation(observation(**tick))
+    entry = only_entry()
+
+    assert entry["grade"] == expected_grade
+    assert entry["managed_exit_reason"] == expected_reason
+    assert entry["managed_result_category"] == expected_category
+    assert entry["captured_r"] is not None
+
+
 def test_no_hit_stays_open_without_rewriting_journal(journal_file):
     write_entries(journal_file, [base_entry()])
     original = journal_file.read_text(encoding="utf-8")
