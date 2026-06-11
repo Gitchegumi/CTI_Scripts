@@ -46,8 +46,8 @@ WORKDIR /app/dashboard
 # Copy dashboard source
 COPY dashboard/package.json dashboard/package-lock.json* ./
 
-# Install deps
-RUN npm install
+# Install deps from the lockfile for reproducible dashboard builds
+RUN npm ci
 
 # Copy dashboard source
 COPY dashboard/next.config.js dashboard/tsconfig.json dashboard/postcss.config.mjs ./
