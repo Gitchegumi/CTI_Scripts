@@ -1190,3 +1190,55 @@ def test_pullback_opportunity_rows_preserve_context_and_blockers():
     assert row["all_blockers"] == ["pullback_trigger_candle_failed"]
     assert row["criteria"][0]["context"]["pattern"] == "shooting_star"
     assert row["criteria"][0]["context"]["value_area_relation"] == "above_midline"
+
+
+def test_unlinked_db_recreates_schema_on_write():
+    import gc
+    import time
+    db = temp_db()
+    opp = EvaluatedOpportunity(
+        id="recreation-test",
+        evaluated_at=iso(),
+        symbol="EURUSD",
+        strategy="CTI-v1.2-pullback",
+        signal_type="pullback",
+        final_decision="emitted",
+        decision_reason="emitted",
+        threshold_version="pullback-v2",
+    )
+    # First write initializes db and writes row successfully
+    record_opportunity(opp, db)
+    assert db.exists()
+
+    # Close the cached connection to release the Windows file lock
+    from tradegumi.strategy_metrics import _write_connections_by_db_path
+    db_key = str(db.resolve())
+    conn = _write_connections_by_db_path.pop(db_key, None)
+    if conn is not None:
+        conn.close()
+
+    # Force garbage collection to release any remaining SQLite references
+    gc.collect()
+
+    # Simulate DB unlinking/deletion (e.g. from a purge) with Windows retry tolerance
+    deleted = False
+    for _ in range(50):
+        try:
+            db.unlink()
+            deleted = True
+            break
+        except PermissionError:
+            gc.collect()
+            time.sleep(0.05)
+    
+    assert deleted, "Could not delete DB file due to lock"
+    assert not db.exists()
+
+    # The second write should automatically detect deletion, recreate schema, and succeed
+    record_opportunity(opp, db)
+    assert db.exists()
+
+    # Verify the row can be read from the recreated DB
+    row = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+    assert row["id"] == "recreation-test"
+

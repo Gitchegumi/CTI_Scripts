@@ -266,6 +266,15 @@ class ComparisonPeriod:
 
 def init_schema(db_path: Path = DB_FILE) -> None:
     db_key = str(db_path.resolve())
+    if not db_path.exists():
+        _initialized_db_paths.discard(db_key)
+        conn = _write_connections_by_db_path.pop(db_key, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     if db_key in _initialized_db_paths:
         return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
