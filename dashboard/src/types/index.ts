@@ -46,6 +46,11 @@ export interface SignalEntry {
   atr: number;
   rr: number | null;
   timestamp: string;
+  lifecycle_role?: "entry" | "management" | "warning" | "outcome" | "legacy_signal" | string;
+  current_stop_loss?: number | null;
+  current_take_profit?: number | null;
+  entry_signal_type?: string | null;
+  source_signal_type?: string | null;
 }
 
 export type SignalOutcomeStatus =
@@ -80,6 +85,29 @@ export interface SignalJournalOutcomeFields {
   ambiguous_reason?: string | null;
   manually_overridden?: boolean;
   manual_override_reason?: string | null;
+}
+
+export interface ManagedLifecycleFields {
+  lifecycle_role?: "entry" | "management" | "warning" | "outcome" | "legacy_signal" | string;
+  trade_id?: string | null;
+  entry_signal_id?: string | null;
+  entry_signal_type?: string | null;
+  management_event_id?: string | null;
+  source_signal_id?: string | null;
+  source_signal_type?: string | null;
+  management_accepted?: boolean | null;
+  management_reason?: string | null;
+  management_rejection_reason?: string | null;
+  price_at_event?: number | null;
+  old_stop_loss?: number | null;
+  new_stop_loss?: number | null;
+  old_take_profit?: number | null;
+  new_take_profit?: number | null;
+  current_stop_loss?: number | null;
+  current_take_profit?: number | null;
+  managed_exit_reason?: string | null;
+  managed_result_category?: "win" | "loss" | "breakeven" | string | null;
+  captured_r?: number | null;
 }
 
 export type TradeGrade =
@@ -291,6 +319,11 @@ export interface StrategyMetricOpportunity {
   threshold_version: string;
   usable_for_strategy_stats?: boolean | null;
   stats_exclusion_reason?: string | null;
+  lifecycle_role?: string | null;
+  trade_id?: string | null;
+  managed_exit_reason?: string | null;
+  managed_result_category?: string | null;
+  captured_r?: number | null;
   criteria: StrategyMetricCriterion[];
 }
 
@@ -333,6 +366,19 @@ export interface StrategyMetricsSummary {
   inferred_tp_close_count: number;
   inferred_sl_close_count: number;
   ambiguous_prime_close_count: number;
+  managed_lifecycle_summary?: Record<string, unknown>;
+  pullback_entries_opened: number;
+  continuation_management_events_observed: number;
+  continuation_management_events_accepted: number;
+  continuation_management_events_rejected: number;
+  tp_extension_count: number;
+  sl_tighten_count: number;
+  break_even_move_count: number;
+  profit_protected_sl_win_count: number;
+  opposite_direction_continuation_warning_count: number;
+  average_r_captured: number | null;
+  max_favorable_excursion_before_exit: number | null;
+  managed_vs_original_result_delta: Record<string, number>;
   rejected_count: number;
   skipped_count: number;
   indeterminate_count: number;

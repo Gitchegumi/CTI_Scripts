@@ -206,8 +206,8 @@ def evaluate_entry(entry: dict[str, Any], observation: PriceObservation) -> Outc
         Outcome decision that either leaves the signal open or resolves it.
     """
     direction = _direction(entry.get("direction"))
-    stop_loss = _float(entry.get("stop_loss"))
-    take_profit = _float(entry.get("take_profit"))
+    stop_loss = _float(entry.get("current_stop_loss", entry.get("stop_loss")))
+    take_profit = _float(entry.get("current_take_profit", entry.get("take_profit")))
     if direction not in {"BUY", "SELL"} or stop_loss is None or take_profit is None:
         return OutcomeDecision(
             status=STATUS_AMBIGUOUS,
@@ -287,10 +287,23 @@ def _apply_decision(entry: dict[str, Any], decision: OutcomeDecision, observatio
     if decision.outcome == OUTCOME_TP:
         entry["grade"] = GRADE_TP_HIT
         entry["trade_grade"] = GRADE_TP_HIT
+        target_price = _float(entry.get("current_take_profit", entry.get("take_profit"))) or decision.exit_price
+        entry.update(journal.classify_managed_exit(entry, target_price, OUTCOME_TP))
         journal._deactivate_prime(entry, journal.PRIME_CLOSE_INFERRED_TP, entry["exit_time"], False)
     elif decision.outcome == OUTCOME_SL:
-        entry["grade"] = GRADE_SL_HIT
-        entry["trade_grade"] = GRADE_SL_HIT
+        stop_price = _float(entry.get("current_stop_loss", entry.get("stop_loss"))) or decision.exit_price
+        managed_exit = journal.classify_managed_exit(entry, stop_price, OUTCOME_SL)
+        entry.update({key: value for key, value in managed_exit.items() if value is not None})
+        category = entry.get("managed_result_category")
+        if category == journal.MANAGED_RESULT_WIN:
+            entry["grade"] = GRADE_TP_HIT
+            entry["trade_grade"] = GRADE_TP_HIT
+        elif category == journal.MANAGED_RESULT_BREAKEVEN:
+            entry["grade"] = "BE"
+            entry["trade_grade"] = "BE"
+        else:
+            entry["grade"] = GRADE_SL_HIT
+            entry["trade_grade"] = GRADE_SL_HIT
         journal._deactivate_prime(entry, journal.PRIME_CLOSE_INFERRED_SL, entry["exit_time"], False)
     elif decision.outcome == OUTCOME_AMBIGUOUS:
         entry["trade_grade"] = journal.PENDING_GRADE

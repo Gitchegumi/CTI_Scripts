@@ -51,6 +51,18 @@ Before suppressing a follow-on signal, the journal checks market candles carried
 
 Suppressed signals do not create setup rows, do not require grading, and do not count as usable strategy-stat opportunities. They remain auditable through the active prime's suppression fields and strategy metrics.
 
+## Continuation Management Lifecycle
+
+Pullback signals are the only lifecycle rows that can open a new managed trade entry. When a pullback is usable for strategy stats, the journal records `lifecycle_role=entry`, a stable `trade_id`, initial/current SL and TP values, and `risk_at_entry`.
+
+Continuation signals are preserved as evidence but do not create new trade entries. A same-direction continuation can manage the active pullback trade by moving SL to break-even, tightening SL into profit protection, or extending TP within configured caps. The evidence row records `lifecycle_role=management`, `management_accepted`, `management_reason`, old/new SL and TP values, the source signal id, and the linked trade id.
+
+If a continuation arrives with no active pullback trade, the row is rejected with `management_rejection_reason=no_active_trade` and remains excluded from strategy stats. Opposite-direction continuations while a trade is active are recorded as `lifecycle_role=warning` so chop and reversal pressure remain visible without opening a conflicting trade.
+
+Managed exits use current managed SL/TP levels before legacy original levels. A protected SL above BUY entry or below SELL entry is classified as a win, an SL at entry is classified as break-even, and normal adverse SL exits remain losses. Manual close rows with an exit price also receive managed result fields such as `managed_exit_reason`, `managed_result_category`, and `captured_r`.
+
+Strategy metrics summarize this lifecycle with pullback entries opened, continuation management events observed/accepted/rejected, SL tighten and break-even moves, TP extensions, profit-protected SL wins, opposite-direction warnings, average captured R, and managed-versus-original result deltas.
+
 ## Alert-Only Auto-Grading
 
 Alert-only and Developing-mode signals can be auto-graded from shared price observations after they are journaled. The evaluator does not generate signals, place trades, close positions, or call Oanda directly. It consumes the same `PriceObservation` records published from the backend one-second pricing path that feeds dashboard state.

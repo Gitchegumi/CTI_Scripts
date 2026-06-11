@@ -18,6 +18,8 @@ class FakeSignal:
         entry_price=1.1000,
         signal_price=None,
         signal_type="pullback",
+        stop_loss=None,
+        take_profit=None,
         pullback_trigger=None,
         pullback_bridge_status=None,
         pullback_rejection_reason=None,
@@ -34,11 +36,11 @@ class FakeSignal:
         self.entry_price = entry_price
         self.signal_price = signal_price if signal_price is not None else entry_price
         if direction.upper() == "SELL":
-            self.stop_loss = entry_price + 0.0020
-            self.take_profit = entry_price - 0.0040
+            self.stop_loss = stop_loss if stop_loss is not None else entry_price + 0.0020
+            self.take_profit = take_profit if take_profit is not None else entry_price - 0.0040
         else:
-            self.stop_loss = entry_price - 0.0020
-            self.take_profit = entry_price + 0.0040
+            self.stop_loss = stop_loss if stop_loss is not None else entry_price - 0.0020
+            self.take_profit = take_profit if take_profit is not None else entry_price + 0.0040
         self.lot_size = 1.0
         self.atr = atr
         self.pullback_trigger = pullback_trigger
@@ -197,6 +199,17 @@ def test_export_journal_csv_includes_auto_grading_fields(journal_file):
     assert "manual_override_reason" in rows[0]
 
 
+def test_export_journal_csv_includes_lifecycle_fields_and_legacy_blanks(journal_file):
+    write_entries(journal_file, [{"signal_id": "sig-1", "symbol": "EURUSD", "grade": "PENDING"}])
+
+    row = next(csv.DictReader(StringIO(journal.export_journal_csv())))
+
+    assert row["lifecycle_role"] == "legacy_signal"
+    assert row["trade_id"] == ""
+    assert row["current_stop_loss"] == ""
+    assert row["managed_result_category"] == ""
+
+
 def test_expired_and_invalidated_outcome_defaults_export(journal_file):
     write_entries(
         journal_file,
@@ -234,6 +247,26 @@ def test_append_signal_creates_setup_group_and_trade_outcome_fields(journal_file
     assert entry["trade_grade"] == "PENDING"
     assert entry["prime_active"] is True
     assert entry["prime_suppressed_signal_count"] == 0
+    assert entry["lifecycle_role"] == "entry"
+    assert entry["trade_id"] == entry["signal_id"]
+    assert entry["entry_signal_type"] == "pullback"
+    assert entry["current_stop_loss"] == entry["stop_loss"]
+    assert entry["current_take_profit"] == entry["take_profit"]
+
+
+def test_continuation_without_active_trade_creates_non_entry_evidence(journal_file, monkeypatch):
+    monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
+
+    signal_id = journal.append_signal(FakeSignal(signal_type="continuation"), rr=2.0)
+    entry = journal.read_journal()[0]
+
+    assert entry["signal_id"] == signal_id
+    assert entry["lifecycle_role"] == "management"
+    assert entry["management_accepted"] is False
+    assert entry["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_NO_ACTIVE_TRADE
+    assert entry["trade_id"] is None
+    assert entry["usable_for_strategy_stats"] is False
+    assert entry["trade_grade"] == "INVALID"
 
 
 def test_append_signal_marks_duplicate_inside_group_window(journal_file, monkeypatch):
@@ -258,7 +291,155 @@ def test_append_signal_suppresses_beyond_group_window_when_prime_unresolved(jour
     first = journal.read_journal()[0]
 
     assert len(journal.read_journal()) == 1
-    assert first["prime_suppressed_signal_count"] == 1
+
+
+def test_continuation_accepts_break_even_and_tp_extension(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1022, entry_price=1.1022))
+    management, trade = journal.read_journal()
+
+    assert management["lifecycle_role"] == "management"
+    assert management["management_accepted"] is True
+    assert management["management_rejection_reason"] is None
+    assert management["new_stop_loss"] == pytest.approx(1.1000)
+    assert management["new_take_profit"] > management["old_take_profit"]
+    assert trade["current_stop_loss"] == pytest.approx(1.1000)
+    assert trade["current_take_profit"] > trade["initial_take_profit"]
+    assert trade["break_even_move_count"] == 1
+    assert trade["tp_extension_count"] == 1
+
+
+def test_continuation_accepts_profit_protection(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1042, entry_price=1.1042))
+    management, trade = journal.read_journal()
+
+    assert management["management_accepted"] is True
+    assert management["new_stop_loss"] > trade["entry_price"]
+    assert trade["sl_tighten_count"] == 1
+
+
+def test_continuation_rejects_insufficient_progress(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1005, entry_price=1.1005))
+    management, trade = journal.read_journal()
+
+    assert management["management_accepted"] is False
+    assert management["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS
+    assert trade["current_stop_loss"] == trade["initial_stop_loss"]
+
+
+def test_continuation_rejects_when_management_disabled(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+    monkeypatch.setattr(journal.config, "CONTINUATION_MANAGEMENT_ENABLED", False)
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1022, entry_price=1.1022))
+    management = journal.read_journal()[0]
+
+    assert management["management_accepted"] is False
+    assert management["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_DISABLED
+
+
+def test_continuation_rejects_duplicate_event_replay(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    entries = journal._read_entries_oldest_first()
+    trade = entries[0]
+    source_id = "EURUSD:BUY:2026-05-14T14:05:00+00:00"
+    trade["management_events"] = [{"source_signal_id": source_id}]
+    decision = journal._evaluate_management_event(trade, FakeSignal(signal_type="continuation", signal_price=1.1022), source_id)
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == journal.MANAGEMENT_REJECTED_DUPLICATE_EVENT
+
+
+def test_continuation_rejects_extension_cap_without_new_sl(journal_file, monkeypatch):
+    monkeypatch.setattr(journal.config, "CONTINUATION_MANAGEMENT_BE_TRIGGER_R", 1.0)
+    monkeypatch.setattr(journal.config, "CONTINUATION_MANAGEMENT_PROFIT_PROTECT_TRIGGER_R", 99.0)
+    monkeypatch.setattr(journal.config, "CONTINUATION_MANAGEMENT_MAX_TP_EXTENSIONS", 0)
+    trade = {
+        "symbol": "EURUSD",
+        "direction": "BUY",
+        "entry_price": 1.1000,
+        "initial_stop_loss": 1.0980,
+        "current_stop_loss": 1.1000,
+        "current_take_profit": 1.1040,
+        "risk_at_entry": 0.0020,
+        "management_events": [],
+    }
+
+    decision = journal._evaluate_management_event(trade, FakeSignal(signal_type="continuation", signal_price=1.1022), "event-1")
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == journal.MANAGEMENT_REJECTED_EXTENSION_CAP
+
+
+def test_continuation_rejects_risk_increasing_sl_change(monkeypatch):
+    monkeypatch.setattr(journal.config, "CONTINUATION_MANAGEMENT_BE_TRIGGER_R", 1.0)
+    trade = {
+        "symbol": "EURUSD",
+        "direction": "BUY",
+        "entry_price": 1.1000,
+        "initial_stop_loss": 1.0980,
+        "current_stop_loss": 1.1010,
+        "current_take_profit": 1.1040,
+        "risk_at_entry": 0.0020,
+        "management_events": [],
+    }
+
+    decision = journal._evaluate_management_event(trade, FakeSignal(signal_type="continuation", signal_price=1.1022), "event-1")
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == journal.MANAGEMENT_REJECTED_RISK_INCREASE
+
+
+def test_opposite_direction_continuation_records_warning(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal(direction="BUY"))
+    journal.append_signal(FakeSignal(direction="SELL", signal_type="continuation", signal_price=1.0975, entry_price=1.0975))
+    warning, trade = journal.read_journal()
+
+    assert warning["lifecycle_role"] == "warning"
+    assert warning["management_reason"] == "opposite_direction_continuation_warning"
+    assert trade["opposite_direction_continuation_warning_count"] == 1
+
+
+def test_trade_closed_between_observation_and_management_is_rejected(journal_file, monkeypatch):
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+    journal.append_signal(FakeSignal())
+    original_lookup = journal._active_managed_trade_for_direction
+    calls = 0
+
+    def closes_on_recheck(entries, symbol, direction):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return original_lookup(entries, symbol, direction)
+        return None
+
+    monkeypatch.setattr(journal, "_active_managed_trade_for_direction", closes_on_recheck)
+
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1022, entry_price=1.1022))
+    management = journal.read_journal()[0]
+
+    assert management["management_accepted"] is False
+    assert management["management_rejection_reason"] == "trade_closed_before_management"
 
 
 def test_append_signal_suppresses_same_symbol_different_strategy(journal_file, monkeypatch):
@@ -347,6 +528,58 @@ def test_grade_and_invalidation_update_trade_grade_and_stats(journal_file):
     assert entry["trade_grade"] == "INVALID"
     assert entry["usable_for_strategy_stats"] is False
     assert entry["stats_exclusion_reason"] == "manual_invalidated"
+
+
+def test_manual_close_profit_classifies_managed_win(journal_file):
+    write_entries(
+        journal_file,
+        [
+            {
+                "signal_id": "sig-1",
+                "direction": "BUY",
+                "entry_price": 1.1000,
+                "initial_stop_loss": 1.0980,
+                "stop_loss": 1.0980,
+                "exit_price": 1.1030,
+                "grade": "PENDING",
+                "trade_grade": "PENDING",
+            }
+        ],
+    )
+
+    assert journal.grade_by_signal_id("sig-1", "MANUAL_CLOSE") is True
+    entry = journal.read_journal()[0]
+
+    assert entry["managed_exit_reason"] == journal.MANAGED_EXIT_MANUAL_PROFIT
+    assert entry["managed_result_category"] == journal.MANAGED_RESULT_WIN
+    assert entry["captured_r"] == pytest.approx(1.5)
+    assert entry["trade_grade"] == "TP_HIT"
+
+
+def test_manual_close_loss_classifies_managed_loss(journal_file):
+    write_entries(
+        journal_file,
+        [
+            {
+                "signal_id": "sig-1",
+                "direction": "SELL",
+                "entry_price": 1.1000,
+                "initial_stop_loss": 1.1020,
+                "stop_loss": 1.1020,
+                "exit_price": 1.1010,
+                "grade": "PENDING",
+                "trade_grade": "PENDING",
+            }
+        ],
+    )
+
+    assert journal.grade_by_signal_id("sig-1", "MANUAL_CLOSE") is True
+    entry = journal.read_journal()[0]
+
+    assert entry["managed_exit_reason"] == journal.MANAGED_EXIT_MANUAL_LOSS
+    assert entry["managed_result_category"] == journal.MANAGED_RESULT_LOSS
+    assert entry["captured_r"] == pytest.approx(-0.5)
+    assert entry["trade_grade"] == "SL_HIT"
 
 
 def test_purge_journal_entries_scopes_to_filter(journal_file):

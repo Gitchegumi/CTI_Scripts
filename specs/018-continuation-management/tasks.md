@@ -17,10 +17,10 @@
 
 **Purpose**: Establish configuration, fixture, and documentation anchors used by all lifecycle work.
 
-- [ ] T001 Add continuation management environment defaults to `src/tradegumi/config.py`
-- [ ] T002 Add continuation management default variable documentation to `.env.example`
-- [ ] T003 [P] Add current-week continuation-only fixture notes for issue #100 validation in `specs/018-continuation-management/quickstart.md`
-- [ ] T004 [P] Review planned Python changes for required module/function docstrings and record expectations in `specs/018-continuation-management/quickstart.md`
+- [X] T001 Add continuation management environment defaults to `src/tradegumi/config.py`
+- [X] T002 Add continuation management default variable documentation to `.env.example`
+- [X] T003 [P] Add current-week continuation-only fixture notes for issue #100 validation in `specs/018-continuation-management/quickstart.md`
+- [X] T004 [P] Review planned Python changes for required module/function docstrings and record expectations in `specs/018-continuation-management/quickstart.md`
 
 ---
 
@@ -30,13 +30,13 @@
 
 **Critical**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Add lifecycle constants, role names, and managed outcome reason constants to `src/tradegumi/journal.py`
-- [ ] T006 Add lifecycle fields to journal normalization and CSV export headers in `src/tradegumi/journal.py`
-- [ ] T007 Add managed trade dataclass or typed helper structures for entry, management event, and outcome values in `src/tradegumi/journal.py`
-- [ ] T008 Add active managed-trade lookup by symbol and direction in `src/tradegumi/journal.py`
-- [ ] T009 Add reusable R-multiple and direction-aware favorable-move helper functions in `src/tradegumi/journal.py`
-- [ ] T010 [P] Add lifecycle summary dataclass fields and zero defaults to `src/tradegumi/strategy_metrics.py`
-- [ ] T011 [P] Add TypeScript lifecycle field types to `dashboard/src/types/index.ts`
+- [X] T005 Add lifecycle constants, role names, and managed outcome reason constants to `src/tradegumi/journal.py`
+- [X] T006 Add lifecycle fields to journal normalization and CSV export headers in `src/tradegumi/journal.py`
+- [X] T007 Add managed trade dataclass or typed helper structures for entry, management event, and outcome values in `src/tradegumi/journal.py`
+- [X] T008 Add active managed-trade lookup by symbol and direction in `src/tradegumi/journal.py`
+- [X] T009 Add reusable R-multiple and direction-aware favorable-move helper functions in `src/tradegumi/journal.py`
+- [X] T010 [P] Add lifecycle summary dataclass fields and zero defaults to `src/tradegumi/strategy_metrics.py`
+- [X] T011 [P] Add TypeScript lifecycle field types to `dashboard/src/types/index.ts`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin.
 
@@ -50,18 +50,18 @@
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Add journal tests for pullback-created trade entries and continuation-only non-entry evidence in `src/tradegumi/tests/test_journal.py`
-- [ ] T013 [P] [US1] Add signal engine regression tests proving continuation detection is preserved while entry creation is blocked without active pullback state in `src/tradegumi/tests/test_signal_engine.py`
-- [ ] T014 [P] [US1] Add metrics regression test for the 92-row issue sample and 101-row current-week continuation-only sample producing zero pullback entries in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T012 [P] [US1] Add journal tests for pullback-created trade entries and continuation-only non-entry evidence in `src/tradegumi/tests/test_journal.py`
+- [X] T013 [P] [US1] Add signal engine regression tests proving continuation detection is preserved while entry creation is blocked without active pullback state in `src/tradegumi/tests/test_signal_engine.py`
+- [X] T014 [P] [US1] Add metrics regression test for the 92-row issue sample and 101-row current-week continuation-only sample producing zero pullback entries in `src/tradegumi/tests/test_strategy_metrics.py`
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Initialize `trade_id`, `entry_signal_id`, `entry_signal_type`, `current_stop_loss`, `current_take_profit`, `risk_at_entry`, and `lifecycle_role=entry` for pullback entries in `src/tradegumi/journal.py`
-- [ ] T016 [US1] Prevent duplicate active same-symbol same-direction pullback entries in `src/tradegumi/journal.py`
-- [ ] T017 [US1] Route continuation signals with no active same-direction pullback trade to non-entry lifecycle evidence in `src/tradegumi/journal.py`
-- [ ] T018 [US1] Update signal alert/journal call path to use lifecycle-aware append behavior in `src/tradegumi/alerts.py`
-- [ ] T019 [US1] Ensure signal engine continuation generation remains available for management routing in `src/tradegumi/signal_engine.py`
-- [ ] T020 [US1] Preserve legacy continuation records as readable non-managed signal evidence in `src/tradegumi/journal.py`
+- [X] T015 [US1] Initialize `trade_id`, `entry_signal_id`, `entry_signal_type`, `current_stop_loss`, `current_take_profit`, `risk_at_entry`, and `lifecycle_role=entry` for pullback entries in `src/tradegumi/journal.py`
+- [X] T016 [US1] Prevent duplicate active same-symbol same-direction pullback entries in `src/tradegumi/journal.py`
+- [X] T017 [US1] Route continuation signals with no active same-direction pullback trade to non-entry lifecycle evidence in `src/tradegumi/journal.py`
+- [X] T018 [US1] Update signal alert/journal call path to use lifecycle-aware append behavior in `src/tradegumi/alerts.py`
+- [X] T019 [US1] Ensure signal engine continuation generation remains available for management routing in `src/tradegumi/signal_engine.py`
+- [X] T020 [US1] Preserve legacy continuation records as readable non-managed signal evidence in `src/tradegumi/journal.py`
 
 **Checkpoint**: User Story 1 is functional and independently testable.
 
@@ -75,21 +75,21 @@
 
 ### Tests for User Story 2
 
-- [ ] T021 [P] [US2] Add same-direction continuation management acceptance tests for break-even, profit-protect, and TP extension rules in `src/tradegumi/tests/test_journal.py`
-- [ ] T022 [P] [US2] Add rejection tests for insufficient favorable movement, risk-increasing SL changes, extension caps, disabled management, and duplicate event replay in `src/tradegumi/tests/test_journal.py`
-- [ ] T023 [P] [US2] Add opposite-direction continuation warning tests in `src/tradegumi/tests/test_journal.py`
-- [ ] T024 [P] [US2] Add race-condition test for a trade closing between continuation observation and management application in `src/tradegumi/tests/test_journal.py`
+- [X] T021 [P] [US2] Add same-direction continuation management acceptance tests for break-even, profit-protect, and TP extension rules in `src/tradegumi/tests/test_journal.py`
+- [X] T022 [P] [US2] Add rejection tests for insufficient favorable movement, risk-increasing SL changes, extension caps, disabled management, and duplicate event replay in `src/tradegumi/tests/test_journal.py`
+- [X] T023 [P] [US2] Add opposite-direction continuation warning tests in `src/tradegumi/tests/test_journal.py`
+- [X] T024 [P] [US2] Add race-condition test for a trade closing between continuation observation and management application in `src/tradegumi/tests/test_journal.py`
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Implement continuation management event creation with `management_event_id`, `source_signal_id`, accepted flag, and rejection reason in `src/tradegumi/journal.py`
-- [ ] T026 [US2] Implement break-even SL movement from configured R threshold in `src/tradegumi/journal.py`
-- [ ] T027 [US2] Implement profit-protect SL tightening from configured R threshold and offset in `src/tradegumi/journal.py`
-- [ ] T028 [US2] Implement capped TP extension from configured multiple, max extension count, and max target R in `src/tradegumi/journal.py`
-- [ ] T029 [US2] Implement management rejection reasons for no active trade, insufficient progress, risk increase, duplicate event, and cap reached in `src/tradegumi/journal.py`
-- [ ] T030 [US2] Implement opposite-direction continuation warning persistence without opening a trade in `src/tradegumi/journal.py`
-- [ ] T031 [US2] Preserve useful continuation management evidence when prime-entry suppression would otherwise hide duplicate entry alerts in `src/tradegumi/journal.py`
-- [ ] T032 [US2] Revalidate active trade state immediately before applying continuation management changes in `src/tradegumi/journal.py`
+- [X] T025 [US2] Implement continuation management event creation with `management_event_id`, `source_signal_id`, accepted flag, and rejection reason in `src/tradegumi/journal.py`
+- [X] T026 [US2] Implement break-even SL movement from configured R threshold in `src/tradegumi/journal.py`
+- [X] T027 [US2] Implement profit-protect SL tightening from configured R threshold and offset in `src/tradegumi/journal.py`
+- [X] T028 [US2] Implement capped TP extension from configured multiple, max extension count, and max target R in `src/tradegumi/journal.py`
+- [X] T029 [US2] Implement management rejection reasons for no active trade, insufficient progress, risk increase, duplicate event, and cap reached in `src/tradegumi/journal.py`
+- [X] T030 [US2] Implement opposite-direction continuation warning persistence without opening a trade in `src/tradegumi/journal.py`
+- [X] T031 [US2] Preserve useful continuation management evidence when prime-entry suppression would otherwise hide duplicate entry alerts in `src/tradegumi/journal.py`
+- [X] T032 [US2] Revalidate active trade state immediately before applying continuation management changes in `src/tradegumi/journal.py`
 
 **Checkpoint**: User Stories 1 and 2 are functional and independently testable.
 
@@ -103,17 +103,17 @@
 
 ### Tests for User Story 3
 
-- [ ] T033 [P] [US3] Add managed TP, SL loss, break-even SL, and profit-protected SL outcome tests for BUY and SELL trades in `src/tradegumi/tests/test_signal_outcomes.py`
-- [ ] T034 [P] [US3] Add manual close profit and manual close loss classification tests in `src/tradegumi/tests/test_journal.py`
-- [ ] T035 [P] [US3] Add captured R and managed-versus-original result comparison tests in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T033 [P] [US3] Add managed TP, SL loss, break-even SL, and profit-protected SL outcome tests for BUY and SELL trades in `src/tradegumi/tests/test_signal_outcomes.py`
+- [X] T034 [P] [US3] Add manual close profit and manual close loss classification tests in `src/tradegumi/tests/test_journal.py`
+- [X] T035 [P] [US3] Add captured R and managed-versus-original result comparison tests in `src/tradegumi/tests/test_strategy_metrics.py`
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] Add direction-aware managed exit classification helper in `src/tradegumi/signal_outcomes.py`
-- [ ] T037 [US3] Update outcome application to use `current_stop_loss` and `current_take_profit` for managed trades in `src/tradegumi/signal_outcomes.py`
-- [ ] T038 [US3] Persist `managed_exit_reason`, `managed_result_category`, `captured_r`, and close fields on managed trade closure in `src/tradegumi/journal.py`
-- [ ] T039 [US3] Update manual grade and manual close paths to classify profit or loss relative to entry and direction in `src/tradegumi/journal.py`
-- [ ] T040 [US3] Preserve legacy grade and outcome behavior for unmanaged records in `src/tradegumi/signal_outcomes.py`
+- [X] T036 [US3] Add direction-aware managed exit classification helper in `src/tradegumi/signal_outcomes.py`
+- [X] T037 [US3] Update outcome application to use `current_stop_loss` and `current_take_profit` for managed trades in `src/tradegumi/signal_outcomes.py`
+- [X] T038 [US3] Persist `managed_exit_reason`, `managed_result_category`, `captured_r`, and close fields on managed trade closure in `src/tradegumi/journal.py`
+- [X] T039 [US3] Update manual grade and manual close paths to classify profit or loss relative to entry and direction in `src/tradegumi/journal.py`
+- [X] T040 [US3] Preserve legacy grade and outcome behavior for unmanaged records in `src/tradegumi/signal_outcomes.py`
 
 **Checkpoint**: User Stories 1, 2, and 3 are functional and independently testable.
 
@@ -127,20 +127,20 @@
 
 ### Tests for User Story 4
 
-- [ ] T041 [P] [US4] Add Signal Journal CSV export tests for lifecycle fields and legacy blank-field compatibility in `src/tradegumi/tests/test_journal.py`
-- [ ] T042 [P] [US4] Add strategy metrics summary tests for all managed lifecycle counters in `src/tradegumi/tests/test_strategy_metrics.py`
-- [ ] T043 [P] [US4] Add observability regression tests for lifecycle alert and JSON state output in `src/tradegumi/tests/test_alerts.py`
+- [X] T041 [P] [US4] Add Signal Journal CSV export tests for lifecycle fields and legacy blank-field compatibility in `src/tradegumi/tests/test_journal.py`
+- [X] T042 [P] [US4] Add strategy metrics summary tests for all managed lifecycle counters in `src/tradegumi/tests/test_strategy_metrics.py`
+- [X] T043 [P] [US4] Add observability regression tests for lifecycle alert and JSON state output in `src/tradegumi/tests/test_alerts.py`
 
 ### Implementation for User Story 4
 
-- [ ] T044 [P] [US4] Add managed lifecycle TypeScript field definitions in `dashboard/src/types/index.ts`
-- [ ] T045 [US4] Aggregate pullback entries, continuation management observed, accepted, rejected, TP extensions, SL tightenings, break-even moves, profit-protected wins, opposite-direction warnings, average R captured, MFE, and managed-vs-original deltas in `src/tradegumi/strategy_metrics.py`
-- [ ] T046 [US4] Include lifecycle identifiers and managed result fields in strategy metrics opportunity export rows in `src/tradegumi/strategy_metrics.py`
-- [ ] T047 [US4] Display lifecycle role, management status, old/new SL/TP values, and managed outcomes in `dashboard/src/app/journal/page.tsx`
-- [ ] T048 [US4] Display managed lifecycle counters and managed-vs-original comparison in `dashboard/src/app/strategy-metrics/page.tsx`
-- [ ] T049 [US4] Ensure journal and metrics API responses remain backward compatible for blank legacy lifecycle fields in `src/tradegumi/api_server.py`
-- [ ] T050 [US4] Add Discord-facing lifecycle message semantics for entry, management, warning, and managed outcome events in `src/tradegumi/alerts.py`
-- [ ] T051 [US4] Ensure lifecycle events update machine-readable JSON state consumed by the dashboard in `src/tradegumi/signal_processor.py`
+- [X] T044 [P] [US4] Add managed lifecycle TypeScript field definitions in `dashboard/src/types/index.ts`
+- [X] T045 [US4] Aggregate pullback entries, continuation management observed, accepted, rejected, TP extensions, SL tightenings, break-even moves, profit-protected wins, opposite-direction warnings, average R captured, MFE, and managed-vs-original deltas in `src/tradegumi/strategy_metrics.py`
+- [X] T046 [US4] Include lifecycle identifiers and managed result fields in strategy metrics opportunity export rows in `src/tradegumi/strategy_metrics.py`
+- [X] T047 [US4] Display lifecycle role, management status, old/new SL/TP values, and managed outcomes in `dashboard/src/app/journal/page.tsx`
+- [X] T048 [US4] Display managed lifecycle counters and managed-vs-original comparison in `dashboard/src/app/strategy-metrics/page.tsx`
+- [X] T049 [US4] Ensure journal and metrics API responses remain backward compatible for blank legacy lifecycle fields in `src/tradegumi/api_server.py`
+- [X] T050 [US4] Add Discord-facing lifecycle message semantics for entry, management, warning, and managed outcome events in `src/tradegumi/alerts.py`
+- [X] T051 [US4] Ensure lifecycle events update machine-readable JSON state consumed by the dashboard in `src/tradegumi/signal_processor.py`
 
 **Checkpoint**: All user stories are independently functional.
 
@@ -150,14 +150,14 @@
 
 **Purpose**: Validation, documentation, code quality, and release readiness across all stories.
 
-- [ ] T052 [P] Update managed lifecycle documentation in `docs/signal-journal.md`
-- [ ] T053 [P] Update validation notes and manual replay scenarios in `specs/018-continuation-management/quickstart.md`
-- [ ] T054 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and required docstrings in `src/tradegumi/`
-- [ ] T055 Run focused Python validation from quickstart in `src/tradegumi/tests/`
-- [ ] T056 Run full Python regression validation in `src/tradegumi/tests/`
-- [ ] T057 Run dashboard lint and build checks in `dashboard/`
-- [ ] T058 Confirm continuation-only exports from issue #100 and current-week sample create zero trade entries using `specs/018-continuation-management/quickstart.md`
-- [ ] T059 Verify signal evaluation and journal/metrics export responsiveness still meet plan targets using `specs/018-continuation-management/quickstart.md`
+- [X] T052 [P] Update managed lifecycle documentation in `docs/signal-journal.md`
+- [X] T053 [P] Update validation notes and manual replay scenarios in `specs/018-continuation-management/quickstart.md`
+- [X] T054 Review changed Python code for intention-revealing names, simple control flow, no unexplained magic values, and required docstrings in `src/tradegumi/`
+- [X] T055 Run focused Python validation from quickstart in `src/tradegumi/tests/`
+- [X] T056 Run full Python regression validation in `src/tradegumi/tests/`
+- [X] T057 Run dashboard lint and build checks in `dashboard/`
+- [X] T058 Confirm continuation-only exports from issue #100 and current-week sample create zero trade entries using `specs/018-continuation-management/quickstart.md`
+- [X] T059 Verify signal evaluation and journal/metrics export responsiveness still meet plan targets using `specs/018-continuation-management/quickstart.md`
 - [ ] T060 Submit PR as DockeGumi using gh cli and `gh auth status` to ensure which user will be the PR author. Set GitcheGumi as reviewer before opening the PR.
 
 ---

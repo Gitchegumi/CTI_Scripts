@@ -2,6 +2,13 @@
 
 ## Backend Tests
 
+The issue #100 reference set has 92 continuation-heavy rows with no valid
+pullback entries. The current-week export from 2026-06-08 through 2026-06-11
+has 101 signals with zero pullback entries and nearly all continuation entries
+failing when treated as entries. Use those files only as replay fixtures; the
+expected result is that continuation rows become management evidence or
+rejections, never fresh trade entries.
+
 Run focused lifecycle tests:
 
 ```powershell
@@ -36,3 +43,17 @@ npm run build
 8. Close a BUY trade at an SL above entry and a SELL trade at an SL below entry and confirm both count as profit-protected wins.
 9. Export the Signal Journal and strategy metrics and confirm lifecycle fields and counters are present.
 10. Open the journal and strategy metrics dashboards and confirm lifecycle roles, management decisions, and managed outcomes are visible.
+
+## Python Review Notes
+
+New lifecycle helpers should keep short docstrings when they encode a business
+rule rather than a direct data move. In particular, document:
+
+- Pullback versus continuation identity helpers.
+- Managed-trade lookup and race recheck helpers.
+- Management decision and evidence-writing helpers.
+- Managed exit classification.
+- Metrics lifecycle aggregation.
+
+Prefer explicit reason strings from the journal constants for every rejection
+or warning path so exported rows stay stable across UI, API, and CSV consumers.

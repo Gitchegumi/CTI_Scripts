@@ -8,6 +8,7 @@ from pytz import timezone
 
 from tradegumi.signal_engine import Signal
 from tradegumi.alerts import (
+    format_signal_message,
     save_signal,
     record_trade_correlation,
     _parse_ts,
@@ -123,6 +124,30 @@ class TestSaveSignal:
             save_signal(make_signal(entry=1.1000, sl=1.1000, tp=1.1400))
         data = json.loads(sig_file.read_text())
         assert data[0]["rr"] is None
+
+    def test_save_signal_writes_lifecycle_state(self, tmp_path):
+        sig_file = tmp_path / "signals.json"
+        signal = make_signal()
+        signal.signal_type = "continuation"
+        with patch("tradegumi.alerts.SIGNALS_FILE", sig_file):
+            save_signal(signal)
+
+        data = json.loads(sig_file.read_text())
+        assert data[0]["signal_type"] == "continuation"
+        assert data[0]["lifecycle_role"] == "management"
+        assert data[0]["source_signal_type"] == "continuation"
+        assert data[0]["current_stop_loss"] == signal.stop_loss
+        assert data[0]["current_take_profit"] == signal.take_profit
+
+    def test_format_signal_message_includes_lifecycle_field(self):
+        signal = make_signal()
+        signal.signal_type = "continuation"
+
+        payload = format_signal_message(signal)
+        fields = {field["name"]: field["value"] for field in payload["embeds"][0]["fields"]}
+
+        assert fields["Signal Type"] == "continuation"
+        assert fields["Lifecycle"] == "Continuation management event"
 
 
 # ── record_trade_correlation ─────────────────────────────────────────────────

@@ -46,6 +46,20 @@ interface JournalEntry {
   prime_close_ambiguous?: boolean;
   prime_suppressed_same_direction_count?: number;
   prime_suppressed_opposite_direction_count?: number;
+  lifecycle_role?: string | null;
+  trade_id?: string | null;
+  management_accepted?: boolean | null;
+  management_reason?: string | null;
+  management_rejection_reason?: string | null;
+  old_stop_loss?: number | null;
+  new_stop_loss?: number | null;
+  old_take_profit?: number | null;
+  new_take_profit?: number | null;
+  current_stop_loss?: number | null;
+  current_take_profit?: number | null;
+  managed_exit_reason?: string | null;
+  managed_result_category?: string | null;
+  captured_r?: number | null;
   grade_timestamp: string | null;
   notes: string;
   discord_msg_id: string | null;
@@ -401,6 +415,40 @@ function TradeGroupCard({
             </div>
             <div className="text-slate-400">R:R</div>
             <div className="text-white text-right">{master.rr != null ? master.rr.toFixed(1) : "N/A"}</div>
+            {master.lifecycle_role && master.lifecycle_role !== "legacy_signal" && (
+              <>
+                <div className="text-slate-400">Lifecycle</div>
+                <div className="text-cyan-200 text-right">{titleCaseToken(master.lifecycle_role)}</div>
+              </>
+            )}
+            {(master.current_stop_loss != null || master.current_take_profit != null) && (
+              <>
+                <div className="text-slate-400">Managed SL / TP</div>
+                <div className="text-white text-right">
+                  <span className="text-red-300">{master.current_stop_loss != null ? fmtPrice(master.current_stop_loss) : "N/A"}</span>
+                  {" / "}
+                  <span className="text-green-300">{master.current_take_profit != null ? fmtPrice(master.current_take_profit) : "N/A"}</span>
+                </div>
+              </>
+            )}
+            {master.lifecycle_role === "management" && (
+              <>
+                <div className="text-slate-400">Management</div>
+                <div className={master.management_accepted ? "text-green-300 text-right" : "text-orange-300 text-right"}>
+                  {master.management_accepted ? "Accepted" : titleCaseToken(master.management_rejection_reason || master.management_reason || "Rejected")}
+                </div>
+              </>
+            )}
+            {(master.old_stop_loss != null || master.new_stop_loss != null || master.old_take_profit != null || master.new_take_profit != null) && (
+              <>
+                <div className="text-slate-400">SL/TP Change</div>
+                <div className="text-white text-right">
+                  {master.old_stop_loss != null ? fmtPrice(master.old_stop_loss) : "N/A"} {"->"} {master.new_stop_loss != null ? fmtPrice(master.new_stop_loss) : "N/A"}
+                  {" | "}
+                  {master.old_take_profit != null ? fmtPrice(master.old_take_profit) : "N/A"} {"->"} {master.new_take_profit != null ? fmtPrice(master.new_take_profit) : "N/A"}
+                </div>
+              </>
+            )}
             <div className="text-slate-400">Entry Valid</div>
             <div className="text-white text-right">
               {master.entry_valid_at_signal == null ? "Unknown" : master.entry_valid_at_signal ? "Yes" : "No"}
@@ -426,6 +474,15 @@ function TradeGroupCard({
                 <div className="text-slate-400">Outcome</div>
                 <div className={master.status === "ambiguous" ? "text-amber-300 text-right" : "text-white text-right"}>
                   {outcomeLabel(master)}
+                </div>
+              </>
+            )}
+            {master.managed_result_category && (
+              <>
+                <div className="text-slate-400">Managed Result</div>
+                <div className="text-white text-right">
+                  {titleCaseToken(master.managed_result_category)}
+                  {master.captured_r != null ? ` (${master.captured_r.toFixed(2)}R)` : ""}
                 </div>
               </>
             )}

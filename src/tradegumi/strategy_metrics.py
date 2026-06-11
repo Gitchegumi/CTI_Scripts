@@ -180,6 +180,21 @@ class EvaluatedOpportunity:
             data["criteria"] = [c.to_dict() for c in self.criteria]
         else:
             data.pop("criteria", None)
+        lifecycle_role = "management" if self.signal_type == "continuation" else "entry" if self.signal_type in {"pullback", "high_value_pullback"} else "legacy_signal"
+        data.setdefault("lifecycle_role", lifecycle_role)
+        data.setdefault("trade_id", None)
+        data.setdefault("entry_signal_id", None)
+        data.setdefault("entry_signal_type", None if lifecycle_role == "management" else self.signal_type)
+        data.setdefault("management_event_id", None)
+        data.setdefault("source_signal_id", None)
+        data.setdefault("source_signal_type", "continuation" if lifecycle_role == "management" else None)
+        data.setdefault("current_stop_loss", None)
+        data.setdefault("current_take_profit", None)
+        data.setdefault("managed_exit_reason", None)
+        data.setdefault("managed_result_category", None)
+        data.setdefault("captured_r", None)
+        data.setdefault("managed_original_tp_result", None)
+        data.setdefault("managed_result_delta", None)
         return data
 
 
@@ -238,6 +253,19 @@ class DiagnosticSummary:
     strategy_counts: dict[str, int] = field(default_factory=dict)
     signal_type_counts: dict[str, int] = field(default_factory=dict)
     pullback_summary: dict[str, Any] = field(default_factory=dict)
+    managed_lifecycle_summary: dict[str, Any] = field(default_factory=dict)
+    pullback_entries_opened: int = 0
+    continuation_management_events_observed: int = 0
+    continuation_management_events_accepted: int = 0
+    continuation_management_events_rejected: int = 0
+    tp_extension_count: int = 0
+    sl_tighten_count: int = 0
+    break_even_move_count: int = 0
+    profit_protected_sl_win_count: int = 0
+    opposite_direction_continuation_warning_count: int = 0
+    average_r_captured: Optional[float] = None
+    max_favorable_excursion_before_exit: Optional[float] = None
+    managed_vs_original_result_delta: dict[str, int] = field(default_factory=dict)
     threshold_version_unknown_reasons: dict[str, int] = field(default_factory=dict)
     near_miss_reason_counts: dict[str, int] = field(default_factory=dict)
     pipeline_funnel: dict[str, int] = field(default_factory=dict)
@@ -1133,6 +1161,75 @@ def _prime_suppression_summary(start_iso: str, end_iso: str, symbol: Optional[st
     }
 
 
+def _managed_lifecycle_summary(start_iso: str, end_iso: str, symbol: Optional[str] = None) -> dict[str, Any]:
+    """Aggregate managed trade lifecycle evidence from Signal Journal records."""
+    try:
+        from tradegumi import journal as signal_journal
+
+        with signal_journal._lock:
+            entries = signal_journal._read_entries_oldest_first()
+    except Exception:
+        entries = []
+
+    start_dt = _parse_dt(start_iso)
+    end_dt = _parse_dt(end_iso)
+    symbol_key = symbol.upper() if symbol else None
+    summary = {
+        "pullback_entries_opened": 0,
+        "continuation_management_events_observed": 0,
+        "continuation_management_events_accepted": 0,
+        "continuation_management_events_rejected": 0,
+        "tp_extension_count": 0,
+        "sl_tighten_count": 0,
+        "break_even_move_count": 0,
+        "profit_protected_sl_win_count": 0,
+        "opposite_direction_continuation_warning_count": 0,
+        "average_r_captured": None,
+        "max_favorable_excursion_before_exit": None,
+        "managed_vs_original_result_delta": {"improved": 0, "unchanged": 0, "worsened": 0, "unknown": 0},
+    }
+    captured_r_values: list[float] = []
+    mfe_values: list[float] = []
+    for entry in entries:
+        entry_symbol = str(entry.get("symbol") or "").upper()
+        if symbol_key and entry_symbol != symbol_key:
+            continue
+        timestamp = _journal_timestamp(entry)
+        if timestamp is not None and not (start_dt <= timestamp < end_dt):
+            continue
+        role = entry.get("lifecycle_role")
+        if role == "entry":
+            summary["pullback_entries_opened"] += 1
+            summary["tp_extension_count"] += int(entry.get("tp_extension_count") or 0)
+            summary["sl_tighten_count"] += int(entry.get("sl_tighten_count") or 0)
+            summary["break_even_move_count"] += int(entry.get("break_even_move_count") or 0)
+            summary["opposite_direction_continuation_warning_count"] += int(entry.get("opposite_direction_continuation_warning_count") or 0)
+        if role in {"management", "warning"}:
+            summary["continuation_management_events_observed"] += 1
+            if entry.get("management_accepted") is True:
+                summary["continuation_management_events_accepted"] += 1
+            else:
+                summary["continuation_management_events_rejected"] += 1
+            if role == "warning":
+                summary["opposite_direction_continuation_warning_count"] += 1
+        if entry.get("managed_exit_reason") == "sl_hit_with_profit":
+            summary["profit_protected_sl_win_count"] += 1
+        captured_r = _safe_float(entry.get("captured_r"))
+        if captured_r is not None:
+            captured_r_values.append(captured_r)
+        mfe = _safe_float(entry.get("max_favorable_excursion"))
+        if mfe is not None:
+            mfe_values.append(mfe)
+        delta = str(entry.get("managed_result_delta") or "unknown")
+        if delta in summary["managed_vs_original_result_delta"]:
+            summary["managed_vs_original_result_delta"][delta] += 1
+    if captured_r_values:
+        summary["average_r_captured"] = round(sum(captured_r_values) / len(captured_r_values), 4)
+    if mfe_values:
+        summary["max_favorable_excursion_before_exit"] = max(mfe_values)
+    return summary
+
+
 def _is_pullback_identity(strategy: Any, signal_type: Any) -> bool:
     """Return whether a strategy/signal identity represents a pullback setup."""
     strategy_name = str(strategy or "").lower()
@@ -1379,6 +1476,7 @@ def get_summary(
             warnings.append("Strategy threshold version changed during selected period")
 
         prime_summary = _prime_suppression_summary(start_iso, end_iso, symbol)
+        managed_summary = _managed_lifecycle_summary(start_iso, end_iso, symbol)
         summary = DiagnosticSummary(
             start=start_iso,
             end=end_iso,
@@ -1409,6 +1507,19 @@ def get_summary(
             strategy_counts=strategy_counts,
             signal_type_counts=signal_type_counts,
             pullback_summary=_pullback_summary(conn, where_sql, params, start_iso, end_iso, symbol),
+            managed_lifecycle_summary=managed_summary,
+            pullback_entries_opened=managed_summary["pullback_entries_opened"],
+            continuation_management_events_observed=managed_summary["continuation_management_events_observed"],
+            continuation_management_events_accepted=managed_summary["continuation_management_events_accepted"],
+            continuation_management_events_rejected=managed_summary["continuation_management_events_rejected"],
+            tp_extension_count=managed_summary["tp_extension_count"],
+            sl_tighten_count=managed_summary["sl_tighten_count"],
+            break_even_move_count=managed_summary["break_even_move_count"],
+            profit_protected_sl_win_count=managed_summary["profit_protected_sl_win_count"],
+            opposite_direction_continuation_warning_count=managed_summary["opposite_direction_continuation_warning_count"],
+            average_r_captured=managed_summary["average_r_captured"],
+            max_favorable_excursion_before_exit=managed_summary["max_favorable_excursion_before_exit"],
+            managed_vs_original_result_delta=managed_summary["managed_vs_original_result_delta"],
             threshold_version_unknown_reasons=threshold_version_unknown_reasons,
             near_miss_reason_counts=near_miss_reason_counts,
             pipeline_funnel=_pipeline_funnel(conn, where_sql, params, total),

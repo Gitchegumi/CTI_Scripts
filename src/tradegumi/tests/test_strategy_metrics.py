@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -84,6 +85,10 @@ def opportunity(
         stats_exclusion_reason=stats_exclusion_reason,
         criteria=criteria,
     )
+
+
+def write_journal_entries(path: Path, entries: list[dict]) -> None:
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
 
 
 def test_schema_near_miss_state_and_serialization():
@@ -252,6 +257,129 @@ def test_comparison_and_export():
 
     exported = export_summary(iso(-14), iso(1), include_opportunities=True, db_path=db)
     assert len(exported["opportunities"]) == 2
+
+
+def test_opportunity_export_includes_lifecycle_placeholders():
+    db = temp_db()
+    record_opportunity(opportunity(1, decision="emitted", failed=0, usable_for_strategy_stats=True), db)
+
+    exported = export_summary(iso(-1), iso(1), include_opportunities=True, db_path=db)
+    row = exported["opportunities"][0]
+
+    assert row["lifecycle_role"] == "entry"
+    assert row["entry_signal_type"] == "pullback"
+    assert "managed_result_category" in row
+    assert "captured_r" in row
+
+
+def test_continuation_only_samples_have_zero_pullback_entries(tmp_path, monkeypatch):
+    db = temp_db()
+    journal_file = tmp_path / "signal_journal.jsonl"
+    monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
+    rows = [
+        {
+            "signal_id": f"issue-100-{idx}",
+            "symbol": "EURUSD",
+            "signal_type": "continuation",
+            "lifecycle_role": "management",
+            "created_at": "2026-06-11T12:00:00+00:00",
+            "management_accepted": False,
+        }
+        for idx in range(101)
+    ]
+    rows.extend(
+        {
+            "signal_id": f"legacy-issue-100-{idx}",
+            "symbol": "GBPUSD",
+            "strategy": "CTI-v1-continuation",
+            "signal_type": "continuation",
+            "lifecycle_role": "management",
+            "created_at": "2026-06-10T12:00:00+00:00",
+            "management_accepted": False,
+        }
+        for idx in range(92)
+    )
+    write_journal_entries(journal_file, rows)
+
+    summary = get_summary("2026-06-08", "2026-06-12", db_path=db)
+
+    assert summary["pullback_summary"]["journaled_count"] == 0
+    assert summary["pullback_entries_opened"] == 0
+    assert summary["continuation_management_events_observed"] == 193
+
+
+def test_managed_lifecycle_summary_counters_and_result_delta(tmp_path, monkeypatch):
+    db = temp_db()
+    journal_file = tmp_path / "signal_journal.jsonl"
+    monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
+    write_journal_entries(
+        journal_file,
+        [
+            {
+                "signal_id": "entry-1",
+                "symbol": "EURUSD",
+                "signal_type": "pullback",
+                "lifecycle_role": "entry",
+                "created_at": "2026-06-11T10:00:00+00:00",
+                "tp_extension_count": 1,
+                "sl_tighten_count": 2,
+                "break_even_move_count": 1,
+                "opposite_direction_continuation_warning_count": 1,
+                "captured_r": 1.5,
+                "max_favorable_excursion": 2.2,
+                "managed_result_delta": "improved",
+            },
+            {
+                "signal_id": "mgmt-1",
+                "symbol": "EURUSD",
+                "signal_type": "continuation",
+                "lifecycle_role": "management",
+                "created_at": "2026-06-11T10:05:00+00:00",
+                "management_accepted": True,
+            },
+            {
+                "signal_id": "mgmt-2",
+                "symbol": "EURUSD",
+                "signal_type": "continuation",
+                "lifecycle_role": "management",
+                "created_at": "2026-06-11T10:10:00+00:00",
+                "management_accepted": False,
+            },
+            {
+                "signal_id": "warn-1",
+                "symbol": "EURUSD",
+                "signal_type": "continuation",
+                "lifecycle_role": "warning",
+                "created_at": "2026-06-11T10:15:00+00:00",
+                "management_accepted": False,
+            },
+            {
+                "signal_id": "exit-1",
+                "symbol": "EURUSD",
+                "lifecycle_role": "outcome",
+                "created_at": "2026-06-11T10:20:00+00:00",
+                "managed_exit_reason": "sl_hit_with_profit",
+                "captured_r": 0.5,
+                "max_favorable_excursion": 1.0,
+                "managed_result_delta": "unchanged",
+            },
+        ],
+    )
+
+    summary = get_summary("2026-06-11", "2026-06-12", db_path=db)
+
+    assert summary["pullback_entries_opened"] == 1
+    assert summary["continuation_management_events_observed"] == 3
+    assert summary["continuation_management_events_accepted"] == 1
+    assert summary["continuation_management_events_rejected"] == 2
+    assert summary["tp_extension_count"] == 1
+    assert summary["sl_tighten_count"] == 2
+    assert summary["break_even_move_count"] == 1
+    assert summary["profit_protected_sl_win_count"] == 1
+    assert summary["opposite_direction_continuation_warning_count"] == 2
+    assert summary["average_r_captured"] == 1.0
+    assert summary["max_favorable_excursion_before_exit"] == 2.2
+    assert summary["managed_vs_original_result_delta"] == {"improved": 1, "unchanged": 1, "worsened": 0, "unknown": 3}
 
 
 def test_summary_counts_only_usable_emitted_signals_as_trade_opportunities():
