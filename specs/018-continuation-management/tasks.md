@@ -158,7 +158,7 @@
 - [X] T057 Run dashboard lint and build checks in `dashboard/`
 - [X] T058 Confirm continuation-only exports from issue #100 and current-week sample create zero trade entries using `specs/018-continuation-management/quickstart.md`
 - [X] T059 Verify signal evaluation and journal/metrics export responsiveness still meet plan targets using `specs/018-continuation-management/quickstart.md`
-- [ ] T060 Submit PR as DockeGumi using gh cli and `gh auth status` to ensure which user will be the PR author. Set GitcheGumi as reviewer before opening the PR.
+- [X] T060 Submit PR as DockeGumi using gh cli and `gh auth status` to ensure which user will be the PR author. Set GitcheGumi as reviewer before opening the PR.
 
 ---
 
