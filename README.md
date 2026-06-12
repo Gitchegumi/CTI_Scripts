@@ -323,30 +323,86 @@ CTI_Scripts/
 └── src/tradegumi/data/           # Runtime JSON data (loop_state, watchlist, signals)
 ```
 
-## Docker Deployment (Planned)
+## Docker Deployment
 
-TradeGumi is designed to run containerized on TrueNAS or any Docker host. The bot + dashboard + API server will be a single `docker-compose` stack. Webhook callbacks enable DockeGumi orchestration even when running on a separate machine.
+TradeGumi runs as a single `docker-compose` stack with Postgres (durable analytics) + Redis (hot runtime cache).
 
 ```yaml
-# Planned docker-compose.yml
 services:
-  tradegumi-bot:
-    build: .
+  tradegumi:
+    image: ghcr.io/gitchegumi/cti-scripts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8199:8199" # API server
-    env_file: .env
+      - "8199:8199"  # API server
+      - "3000:3000"  # Dashboard
+    env_file:
+      - .env
     volumes:
-      - tradegumi-data:/app/data
-
-  tradegumi-dashboard:
-    build: ./dashboard
-    ports:
-      - "3000:3000" # Dashboard
-    environment:
-      - NEXT_PUBLIC_API_URL=http://tradegumi-bot:8199
+      - tradegumi-data:/app/src/tradegumi/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8199/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
-      - tradegumi-bot
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradegumi
+      POSTGRES_PASSWORD: ${TRADEGUMI_POSTGRES_PASSWORD:-tradegumi}
+      POSTGRES_DB: tradegumi
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradegumi -d tradegumi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  tradegumi-data:
+  postgres-data:
+  redis-data:
 ```
+
+### Required `.env` variables
+
+```ini
+TRADEGUMI_DB_BACKEND=postgres
+TRADEGUMI_DATABASE_URL=postgresql://tradegumi:your_password@postgres:5432/tradegumi
+TRADEGUMI_REDIS_URL=redis://redis:6379/0
+TRADEGUMI_SQLITE_FALLBACK=true
+```
+
+When `TRADEGUMI_DB_BACKEND=postgres`, strategy metrics and signal journal writes go to Postgres. If Postgres is unreachable and `TRADEGUMI_SQLITE_FALLBACK=true`, the app silently falls back to the existing SQLite files. Redis caches hot runtime state (latest prices, active signals, watchlist, strategy summary) and is safe to lose — the source of truth remains Postgres.
 
 ## Oanda Setup
 
@@ -361,7 +417,7 @@ Oanda API reference: [https://developer.oanda.com/rest-live-v20/introduction/](h
 
 - [ ] MatchTrader REST client implementation
 - [ ] `TRADEGUMI_MODE=live` unlock
-- [ ] Docker Compose deployment for TrueNAS
+- [x] Docker Compose deployment with Postgres + Redis
 - [ ] Tiered risk table (from Risk_Management_Rules.docx) replacing flat 0.25%
 - [ ] Dynamic position sizing (Layer 3 — after positive expectancy validated)
 - [ ] Automated daily performance reporting to Discord
