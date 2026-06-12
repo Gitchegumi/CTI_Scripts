@@ -77,6 +77,13 @@ TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS = float(os.getenv("TRADEGUMI_STREAM_H
 TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS = float(os.getenv("TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS", "60"))
 TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS = int(os.getenv("TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS", "5"))
 
+# ── Database / Cache ────────────────────────────────────────────────────────
+TRADEGUMI_DB_BACKEND = os.getenv("TRADEGUMI_DB_BACKEND", "sqlite").lower()
+TRADEGUMI_DATABASE_URL = os.getenv("TRADEGUMI_DATABASE_URL", "")
+TRADEGUMI_REDIS_URL = os.getenv("TRADEGUMI_REDIS_URL", "")
+TRADEGUMI_SQLITE_FALLBACK = os.getenv("TRADEGUMI_SQLITE_FALLBACK", "true").lower() in ("true", "1", "yes")
+TRADEGUMI_POSTGRES_PASSWORD = os.getenv("TRADEGUMI_POSTGRES_PASSWORD", "")
+
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
 # Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)
