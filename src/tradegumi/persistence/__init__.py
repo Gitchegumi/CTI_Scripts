@@ -384,18 +384,22 @@ class PostgresBackend(DBBackend):
 
     def execute(self, sql: str, params: Optional[tuple] = None):
         conn = self._get_conn()
-        return conn.execute(sql, params or ())
+        # Translate SQLite-style ? placeholders to psycopg %s
+        translated = sql.replace("?", "%s")
+        return conn.execute(translated, params or ())
 
     def executemany(self, sql: str, params: list[tuple]):
         conn = self._get_conn()
+        translated = sql.replace("?", "%s")
         with conn.cursor() as cur:
-            cur.executemany(sql, params)
+            cur.executemany(translated, params)
         conn.commit()
 
     def fetchall(self, sql: str, params: Optional[tuple] = None) -> list[dict[str, Any]]:
         conn = self._get_conn()
+        translated = sql.replace("?", "%s")
         with conn.cursor() as cur:
-            cur.execute(sql, params or ())
+            cur.execute(translated, params or ())
             columns = [desc[0] for desc in cur.description] if cur.description else []
             return [dict(zip(columns, row)) for row in cur.fetchall()]
 

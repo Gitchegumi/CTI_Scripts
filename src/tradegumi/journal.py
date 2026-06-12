@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tradegumi import config
+from tradegumi.persistence import get_db
 
 log = logging.getLogger(__name__)
 
@@ -339,6 +340,51 @@ def _write_entries(entries: list[dict[str, Any]]) -> None:
     body = "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries)
     tmp.write_text(body, encoding="utf-8")
     tmp.replace(JOURNAL_FILE)
+
+
+def _sync_entry_to_db(entry: dict[str, Any]) -> None:
+    """Persist a journal entry to the database layer (Postgres or SQLite) alongside JSONL."""
+    try:
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO journal_entries (
+                signal_id, signal_timestamp, symbol, direction, strategy, signal_type,
+                lifecycle_role, grade, grade_timestamp, entry_price, stop_loss, take_profit,
+                lot_size, atr, rr, confidence, notes, discord_msg_id, data, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(signal_id) DO UPDATE SET
+                grade=excluded.grade,
+                grade_timestamp=excluded.grade_timestamp,
+                notes=excluded.notes,
+                data=excluded.data,
+                lifecycle_role=excluded.lifecycle_role
+            """,
+            (
+                entry.get("signal_id"),
+                entry.get("signal_timestamp"),
+                entry.get("symbol"),
+                entry.get("direction"),
+                entry.get("strategy"),
+                entry.get("signal_type"),
+                entry.get("lifecycle_role"),
+                entry.get("grade"),
+                entry.get("grade_timestamp"),
+                entry.get("entry_price"),
+                entry.get("stop_loss"),
+                entry.get("take_profit"),
+                entry.get("lot_size"),
+                entry.get("atr"),
+                entry.get("rr"),
+                entry.get("confidence"),
+                entry.get("notes"),
+                entry.get("discord_msg_id"),
+                json.dumps(entry, default=str),
+                entry.get("signal_timestamp"),
+            ),
+        )
+    except Exception as exc:
+        log.warning("Failed to sync journal entry to DB: %s", exc)
 
 
 def _normalize_filter_grade(grade: Optional[str]) -> Optional[str]:
@@ -1306,6 +1352,7 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
         else:
             entry.update({"prime_active": False, "prime_suppressed_signal_count": 0, "lifecycle_role": LIFECYCLE_LEGACY_SIGNAL})
         existing_entries.append(entry)
+        _sync_entry_to_db(entry)
         _write_entries(existing_entries)
 
     return signal_id
