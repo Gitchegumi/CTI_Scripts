@@ -298,6 +298,8 @@ export interface StrategyMetricCriterion {
   required: boolean;
   blocked_signal: boolean;
   data_quality: "complete" | "missing" | "malformed" | "not_applicable";
+  reason?: string | null;
+  context?: Record<string, unknown>;
 }
 
 export interface StrategyMetricOpportunity {
@@ -400,4 +402,30 @@ export interface StrategyMetricsComparison {
     baseline_top_blocker: string | null;
     comparison_top_blocker: string | null;
   };
+}
+
+export interface StrategyCriteriaList {
+  start: string;
+  end: string;
+  criteria: StrategyCriterionSummary[];
+}
+
+export interface CriterionDetail {
+  start: string;
+  end: string;
+  criterion_name: string;
+  layer: string;
+  evaluated_count: number;
+  pass_count: number;
+  fail_count: number;
+  pass_rate: number;
+  fail_rate: number;
+  incomplete_count: number;
+  near_miss_contribution: number;
+  average_failure_margin: number | null;
+  average_normalized_margin: number | null;
+  opportunities: StrategyMetricOpportunity[];
+  total_matching: number;
+  limit: number;
+  offset: number;
 }

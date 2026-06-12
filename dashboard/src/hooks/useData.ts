@@ -269,6 +269,9 @@ export function useStrategyMetricsSummary(params: {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Track last successful data so stale results stay visible during re-fetch
+  const [lastSummary, setLastSummary] = useState<StrategyMetricsSummary | null>(null);
+  const [lastOpportunities, setLastOpportunities] = useState<StrategyMetricOpportunity[]>([]);
   const pageSize = 200;
 
   const refresh = useCallback(async () => {
@@ -282,11 +285,12 @@ export function useStrategyMetricsSummary(params: {
       ]);
       setSummary(summaryData);
       setOpportunities(opportunityData);
+      setLastSummary(summaryData);
+      setLastOpportunities(opportunityData);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load strategy metrics");
-      setSummary(null);
-      setOpportunities([]);
+      // Keep last successful data visible on error
     } finally {
       setLoading(false);
     }
@@ -297,26 +301,35 @@ export function useStrategyMetricsSummary(params: {
     setLoadingMore(true);
     try {
       const { getStrategyMetricOpportunities } = await import("@/lib/api");
+      const currentOpp = opportunities.length > 0 ? opportunities : lastOpportunities;
       const next = await getStrategyMetricOpportunities({
         ...params,
         limit: pageSize,
-        offset: opportunities.length,
+        offset: currentOpp.length,
       });
-      setOpportunities((current) => [...current, ...next]);
+      setOpportunities((current) => {
+        const base = current.length > 0 ? current : lastOpportunities;
+        return [...base, ...next];
+      });
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load strategy metrics");
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, opportunities.length, params, pageSize]);
+  }, [loadingMore, opportunities.length, lastOpportunities.length, params, pageSize]);
 
-  useEffect(() => {
-    const id = window.setTimeout(() => { void refresh(); }, 0);
-    return () => window.clearTimeout(id);
-  }, [refresh]);
+  // No auto-fetch on mount or param change — caller must call refresh() explicitly
 
-  return { summary, opportunities, error, loading, loadingMore, loadMore, refresh };
+  return {
+    summary: summary ?? lastSummary,
+    opportunities: opportunities.length > 0 ? opportunities : lastOpportunities,
+    error,
+    loading,
+    loadingMore,
+    loadMore,
+    refresh,
+  };
 }
 
 export function useStrategyMetricsComparison(params: {
@@ -351,10 +364,7 @@ export function useStrategyMetricsComparison(params: {
     }
   }, [enabled, params]);
 
-  useEffect(() => {
-    const id = window.setTimeout(() => { void refresh(); }, 0);
-    return () => window.clearTimeout(id);
-  }, [refresh]);
+  // No auto-fetch — caller must call refresh() explicitly
 
   return { comparison, error, loading, refresh };
 }

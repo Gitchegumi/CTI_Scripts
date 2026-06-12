@@ -1562,6 +1562,200 @@ def _summary_dataclass_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     return converted
 
 
+def get_criteria_list(
+    start: str,
+    end: str,
+    symbol: Optional[str] = None,
+    strategy: Optional[str] = None,
+    signal_type: Optional[str] = None,
+    decision: Optional[str] = None,
+    first_blocker: Optional[str] = None,
+    db_path: Path = DB_FILE,
+) -> dict[str, Any]:
+    """Return per-criterion aggregated stats for the given range."""
+    init_schema(db_path)
+    where_sql, params, _, _ = _opportunity_filter_clauses(
+        start,
+        end,
+        symbol=symbol,
+        decision=decision,
+        strategy=strategy,
+        signal_type=signal_type,
+        first_blocker=first_blocker,
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        summaries = _criterion_summaries(conn, where_sql, params)
+        return {
+            "start": start,
+            "end": end,
+            "criteria": [asdict(s) for s in summaries],
+        }
+
+
+def get_criterion_detail(
+    start: str,
+    end: str,
+    criterion_name: str,
+    symbol: Optional[str] = None,
+    decision: Optional[str] = None,
+    near_miss: Optional[bool] = None,
+    first_blocker: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db_path: Path = DB_FILE,
+) -> dict[str, Any]:
+    """Return detailed stats and failed/near-miss opportunities for one criterion."""
+    init_schema(db_path)
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+
+    # Build the same base filter but also require the criterion
+    base_where, base_params, _, _ = _opportunity_filter_clauses(
+        start,
+        end,
+        symbol=symbol,
+        decision=decision,
+        first_blocker=first_blocker,
+    )
+
+    criterion_where = f"{base_where} AND c.criterion_name = ?"
+    criterion_params = [*base_params, criterion_name]
+
+    near_miss_where = criterion_where
+    near_miss_params = criterion_params[:]
+    if near_miss is True:
+        near_miss_where += " AND o.near_miss = 1"
+    elif near_miss is False:
+        near_miss_where += " AND o.near_miss = 0"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+
+        # Aggregated stats for this criterion across the full filtered set
+        stats_row = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS evaluated_count,
+                SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS pass_count,
+                SUM(CASE WHEN c.passed = 0 THEN 1 ELSE 0 END) AS fail_count,
+                SUM(CASE WHEN c.data_quality != 'complete' THEN 1 ELSE 0 END) AS incomplete_count,
+                AVG(CASE WHEN c.passed = 0 THEN ABS(c.margin) ELSE NULL END) AS average_failure_margin,
+                SUM(CASE WHEN o.near_miss = 1 AND c.blocked_signal = 1 THEN 1 ELSE 0 END) AS near_miss_contribution,
+                AVG(CASE WHEN c.normalized_margin IS NOT NULL AND c.passed = 0
+                    THEN ABS(c.normalized_margin) ELSE NULL END) AS avg_normalized_margin
+            FROM criterion_results c
+            JOIN evaluated_opportunities o ON o.id = c.opportunity_id
+            WHERE {criterion_where}
+            """,
+            criterion_params,
+        ).fetchone()
+
+        evaluated = int(stats_row["evaluated_count"] or 0) if stats_row else 0
+        passed = int(stats_row["pass_count"] or 0) if stats_row else 0
+        failed = int(stats_row["fail_count"] or 0) if stats_row else 0
+        incomplete = int(stats_row["incomplete_count"] or 0) if stats_row else 0
+        avg_margin = float(stats_row["average_failure_margin"]) if stats_row and stats_row["average_failure_margin"] is not None else None
+        avg_norm = float(stats_row["avg_normalized_margin"]) if stats_row and stats_row["avg_normalized_margin"] is not None else None
+        near_miss_contribution = int(stats_row["near_miss_contribution"] or 0) if stats_row else 0
+
+        # Layer of this criterion (from first matching row)
+        layer_row = conn.execute(
+            f"SELECT layer FROM criterion_results WHERE {criterion_where} LIMIT 1",
+            criterion_params,
+        ).fetchone()
+        layer = layer_row["layer"] if layer_row else "unknown"
+
+        # Failed + near-miss opportunities (for drilldown)
+        opp_rows = conn.execute(
+            f"""
+            SELECT o.id
+            FROM evaluated_opportunities o
+            JOIN criterion_results c ON c.opportunity_id = o.id
+            WHERE {near_miss_where}
+              AND (c.passed = 0 OR c.passed IS NULL OR o.near_miss = 1)
+            ORDER BY o.evaluated_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*near_miss_params, limit, offset],
+        ).fetchall()
+        opp_ids = [r["id"] for r in opp_rows]
+
+        # Total count for pagination
+        total_count_row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT o.id) AS total
+            FROM evaluated_opportunities o
+            JOIN criterion_results c ON c.opportunity_id = o.id
+            WHERE {near_miss_where}
+              AND (c.passed = 0 OR c.passed IS NULL OR o.near_miss = 1)
+            """,
+            near_miss_params,
+        ).fetchone()
+        total_count = int(total_count_row["total"] or 0) if total_count_row else 0
+
+        opportunities: list[dict[str, Any]] = []
+        if opp_ids:
+            placeholders = ",".join("?" for _ in opp_ids)
+            crit_rows = conn.execute(
+                f"SELECT * FROM criterion_results WHERE opportunity_id IN ({placeholders}) ORDER BY opportunity_id, id",
+                opp_ids,
+            ).fetchall()
+            criteria_by_opp: dict[str, list[CriterionResult]] = {}
+            for c in crit_rows:
+                opp_id = c["opportunity_id"]
+                criteria_by_opp.setdefault(opp_id, []).append(
+                    CriterionResult(
+                        id=c["id"],
+                        opportunity_id=opp_id,
+                        criterion_name=_canonical_criterion_name(c["criterion_name"]),
+                        layer=c["layer"],
+                        measured_value=json.loads(c["measured_value"]) if c["measured_value"] else None,
+                        threshold_value=json.loads(c["threshold_value"]) if c["threshold_value"] else None,
+                        threshold_operator=c["threshold_operator"],
+                        passed=None if c["passed"] is None else bool(c["passed"]),
+                        expected_pass=None if "expected_pass" not in c.keys() or c["expected_pass"] is None else bool(c["expected_pass"]),
+                        pass_mismatch=bool(c["pass_mismatch"]) if "pass_mismatch" in c.keys() else False,
+                        margin=c["margin"],
+                        normalized_margin=c["normalized_margin"],
+                        required=bool(c["required"]),
+                        blocked_signal=bool(c["blocked_signal"]),
+                        data_quality=c["data_quality"],
+                        diagnostic_state=c["diagnostic_state"] if "diagnostic_state" in c.keys() else "evaluated",
+                        reason=c["reason"] if "reason" in c.keys() else None,
+                        context=json.loads(c["context"] or "{}") if "context" in c.keys() else {},
+                    )
+                )
+            opp_rows_full = conn.execute(
+                f"SELECT * FROM evaluated_opportunities WHERE id IN ({placeholders})",
+                opp_ids,
+            ).fetchall()
+            for row in opp_rows_full:
+                criteria = criteria_by_opp.get(row["id"], [])
+                opp = _row_to_opportunity(row, criteria)
+                opportunities.append(opp.to_dict())
+
+        return {
+            "start": start,
+            "end": end,
+            "criterion_name": criterion_name,
+            "layer": layer,
+            "evaluated_count": evaluated,
+            "pass_count": passed,
+            "fail_count": failed,
+            "pass_rate": round(passed / evaluated, 4) if evaluated else 0.0,
+            "fail_rate": round(failed / evaluated, 4) if evaluated else 0.0,
+            "incomplete_count": incomplete,
+            "near_miss_contribution": near_miss_contribution,
+            "average_failure_margin": round(avg_margin, 6) if avg_margin is not None else None,
+            "average_normalized_margin": round(avg_norm, 6) if avg_norm is not None else None,
+            "opportunities": opportunities,
+            "total_matching": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
 def export_summary(
     start: str,
     end: str,

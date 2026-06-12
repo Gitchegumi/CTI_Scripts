@@ -1,10 +1,13 @@
 import type {
   AgentExport,
+  CriterionDetail,
+  StrategyCriteriaList,
   StrategyMetricOpportunity,
   StrategyMetricsComparison,
   StrategyMetricsSummary,
   TradePermissions,
 } from "@/types";
+
 
 const BASE_URL = "";
 
@@ -174,6 +177,38 @@ export async function getStrategyMetricsComparison(params: {
   symbol?: string;
 }): Promise<StrategyMetricsComparison> {
   return apiFetch<StrategyMetricsComparison>(`/api/strategy-metrics/compare?${query(params)}`);
+}
+
+export async function getCriteriaList(params: {
+  start: string;
+  end: string;
+  symbol?: string;
+  strategy?: string;
+  signal_type?: string;
+  decision?: string;
+  first_blocker?: string;
+}): Promise<StrategyCriteriaList> {
+  return apiFetch<StrategyCriteriaList>(`/api/strategy-metrics/criteria?${query(params)}`);
+}
+
+export async function getCriterionDetail(
+  criterionName: string,
+  params: {
+    start: string;
+    end: string;
+    symbol?: string;
+    decision?: string;
+    near_miss?: boolean;
+    first_blocker?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<CriterionDetail> {
+  const { limit = 50, offset = 0, ...rest } = params;
+  const q = query({ ...rest, limit, offset });
+  return apiFetch<CriterionDetail>(
+    `/api/strategy-metrics/criteria/${encodeURIComponent(criterionName)}?${q}`
+  );
 }
 
 export async function exportStrategyMetrics(params: {
