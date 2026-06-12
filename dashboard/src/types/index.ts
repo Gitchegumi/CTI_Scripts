@@ -388,6 +388,17 @@ export interface StrategyMetricsSummary {
   criterion_summaries: StrategyCriterionSummary[];
   top_blockers: StrategyBlockerSummary[];
   data_quality_warnings: string[];
+  pipeline_funnel?: {
+    total_evaluated: number;
+    emitted: number;
+    opportunities: number;
+    accepted: number;
+    rejected: number;
+    skipped: number;
+    indeterminate: number;
+    near_miss: number;
+  };
+  near_miss_reason_counts?: Record<string, number>;
 }
 
 export interface StrategyMetricsComparison {

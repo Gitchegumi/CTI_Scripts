@@ -602,7 +602,8 @@ export default function StrategyMetricsPage() {
     [baseStart, baseEnd, appliedFilters]
   );
 
-  const { comparison } = useStrategyMetricsComparison(comparisonParams, compare);
+  const comparisonData = useStrategyMetricsComparison(comparisonParams, compare);
+  const { comparison, refresh: comparisonRefresh } = comparisonData;
 
 
   const handleApply = useCallback(() => {
@@ -639,8 +640,8 @@ export default function StrategyMetricsPage() {
   const triggerRefresh = useCallback(async () => {
     await refresh();
     void fetchCriteriaList();
-    if (compare) void comparison.refresh();
-  }, [refresh, fetchCriteriaList, compare, comparison]);
+    if (compare && comparisonRefresh) void comparisonRefresh();
+  }, [refresh, fetchCriteriaList, compare, comparisonRefresh]);
 
   // Watch appliedFilters to trigger refresh after apply
   const prevAppliedFilters = usePrevious(appliedFilters);
@@ -667,7 +668,7 @@ export default function StrategyMetricsPage() {
 
   // Trigger comparison refresh when compare mode or compare params change
   useEffect(() => {
-    if (compare) void comparison.refresh();
+    if (compare) void comparisonData.refresh();
   }, [compare, comparisonParams, comparison]);
 
 
