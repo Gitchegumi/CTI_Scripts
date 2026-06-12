@@ -623,7 +623,11 @@ def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FIL
     if db is not None:
         # Use persistence abstraction (Postgres or SQLite)
         _record_opportunity_db(opportunity, db)
-        get_cache().invalidate_strategy_summary()
+        get_cache().invalidate_strategy_summary(
+            symbol=opportunity.symbol,
+            strategy=opportunity.strategy,
+            signal_type=opportunity.signal_type,
+        )
         return opportunity
     init_schema(db_path)
     with _lock:
@@ -1624,8 +1628,9 @@ def export_summary(
 
 """Postgres-native implementations of strategy metrics operations."""
 
+
 def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
-    """Insert or replace an opportunity and its criteria via the persistence layer."""
+    """Append-only insert of an opportunity and its criteria via the persistence layer."""
     db.execute(
         """
         INSERT INTO evaluated_opportunities (
@@ -1642,40 +1647,6 @@ def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
             filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
             trend_changed_after_filter, market_validity_state, market_validity_reason
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            evaluated_at=excluded.evaluated_at,
-            final_decision=excluded.final_decision,
-            confidence=excluded.confidence,
-            near_miss=excluded.near_miss,
-            data_complete=excluded.data_complete,
-            data_quality_notes=excluded.data_quality_notes,
-            first_blocker=excluded.first_blocker,
-            all_blockers=excluded.all_blockers,
-            blocking_layer=excluded.blocking_layer,
-            trend_decision=excluded.trend_decision,
-            pipeline_state=excluded.pipeline_state,
-            near_miss_reason=excluded.near_miss_reason,
-            usable_for_strategy_stats=excluded.usable_for_strategy_stats,
-            stats_exclusion_reason=excluded.stats_exclusion_reason,
-            volatility_shock_detected=excluded.volatility_shock_detected,
-            shock_timeframe=excluded.shock_timeframe,
-            shock_candle_time=excluded.shock_candle_time,
-            shock_true_range=excluded.shock_true_range,
-            shock_atr=excluded.shock_atr,
-            shock_atr_multiple=excluded.shock_atr_multiple,
-            shock_lookback_bars=excluded.shock_lookback_bars,
-            shock_direction=excluded.shock_direction,
-            shock_suppression_until=excluded.shock_suppression_until,
-            shock_suppression_candles_remaining=excluded.shock_suppression_candles_remaining,
-            raw_lr_1h=excluded.raw_lr_1h,
-            raw_lr_15m=excluded.raw_lr_15m,
-            raw_lr_5m=excluded.raw_lr_5m,
-            filtered_lr_1h=excluded.filtered_lr_1h,
-            filtered_lr_15m=excluded.filtered_lr_15m,
-            filtered_lr_5m=excluded.filtered_lr_5m,
-            trend_changed_after_filter=excluded.trend_changed_after_filter,
-            market_validity_state=excluded.market_validity_state,
-            market_validity_reason=excluded.market_validity_reason
         """,
         (
             opportunity.id,
@@ -1726,10 +1697,10 @@ def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
             opportunity.market_validity_reason,
         ),
     )
-    db.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
     criterion_rows = [
         (
             opportunity.id,
+            opportunity.evaluated_at,
             _canonical_criterion_name(criterion.criterion_name),
             criterion.layer,
             json.dumps(criterion.measured_value),
@@ -1753,11 +1724,11 @@ def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
         db.executemany(
             """
             INSERT INTO criterion_results (
-                opportunity_id, criterion_name, layer, measured_value, threshold_value,
+                opportunity_id, evaluated_at, criterion_name, layer, measured_value, threshold_value,
                 threshold_operator, passed, expected_pass, pass_mismatch, margin,
                 normalized_margin, required, blocked_signal, data_quality, diagnostic_state,
                 reason, context
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             criterion_rows,
         )
@@ -1780,6 +1751,8 @@ def _get_opportunities_db(
         start, end, symbol=symbol, decision=decision, strategy=strategy,
         signal_type=signal_type, first_blocker=first_blocker, near_miss=near_miss,
     )
+    limit = max(1, min(int(limit), config.STRATEGY_METRICS_MAX_OPPORTUNITIES))
+    offset = max(0, int(offset))
     rows = db.fetchall(
         f"SELECT * FROM evaluated_opportunities WHERE {where_sql} ORDER BY evaluated_at DESC LIMIT ? OFFSET ?",
         (*params, limit, offset),
@@ -1789,7 +1762,12 @@ def _get_opportunities_db(
     if ids:
         placeholders = ",".join("?" for _ in ids)
         crit_rows = db.fetchall(
-            f"SELECT * FROM criterion_results WHERE opportunity_id IN ({placeholders}) ORDER BY opportunity_id, id",
+            f"""
+            SELECT * FROM criterion_results
+            WHERE opportunity_id IN ({placeholders})
+            ORDER BY opportunity_id, id
+            LIMIT {config.STRATEGY_METRICS_MAX_OPPORTUNITIES * 50}
+            """,
             tuple(ids),
         )
         for c in crit_rows:
@@ -1865,12 +1843,47 @@ def _get_summary_db(
     stats_excluded_count = int(totals.get("stats_excluded_count") or 0)
     stats_unknown_eligibility_count = int(totals.get("stats_unknown_eligibility_count") or 0)
 
-    # Use raw conn for complex queries that need json_each (Postgres native)
-    raw_conn = db.connect()
-    threshold_version_counts = _count_by(raw_conn, "o.threshold_version", where_sql, params)
-    strategy_counts = _count_by(raw_conn, "o.strategy", where_sql, params)
-    signal_type_counts = _count_by(raw_conn, "o.signal_type", where_sql, params)
-    # (Additional summary fields computed the same way as SQLite path — omitted for brevity)
+    # Per-group counts via standard GROUP BY queries (no json_each needed)
+    threshold_version_counts = dict(
+        (r["val"], r["cnt"])
+        for r in db.fetchall(
+            f"""
+            SELECT threshold_version AS val, COUNT(*) AS cnt
+            FROM evaluated_opportunities o
+            WHERE {where_sql}
+            GROUP BY threshold_version
+            """,
+            params,
+        )
+    ) if total > 0 else {}
+
+    strategy_counts = dict(
+        (r["val"], r["cnt"])
+        for r in db.fetchall(
+            f"""
+            SELECT strategy AS val, COUNT(*) AS cnt
+            FROM evaluated_opportunities o
+            WHERE {where_sql}
+            GROUP BY strategy
+            """,
+            params,
+        )
+    ) if total > 0 else {}
+
+    signal_type_counts = dict(
+        (r["val"], r["cnt"])
+        for r in db.fetchall(
+            f"""
+            SELECT signal_type AS val, COUNT(*) AS cnt
+            FROM evaluated_opportunities o
+            WHERE {where_sql}
+            GROUP BY signal_type
+            """,
+            params,
+        )
+    ) if total > 0 else {}
+
+    # Simplified summaries — full parity with SQLite path will be completed in follow-up commit
     return {
         "start": start_iso,
         "end": end_iso,
@@ -1886,7 +1899,6 @@ def _get_summary_db(
         "threshold_version_counts": threshold_version_counts,
         "strategy_counts": strategy_counts,
         "signal_type_counts": signal_type_counts,
-        # Simplified — full parity with SQLite path will be completed in follow-up commit
         "criterion_summaries": [],
         "top_blockers": [],
         "first_blocker": None,

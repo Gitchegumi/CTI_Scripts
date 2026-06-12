@@ -107,12 +107,38 @@ class RedisCache:
         key = f"strategy_summary:{json.dumps(filters, sort_keys=True, default=str)}"
         return self.get(key)
 
-    def invalidate_strategy_summary(self) -> bool:
+    def invalidate_strategy_summary(self, symbol: Optional[str] = None, strategy: Optional[str] = None, signal_type: Optional[str] = None) -> bool:
+        """Invalidate strategy summary cache keys matching given filters.
+
+        If no filters are provided, invalidates ALL strategy summary keys
+        (blunt hammer — use sparingly).
+        """
         client = self._get_client()
         if client is None:
             return False
         try:
-            for k in client.scan_iter(match=self._key("strategy_summary:*")):
+            if symbol is None and strategy is None and signal_type is None:
+                for k in client.scan_iter(match=self._key("strategy_summary:*")):
+                    client.delete(k)
+                return True
+            # Build all permutations of the provided filter values
+            import itertools
+            filters = {}
+            if symbol:
+                filters["symbol"] = symbol
+            if strategy:
+                filters["strategy"] = strategy
+            if signal_type:
+                filters["signal_type"] = signal_type
+            keys_to_invalidate: set[str] = set()
+            for r in range(1, len(filters) + 1):
+                for combo in itertools.combinations(filters.items(), r):
+                    sub = dict(combo)
+                    key = f"strategy_summary:{json.dumps(sub, sort_keys=True, default=str)}"
+                    keys_to_invalidate.add(self._key(key))
+            # Also invalidate the fully-unfiltered key
+            keys_to_invalidate.add(self._key("strategy_summary:{}"))
+            for k in keys_to_invalidate:
                 client.delete(k)
             return True
         except Exception as exc:

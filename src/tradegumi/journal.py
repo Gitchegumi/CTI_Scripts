@@ -343,9 +343,50 @@ def _write_entries(entries: list[dict[str, Any]]) -> None:
 
 
 def _sync_entry_to_db(entry: dict[str, Any]) -> None:
-    """Persist a journal entry to the database layer (Postgres or SQLite) alongside JSONL."""
+    """Persist a journal entry to the database layer (Postgres or SQLite) alongside JSONL.
+
+    Insert is append-only.  Grade updates (grade, grade_timestamp, notes,
+    lifecycle_role) are sent as a targeted UPDATE on signal_id so we don't
+    duplicate the full row history.
+    """
     try:
         db = get_db()
+    except Exception as exc:
+        log.warning("Failed to get DB backend for journal sync: %s", exc)
+        return
+
+    # Upsert grade-mutable fields if the row already exists
+    existing = db.fetchone(
+        "SELECT signal_id FROM journal_entries WHERE signal_id = ?",
+        (entry.get("signal_id"),),
+    )
+    if existing:
+        try:
+            db.execute(
+                """
+                UPDATE journal_entries SET
+                    grade = ?,
+                    grade_timestamp = ?,
+                    notes = ?,
+                    lifecycle_role = ?,
+                    data = ?
+                WHERE signal_id = ?
+                """,
+                (
+                    entry.get("grade"),
+                    entry.get("grade_timestamp"),
+                    entry.get("notes"),
+                    entry.get("lifecycle_role"),
+                    json.dumps(entry, default=str),
+                    entry.get("signal_id"),
+                ),
+            )
+        except Exception as exc:
+            log.warning("Failed to update existing journal entry %s: %s", entry.get("signal_id"), exc)
+        return
+
+    # Fresh insert — append-only
+    try:
         db.execute(
             """
             INSERT INTO journal_entries (
@@ -353,12 +394,6 @@ def _sync_entry_to_db(entry: dict[str, Any]) -> None:
                 lifecycle_role, grade, grade_timestamp, entry_price, stop_loss, take_profit,
                 lot_size, atr, rr, confidence, notes, discord_msg_id, data, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(signal_id) DO UPDATE SET
-                grade=excluded.grade,
-                grade_timestamp=excluded.grade_timestamp,
-                notes=excluded.notes,
-                data=excluded.data,
-                lifecycle_role=excluded.lifecycle_role
             """,
             (
                 entry.get("signal_id"),
@@ -384,7 +419,7 @@ def _sync_entry_to_db(entry: dict[str, Any]) -> None:
             ),
         )
     except Exception as exc:
-        log.warning("Failed to sync journal entry to DB: %s", exc)
+        log.warning("Failed to insert journal entry %s: %s", entry.get("signal_id"), exc)
 
 
 def _normalize_filter_grade(grade: Optional[str]) -> Optional[str]:
