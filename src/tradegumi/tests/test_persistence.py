@@ -1,168 +1,132 @@
-"""Tests for the persistence abstraction layer.
+"""Tests for the Postgres persistence backend and get_db() factory.
 
-Covers SQLiteBackend and get_db() factory.  PostgresBackend is tested
-separately (requires a live Postgres container) in CI.
+These require a live Postgres — set ``TRADEGUMI_TEST_DATABASE_URL`` to run them;
+otherwise they skip.
 """
-
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
-from tradegumi.persistence import DBBackend, SQLiteBackend, get_db, close_db
+from tradegumi.persistence import PostgresBackend, get_db, close_db
+from tradegumi.tests._pg import TEST_DSN, requires_postgres, get_test_backend
 
 
 @pytest.fixture
-def tmp_sqlite():
-    """Yield a fresh SQLiteBackend pointing at a temp file."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        path = Path(f.name)
-    db = SQLiteBackend(db_path=path)
-    yield db
-    db.close()
-    path.unlink(missing_ok=True)
+def db():
+    yield get_test_backend()
 
 
-class TestSQLiteBackend:
-    def test_init_schema_creates_tables(self, tmp_sqlite: SQLiteBackend):
-        tmp_sqlite.init_schema()
-        conn = tmp_sqlite.connect()
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('evaluated_opportunities', 'criterion_results', 'journal_entries')"
+@requires_postgres
+class TestPostgresBackend:
+    def test_init_schema_creates_tables(self, db: PostgresBackend):
+        rows = db.fetchall(
+            """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name IN ('evaluated_opportunities', 'criterion_results', 'journal_entries')
+            """
         )
-        tables = {r[0] for r in cur.fetchall()}
+        tables = {r["table_name"] for r in rows}
         assert tables == {"evaluated_opportunities", "criterion_results", "journal_entries"}
 
-    def test_evaluated_opportunities_is_append_only(self, tmp_sqlite: SQLiteBackend):
-        """The PK is composite (id, evaluated_at) — inserting the same id with a
-        different evaluated_at should succeed (append-only)."""
-        tmp_sqlite.init_schema()
-        tmp_sqlite.execute(
-            """
-            INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
-                signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
-                near_miss, data_complete, data_quality_notes, threshold_version, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            ("opp-1", "2026-01-01T00:00:00", "EURUSD", "M15", "alert_only", "cti",
-             "pullback", "BUY", "uptrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00"),
-        )
-        tmp_sqlite.execute(
-            """
-            INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
-                signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
-                near_miss, data_complete, data_quality_notes, threshold_version, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            ("opp-1", "2026-01-01T01:00:00", "EURUSD", "M15", "alert_only", "cti",
-             "pullback", "BUY", "uptrend", "rejected", "failed", 1, 0, 1, "[]", "v1", "2026-01-01T01:00:00"),
-        )
-        rows = tmp_sqlite.fetchall("SELECT * FROM evaluated_opportunities WHERE id = ?", ("opp-1",))
+    def test_evaluated_opportunities_is_append_only(self, db: PostgresBackend):
+        """Composite PK (id, evaluated_at): same id at a new evaluated_at inserts."""
+        for ts, decision in (("2026-01-01T00:00:00+00:00", "emitted"), ("2026-01-01T01:00:00+00:00", "rejected")):
+            db.execute(
+                """
+                INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
+                    signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
+                    near_miss, data_complete, data_quality_notes, threshold_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("opp-1", ts, "EURUSD", "M15", "alert_only", "cti",
+                 "pullback", "BUY", "uptrend", decision, "x", 0, 0, 1, "[]", "v1", ts),
+            )
+        rows = db.fetchall("SELECT * FROM evaluated_opportunities WHERE id = ?", ("opp-1",))
         assert len(rows) == 2
-        decisions = {r["final_decision"] for r in rows}
-        assert decisions == {"emitted", "rejected"}
+        assert {r["final_decision"] for r in rows} == {"emitted", "rejected"}
 
-    def test_criterion_results_foreign_key(self, tmp_sqlite: SQLiteBackend):
-        """Criterion rows reference (id, evaluated_at)."""
-        tmp_sqlite.init_schema()
-        tmp_sqlite.execute(
+    def test_criterion_results_foreign_key(self, db: PostgresBackend):
+        db.execute(
             """
             INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
                 signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
                 near_miss, data_complete, data_quality_notes, threshold_version, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("opp-2", "2026-01-01T00:00:00", "GBPUSD", "M15", "alert_only", "cti",
-             "pullback", "SELL", "downtrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00"),
+            ("opp-2", "2026-01-01T00:00:00+00:00", "GBPUSD", "M15", "alert_only", "cti",
+             "pullback", "SELL", "downtrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00+00:00"),
         )
-        tmp_sqlite.execute(
+        db.execute(
             """
             INSERT INTO criterion_results (opportunity_id, evaluated_at, criterion_name, layer,
                 threshold_operator, required, blocked_signal, data_quality)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("opp-2", "2026-01-01T00:00:00", "trend_aligned", "layer_1", "gte", 1, 0, "complete"),
+            ("opp-2", "2026-01-01T00:00:00+00:00", "trend_aligned", "layer_1", "gte", 1, 0, "complete"),
         )
-        rows = tmp_sqlite.fetchall("SELECT * FROM criterion_results WHERE opportunity_id = ?", ("opp-2",))
+        rows = db.fetchall("SELECT * FROM criterion_results WHERE opportunity_id = ?", ("opp-2",))
         assert len(rows) == 1
         assert rows[0]["criterion_name"] == "trend_aligned"
 
-    def test_fetchone_returns_none_when_empty(self, tmp_sqlite: SQLiteBackend):
-        tmp_sqlite.init_schema()
-        result = tmp_sqlite.fetchone("SELECT * FROM evaluated_opportunities WHERE id = ?", ("nope",))
-        assert result is None
+    def test_fetchone_returns_none_when_empty(self, db: PostgresBackend):
+        assert db.fetchone("SELECT * FROM evaluated_opportunities WHERE id = ?", ("nope",)) is None
 
-    def test_transaction_rollback_on_error(self, tmp_sqlite: SQLiteBackend):
-        tmp_sqlite.init_schema()
-        with pytest.raises(Exception):
-            with tmp_sqlite.transaction():
-                tmp_sqlite.execute(
+    def test_execute_commits_standalone_write(self, db: PostgresBackend):
+        """A bare execute() persists immediately (committed, not left in a txn)."""
+        db.execute(
+            """
+            INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
+                signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
+                near_miss, data_complete, data_quality_notes, threshold_version, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("opp-commit", "2026-01-01T00:00:00+00:00", "EURUSD", "M15", "alert_only", "cti",
+             "pullback", "BUY", "uptrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00+00:00"),
+        )
+        # A separate connection only sees committed data.
+        import psycopg
+        other = psycopg.connect(TEST_DSN)
+        try:
+            with other.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM evaluated_opportunities WHERE id = %s", ("opp-commit",))
+                count = cur.fetchone()[0]
+        finally:
+            other.close()
+        assert count == 1
+
+    def test_transaction_rollback_on_error(self, db: PostgresBackend):
+        with pytest.raises(RuntimeError):
+            with db.transaction():
+                db.execute(
                     """
                     INSERT INTO evaluated_opportunities (id, evaluated_at, symbol, timeframe, mode, strategy,
                         signal_type, direction, trend, final_decision, decision_reason, failed_criteria_count,
                         near_miss, data_complete, data_quality_notes, threshold_version, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("opp-3", "2026-01-01T00:00:00", "USDJPY", "M15", "alert_only", "cti",
-                     "pullback", "BUY", "uptrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00"),
+                    ("opp-rb", "2026-01-01T00:00:00+00:00", "USDJPY", "M15", "alert_only", "cti",
+                     "pullback", "BUY", "uptrend", "emitted", "passed", 0, 0, 1, "[]", "v1", "2026-01-01T00:00:00+00:00"),
                 )
                 raise RuntimeError("rollback")
-        rows = tmp_sqlite.fetchall("SELECT * FROM evaluated_opportunities WHERE id = ?", ("opp-3",))
-        assert len(rows) == 0
-
-    def test_close_releases_connection(self, tmp_sqlite: SQLiteBackend):
-        tmp_sqlite.init_schema()
-        assert tmp_sqlite._conn is not None
-        tmp_sqlite.close()
-        assert tmp_sqlite._conn is None
+        assert db.fetchall("SELECT * FROM evaluated_opportunities WHERE id = ?", ("opp-rb",)) == []
 
 
 class TestGetDbFactory:
-    def test_factory_returns_singleton(self):
-        os.environ["TRADEGUMI_DB_BACKEND"] = "sqlite"
-        close_db()
-        db1 = get_db()
-        db2 = get_db()
-        assert db1 is db2
-        close_db()
-
-    def test_factory_override_backend(self):
-        """get_db accepts override params for testing."""
-        close_db()
-        db = get_db(backend="sqlite")
-        assert isinstance(db, SQLiteBackend)
-        close_db()
-
-    def test_init_schema_called_on_first_use(self, tmp_sqlite: SQLiteBackend):
-        """Schema is initialised automatically by get_db()."""
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            path = Path(f.name)
-        try:
-            db = get_db(backend="sqlite", database_url=str(path))
-            conn = db.connect()
-            cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = {r[0] for r in cur.fetchall()}
-            assert "evaluated_opportunities" in tables
-        finally:
-            close_db()
-            path.unlink(missing_ok=True)
-
-    def test_get_db_fallback_to_sqlite(self, monkeypatch):
-        """If postgres backend fails and fallback is enabled, returns SQLite."""
-        monkeypatch.setenv("TRADEGUMI_DB_BACKEND", "postgres")
-        monkeypatch.setenv("TRADEGUMI_DATABASE_URL", "postgresql://invalid")
-        close_db()
-        db = get_db()
-        assert isinstance(db, SQLiteBackend)
-        close_db()
-
-    def test_get_db_no_fallback_raises(self, monkeypatch):
-        """If fallback is disabled and postgres fails, raises."""
-        monkeypatch.setenv("TRADEGUMI_DB_BACKEND", "postgres")
-        monkeypatch.setenv("TRADEGUMI_DATABASE_URL", "postgresql://invalid")
-        monkeypatch.setenv("TRADEGUMI_SQLITE_FALLBACK", "false")
+    def test_get_db_requires_database_url(self, monkeypatch):
+        """With no DSN, get_db() raises (no SQLite fallback)."""
+        monkeypatch.setenv("TRADEGUMI_DATABASE_URL", "")
         close_db()
         with pytest.raises(Exception):
-            get_db()
+            get_db(database_url="")
         close_db()
+
+    @requires_postgres
+    def test_factory_returns_singleton(self):
+        close_db()
+        try:
+            db1 = get_db(database_url=TEST_DSN)
+            db2 = get_db(database_url=TEST_DSN)
+            assert db1 is db2
+            assert isinstance(db1, PostgresBackend)
+        finally:
+            close_db()

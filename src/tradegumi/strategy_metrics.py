@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import json
 import math
-import sqlite3
-import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,7 +18,6 @@ from tradegumi.persistence import get_db, DBBackend
 from tradegumi.persistence.redis import get_cache
 
 DATA_DIR = Path(__file__).parent / "data"
-DB_FILE = DATA_DIR / "strategy_metrics.db"
 STATE_FILE = DATA_DIR / "strategy_metrics.json"
 
 VALID_DECISIONS = {"emitted", "rejected", "skipped", "indeterminate"}
@@ -40,10 +37,6 @@ INDETERMINATE_REASONS = {
     "oanda_request_failed",
     "oanda_response_malformed",
 }
-_lock = threading.Lock()
-_initialized_db_paths: set[str] = set()
-_last_prune_by_db_path: dict[str, datetime] = {}
-_write_connections_by_db_path: dict[str, sqlite3.Connection] = {}
 _LEGACY_CRITERION_NAMES = {"singal_engine_data": "signal_engine_data"}
 
 
@@ -294,143 +287,6 @@ class ComparisonPeriod:
         }
 
 
-def init_schema(db_path: Path = DB_FILE, db: Optional[DBBackend] = None) -> None:
-    db_key = str(db_path.resolve())
-    if not db_path.exists():
-        _initialized_db_paths.discard(db_key)
-        conn = _write_connections_by_db_path.pop(db_key, None)
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    if db_key in _initialized_db_paths:
-        return
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS evaluated_opportunities (
-                id TEXT PRIMARY KEY,
-                evaluated_at TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                timeframe TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                strategy TEXT NOT NULL,
-                signal_type TEXT NOT NULL DEFAULT 'pullback',
-                direction TEXT NOT NULL,
-                trend TEXT NOT NULL,
-                final_decision TEXT NOT NULL,
-                decision_reason TEXT NOT NULL,
-                confidence REAL,
-                failed_criteria_count INTEGER NOT NULL,
-                near_miss INTEGER NOT NULL,
-                data_complete INTEGER NOT NULL,
-                data_quality_notes TEXT NOT NULL,
-                threshold_version TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                first_blocker TEXT,
-                all_blockers TEXT NOT NULL DEFAULT '[]',
-                blocking_layer TEXT,
-                trend_decision TEXT,
-                pipeline_state TEXT,
-                near_miss_reason TEXT,
-                threshold_version_unknown_reason TEXT,
-                usable_for_strategy_stats INTEGER,
-                stats_exclusion_reason TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS criterion_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                opportunity_id TEXT NOT NULL,
-                criterion_name TEXT NOT NULL,
-                layer TEXT NOT NULL,
-                measured_value TEXT,
-                threshold_value TEXT,
-                threshold_operator TEXT NOT NULL,
-                passed INTEGER,
-                expected_pass INTEGER,
-                pass_mismatch INTEGER NOT NULL DEFAULT 0,
-                margin REAL,
-                normalized_margin REAL,
-                required INTEGER NOT NULL,
-                blocked_signal INTEGER NOT NULL,
-                data_quality TEXT NOT NULL,
-                diagnostic_state TEXT NOT NULL DEFAULT 'evaluated',
-                reason TEXT,
-                context TEXT NOT NULL DEFAULT '{}',
-                FOREIGN KEY(opportunity_id) REFERENCES evaluated_opportunities(id)
-            )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_at ON evaluated_opportunities(evaluated_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_symbol ON evaluated_opportunities(symbol)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_decision ON evaluated_opportunities(final_decision)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_symbol ON evaluated_opportunities(evaluated_at, symbol)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_eval_decision ON evaluated_opportunities(evaluated_at, final_decision)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_opp ON criterion_results(opportunity_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_metrics_criteria_name_opp ON criterion_results(criterion_name, opportunity_id)")
-        _ensure_column(conn, "evaluated_opportunities", "first_blocker", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "all_blockers", "TEXT NOT NULL DEFAULT '[]'")
-        _ensure_column(conn, "evaluated_opportunities", "blocking_layer", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "trend_decision", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "pipeline_state", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "near_miss_reason", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "threshold_version_unknown_reason", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "usable_for_strategy_stats", "INTEGER")
-        _ensure_column(conn, "evaluated_opportunities", "stats_exclusion_reason", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "signal_type", "TEXT NOT NULL DEFAULT 'pullback'")
-        _ensure_column(conn, "criterion_results", "expected_pass", "INTEGER")
-        _ensure_column(conn, "criterion_results", "pass_mismatch", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "criterion_results", "diagnostic_state", "TEXT NOT NULL DEFAULT 'evaluated'")
-        _ensure_column(conn, "criterion_results", "reason", "TEXT")
-        _ensure_column(conn, "criterion_results", "context", "TEXT NOT NULL DEFAULT '{}'")
-        # ── Volatility shock + filtered LR columns ────────────────────────────
-        _ensure_column(conn, "evaluated_opportunities", "volatility_shock_detected", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "evaluated_opportunities", "shock_timeframe", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "shock_candle_time", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "shock_true_range", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "shock_atr", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "shock_atr_multiple", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "shock_lookback_bars", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "evaluated_opportunities", "shock_direction", "TEXT NOT NULL DEFAULT 'none'")
-        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_until", "TEXT")
-        _ensure_column(conn, "evaluated_opportunities", "shock_suppression_candles_remaining", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "evaluated_opportunities", "raw_lr_1h", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "raw_lr_15m", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "raw_lr_5m", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_1h", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_15m", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "filtered_lr_5m", "REAL")
-        _ensure_column(conn, "evaluated_opportunities", "trend_changed_after_filter", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "evaluated_opportunities", "market_validity_state", "TEXT NOT NULL DEFAULT 'valid'")
-        _ensure_column(conn, "evaluated_opportunities", "market_validity_reason", "TEXT")
-    _initialized_db_paths.add(db_key)
-
-
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
-    """Add an additive SQLite column when an existing metrics database predates it."""
-    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if column not in existing:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-
-
-def _write_connection(db_path: Path) -> sqlite3.Connection:
-    """Return a reusable SQLite write connection for high-volume diagnostic inserts."""
-    db_key = str(db_path.resolve())
-    conn = _write_connections_by_db_path.get(db_key)
-    if conn is None:
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        _write_connections_by_db_path[db_key] = conn
-    return conn
-
-
 def _compute_threshold_pass(measured: Any, threshold: Any, operator: str) -> Optional[bool]:
     """Compute expected_pass from measured, threshold, and operator."""
     if operator == "boolean":
@@ -618,151 +474,46 @@ def _layer_from_reason(reason: str) -> str:
     return "entry"
 
 
-def record_opportunity(opportunity: EvaluatedOpportunity, db_path: Path = DB_FILE, db: Optional[DBBackend] = None) -> EvaluatedOpportunity:
+_last_prune_at: Optional[datetime] = None
+
+
+def record_opportunity(opportunity: EvaluatedOpportunity, db: Optional[DBBackend] = None) -> EvaluatedOpportunity:
     opportunity = validate_opportunity(opportunity)
-    if db is not None:
-        # Use persistence abstraction (Postgres or SQLite)
-        _record_opportunity_db(opportunity, db)
-        get_cache().invalidate_strategy_summary(
-            symbol=opportunity.symbol,
-            strategy=opportunity.strategy,
-            signal_type=opportunity.signal_type,
-        )
-        return opportunity
-    init_schema(db_path)
-    with _lock:
-        conn = _write_connection(db_path)
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO evaluated_opportunities (
-                id, evaluated_at, symbol, timeframe, mode, strategy, signal_type, direction, trend,
-                final_decision, decision_reason, confidence, failed_criteria_count,
-                near_miss, data_complete, data_quality_notes, threshold_version, created_at,
-                first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
-                near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
-                stats_exclusion_reason,
-                volatility_shock_detected, shock_timeframe, shock_candle_time, shock_true_range,
-                shock_atr, shock_atr_multiple, shock_lookback_bars, shock_direction,
-                shock_suppression_until, shock_suppression_candles_remaining,
-                raw_lr_1h, raw_lr_15m, raw_lr_5m,
-                filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
-                trend_changed_after_filter, market_validity_state, market_validity_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                opportunity.id,
-                opportunity.evaluated_at,
-                opportunity.symbol,
-                opportunity.timeframe,
-                opportunity.mode,
-                opportunity.strategy,
-                opportunity.signal_type,
-                opportunity.direction,
-                opportunity.trend,
-                opportunity.final_decision,
-                opportunity.decision_reason,
-                opportunity.confidence,
-                opportunity.failed_criteria_count,
-                int(opportunity.near_miss),
-                int(opportunity.data_complete),
-                json.dumps(opportunity.data_quality_notes),
-                opportunity.threshold_version,
-                opportunity.created_at,
-                opportunity.first_blocker,
-                json.dumps(opportunity.all_blockers),
-                opportunity.blocking_layer,
-                json.dumps(opportunity.trend_decision) if opportunity.trend_decision is not None else None,
-                opportunity.pipeline_state,
-                opportunity.near_miss_reason,
-                opportunity.threshold_version_unknown_reason,
-                None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
-                opportunity.stats_exclusion_reason,
-                int(opportunity.volatility_shock_detected),
-                opportunity.shock_timeframe,
-                opportunity.shock_candle_time,
-                opportunity.shock_true_range,
-                opportunity.shock_atr,
-                opportunity.shock_atr_multiple,
-                opportunity.shock_lookback_bars,
-                opportunity.shock_direction,
-                opportunity.shock_suppression_until,
-                opportunity.shock_suppression_candles_remaining,
-                opportunity.raw_lr_1h,
-                opportunity.raw_lr_15m,
-                opportunity.raw_lr_5m,
-                opportunity.filtered_lr_1h,
-                opportunity.filtered_lr_15m,
-                opportunity.filtered_lr_5m,
-                int(opportunity.trend_changed_after_filter),
-                opportunity.market_validity_state,
-                opportunity.market_validity_reason,
-            ),
-        )
-        conn.execute("DELETE FROM criterion_results WHERE opportunity_id = ?", (opportunity.id,))
-        criterion_rows = [
-            (
-                opportunity.id,
-                _canonical_criterion_name(criterion.criterion_name),
-                criterion.layer,
-                json.dumps(criterion.measured_value),
-                json.dumps(criterion.threshold_value),
-                criterion.threshold_operator,
-                None if criterion.passed is None else int(criterion.passed),
-                None if criterion.expected_pass is None else int(criterion.expected_pass),
-                int(criterion.pass_mismatch),
-                criterion.margin,
-                criterion.normalized_margin,
-                int(criterion.required),
-                int(criterion.blocked_signal),
-                criterion.data_quality,
-                criterion.diagnostic_state,
-                criterion.reason,
-                json.dumps(criterion.context),
-            )
-            for criterion in opportunity.criteria
-        ]
-        if criterion_rows:
-            conn.executemany(
-                """
-                INSERT INTO criterion_results (
-                    opportunity_id, criterion_name, layer, measured_value, threshold_value,
-                    threshold_operator, passed, expected_pass, pass_mismatch, margin,
-                    normalized_margin, required, blocked_signal, data_quality, diagnostic_state,
-                    reason, context
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                criterion_rows,
-            )
-        conn.commit()
-    _prune_retention_if_due(db_path=db_path)
+    db = db or get_db()
+    _record_opportunity_db(opportunity, db)
+    get_cache().invalidate_strategy_summary(
+        symbol=opportunity.symbol,
+        strategy=opportunity.strategy,
+        signal_type=opportunity.signal_type,
+    )
+    _prune_retention_if_due(db)
     return opportunity
 
 
-def _prune_retention_if_due(db_path: Path = DB_FILE, interval: timedelta = timedelta(hours=1)) -> int:
-    """Prune old diagnostics at most once per interval for each database path."""
-    db_key = str(db_path.resolve())
+def _prune_retention_if_due(db: DBBackend, interval: timedelta = timedelta(hours=1)) -> int:
+    """Prune old diagnostics at most once per interval (process-wide throttle)."""
+    global _last_prune_at
     now = datetime.now(timezone.utc)
-    last_prune = _last_prune_by_db_path.get(db_key)
-    if last_prune is not None and now - last_prune < interval:
+    if _last_prune_at is not None and now - _last_prune_at < interval:
         return 0
-    removed = prune_retention(db_path=db_path)
-    _last_prune_by_db_path[db_key] = now
+    removed = prune_retention(db=db)
+    _last_prune_at = now
     return removed
 
 
-def prune_retention(days: Optional[int] = None, db_path: Path = DB_FILE) -> int:
+def prune_retention(days: Optional[int] = None, db: Optional[DBBackend] = None) -> int:
+    """Delete diagnostics older than the retention window (criteria cascade)."""
     days = days or config.STRATEGY_METRICS_RETENTION_DAYS
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    init_schema(db_path)
-    with _lock, sqlite3.connect(db_path) as conn:
-        old_ids = [r[0] for r in conn.execute("SELECT id FROM evaluated_opportunities WHERE evaluated_at < ?", (cutoff,))]
-        if old_ids:
-            conn.executemany("DELETE FROM criterion_results WHERE opportunity_id = ?", [(i,) for i in old_ids])
-            conn.executemany("DELETE FROM evaluated_opportunities WHERE id = ?", [(i,) for i in old_ids])
-    return len(old_ids)
+    db = db or get_db()
+    cur = db.execute("DELETE FROM evaluated_opportunities WHERE evaluated_at < ?", (cutoff,))
+    try:
+        return int(cur.rowcount) if cur is not None and cur.rowcount is not None else 0
+    except Exception:
+        return 0
 
 
-def _row_to_opportunity(row: sqlite3.Row, criteria: list[CriterionResult]) -> EvaluatedOpportunity:
+def _row_to_opportunity(row: Any, criteria: list[CriterionResult]) -> EvaluatedOpportunity:
     return EvaluatedOpportunity(
         id=row["id"],
         evaluated_at=row["evaluated_at"],
@@ -867,230 +618,10 @@ def get_opportunities(
     near_miss: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
-    db_path: Path = DB_FILE,
     db: Optional[DBBackend] = None,
 ) -> list[dict[str, Any]]:
-    if db is not None:
-        return _get_opportunities_db(start, end, symbol, decision, strategy, signal_type, first_blocker, near_miss, limit, offset, db)
-    init_schema(db_path)
-    limit = max(1, min(int(limit), config.STRATEGY_METRICS_MAX_OPPORTUNITIES))
-    offset = max(0, int(offset))
-    where_sql, params, _, _ = _opportunity_filter_clauses(
-        start,
-        end,
-        symbol=symbol,
-        decision=decision,
-        strategy=strategy,
-        signal_type=signal_type,
-        first_blocker=first_blocker,
-        near_miss=near_miss,
-    )
-
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            f"SELECT * FROM evaluated_opportunities WHERE {where_sql} ORDER BY evaluated_at DESC LIMIT ? OFFSET ?",
-            (*params, limit, offset),
-        ).fetchall()
-        ids = [row["id"] for row in rows]
-        criteria_by_opportunity: dict[str, list[CriterionResult]] = {opportunity_id: [] for opportunity_id in ids}
-        if ids:
-            placeholders = ",".join("?" for _ in ids)
-            crit_rows = conn.execute(
-                f"SELECT * FROM criterion_results WHERE opportunity_id IN ({placeholders}) ORDER BY opportunity_id, id",
-                ids,
-            ).fetchall()
-            for c in crit_rows:
-                criteria_by_opportunity.setdefault(c["opportunity_id"], []).append(
-                    CriterionResult(
-                        id=c["id"],
-                        opportunity_id=c["opportunity_id"],
-                        criterion_name=_canonical_criterion_name(c["criterion_name"]),
-                        layer=c["layer"],
-                        measured_value=json.loads(c["measured_value"]) if c["measured_value"] else None,
-                        threshold_value=json.loads(c["threshold_value"]) if c["threshold_value"] else None,
-                        threshold_operator=c["threshold_operator"],
-                        passed=None if c["passed"] is None else bool(c["passed"]),
-                        expected_pass=None if "expected_pass" not in c.keys() or c["expected_pass"] is None else bool(c["expected_pass"]),
-                        pass_mismatch=bool(c["pass_mismatch"]) if "pass_mismatch" in c.keys() else False,
-                        margin=c["margin"],
-                        normalized_margin=c["normalized_margin"],
-                        required=bool(c["required"]),
-                        blocked_signal=bool(c["blocked_signal"]),
-                        data_quality=c["data_quality"],
-                        diagnostic_state=c["diagnostic_state"] if "diagnostic_state" in c.keys() else "evaluated",
-                        reason=c["reason"] if "reason" in c.keys() else None,
-                        context=json.loads(c["context"] or "{}") if "context" in c.keys() else {},
-                    )
-                )
-        result = []
-        for row in rows:
-            criteria = criteria_by_opportunity.get(row["id"], [])
-            result.append(_row_to_opportunity(row, criteria).to_dict())
-        return result
-
-
-def _criterion_summaries(conn: sqlite3.Connection, where_sql: str, params: list[Any]) -> list[CriterionSummary]:
-    rows = conn.execute(
-        f"""
-        SELECT c.criterion_name,
-               COUNT(*) AS evaluated_count,
-               SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS pass_count,
-               SUM(CASE WHEN c.passed = 0 THEN 1 ELSE 0 END) AS fail_count,
-               SUM(CASE WHEN c.data_quality != 'complete' THEN 1 ELSE 0 END) AS incomplete_count,
-               AVG(CASE WHEN c.passed = 0 THEN ABS(c.margin) ELSE NULL END) AS average_failure_margin,
-               SUM(CASE WHEN o.near_miss = 1 AND c.blocked_signal = 1 THEN 1 ELSE 0 END) AS near_miss_contribution
-        FROM criterion_results c
-        JOIN evaluated_opportunities o ON o.id = c.opportunity_id
-        WHERE {where_sql}
-        GROUP BY c.criterion_name
-        ORDER BY c.criterion_name
-        """,
-        params,
-    ).fetchall()
-    summaries = []
-    for name, evaluated, passed, failed, incomplete, avg_margin, near_miss_contribution in rows:
-        evaluated = evaluated or 0
-        passed = passed or 0
-        failed = failed or 0
-        summaries.append(
-            CriterionSummary(
-                criterion_name=name,
-                evaluated_count=evaluated,
-                pass_count=passed,
-                fail_count=failed,
-                pass_rate=round(passed / evaluated, 4) if evaluated else 0.0,
-                fail_rate=round(failed / evaluated, 4) if evaluated else 0.0,
-                near_miss_contribution=int(near_miss_contribution or 0),
-                average_failure_margin=None if avg_margin is None else round(float(avg_margin), 6),
-                incomplete_count=incomplete or 0,
-            )
-        )
-    return summaries
-
-
-def _blocker_summaries(conn: sqlite3.Connection, where_sql: str, params: list[Any], blocked_opportunity_count: int) -> list[BlockerSummary]:
-    """Summarize blockers with SQL JSON aggregation instead of loading all rows."""
-    if not blocked_opportunity_count:
-        return []
-    rows = conn.execute(
-        f"""
-        SELECT
-            CAST(blocker.value AS TEXT) AS criterion_name,
-            COUNT(DISTINCT o.id) AS blocked_count,
-            AVG(CASE
-                WHEN c.normalized_margin IS NULL THEN NULL
-                WHEN ABS(c.normalized_margin) > 1.0 THEN 0.0
-                ELSE 1.0 - ABS(c.normalized_margin)
-            END) AS margin_component,
-            AVG(CASE
-                WHEN req.total_required > 1 THEN CAST(req.passed_required AS REAL) / (req.total_required - 1)
-                ELSE 0.0
-            END) AS quality_component,
-            GROUP_CONCAT(DISTINCT o.id) AS example_ids
-        FROM evaluated_opportunities o
-        JOIN json_each(o.all_blockers) blocker
-        LEFT JOIN criterion_results c
-            ON c.opportunity_id = o.id
-           AND c.criterion_name = CAST(blocker.value AS TEXT)
-        LEFT JOIN (
-            SELECT opportunity_id,
-                   COUNT(*) AS total_required,
-                   SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) AS passed_required
-            FROM criterion_results
-            WHERE required = 1
-            GROUP BY opportunity_id
-        ) req ON req.opportunity_id = o.id
-        WHERE {where_sql}
-          AND o.all_blockers != '[]'
-        GROUP BY CAST(blocker.value AS TEXT)
-        ORDER BY blocked_count DESC, criterion_name
-        LIMIT 50
-        """,
-        params,
-    ).fetchall()
-    result = []
-    for name, blocked_count, margin_component, quality_component, example_ids in rows:
-        frequency = int(blocked_count or 0) / blocked_opportunity_count
-        margin = 0.0 if margin_component is None else max(0.0, min(1.0, float(margin_component)))
-        quality = 0.0 if quality_component is None else max(0.0, min(1.0, float(quality_component)))
-        combined = (frequency * 0.40) + (margin * 0.30) + (quality * 0.30)
-        examples = sorted(str(example_ids or "").split(","))[:5]
-        result.append(
-            BlockerSummary(
-                criterion_name=name,
-                blocked_count=int(blocked_count or 0),
-                frequency_component=round(frequency, 4),
-                margin_component=round(margin, 4),
-                quality_component=round(quality, 4),
-                combined_score=round(combined, 4),
-                example_opportunity_ids=[example for example in examples if example],
-            )
-        )
-    return sorted(result, key=lambda b: (-b.combined_score, -b.blocked_count, b.criterion_name))
-
-
-def _pipeline_funnel(conn: sqlite3.Connection, where_sql: str, params: list[Any], total: int) -> dict[str, int]:
-    """Build stage counts with SQL so large ranges do not materialize rows."""
-    row = conn.execute(
-        f"""
-        SELECT
-            SUM(CASE
-                WHEN o.decision_reason = 'no_trend'
-                  OR o.pipeline_state = 'trend_skipped'
-                  OR EXISTS (
-                      SELECT 1 FROM json_each(o.all_blockers) blocker
-                      WHERE CAST(blocker.value AS TEXT) LIKE 'trend:%'
-                  )
-                THEN 1 ELSE 0
-            END) AS trend_skipped,
-            SUM(CASE
-                WHEN o.data_complete = 0
-                  OR EXISTS (
-                      SELECT 1 FROM json_each(o.all_blockers) blocker
-                      WHERE CAST(blocker.value AS TEXT) LIKE 'signal_engine_data:%'
-                  )
-                THEN 1 ELSE 0
-            END) AS signal_data_missing,
-            SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS signal_rejected,
-            SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS signal_emitted,
-            SUM(CASE WHEN o.final_decision = 'indeterminate' THEN 1 ELSE 0 END) AS indeterminate
-        FROM evaluated_opportunities o
-        WHERE {where_sql}
-        """,
-        params,
-    ).fetchone()
-    trend_skipped = int(row["trend_skipped"] or 0) if row else 0
-    signal_data_missing = int(row["signal_data_missing"] or 0) if row else 0
-    signal_rejected = int(row["signal_rejected"] or 0) if row else 0
-    signal_emitted = int(row["signal_emitted"] or 0) if row else 0
-    indeterminate = int(row["indeterminate"] or 0) if row else 0
-    candle_row = conn.execute(
-        f"""
-        SELECT
-            COUNT(DISTINCT CASE WHEN c.criterion_name = 'candle_close_gate' AND c.passed = 1 THEN o.id END) AS candle_passed,
-            COUNT(DISTINCT CASE WHEN c.criterion_name = 'candle_close_gate' AND (c.passed = 0 OR c.passed IS NULL) THEN o.id END) AS candle_waiting_or_failed,
-            COUNT(DISTINCT CASE WHEN c.criterion_name IN ('stoch_rsi', 'macd', 'keltner', 'confidence') THEN o.id END) AS signal_rules_evaluated
-        FROM evaluated_opportunities o
-        JOIN criterion_results c ON c.opportunity_id = o.id
-        WHERE {where_sql}
-        """,
-        params,
-    ).fetchone()
-    trend_candidate_found = max(0, total - trend_skipped)
-    return {
-        "total_evaluated": total,
-        "trend_skipped": trend_skipped,
-        "trend_candidate_found": trend_candidate_found,
-        "signal_data_complete": max(0, trend_candidate_found - signal_data_missing),
-        "signal_data_missing": signal_data_missing,
-        "candle_close_gate_passed": int(candle_row["candle_passed"] or 0) if candle_row else 0,
-        "candle_close_gate_waiting_or_failed": int(candle_row["candle_waiting_or_failed"] or 0) if candle_row else 0,
-        "signal_rules_evaluated": int(candle_row["signal_rules_evaluated"] or 0) if candle_row else 0,
-        "signal_rejected": signal_rejected,
-        "signal_emitted": signal_emitted,
-        "indeterminate": indeterminate,
-    }
+    db = db or get_db()
+    return _get_opportunities_db(start, end, symbol, decision, strategy, signal_type, first_blocker, near_miss, limit, offset, db)
 
 
 def _journal_timestamp(entry: dict[str, Any]) -> Optional[datetime]:
@@ -1291,72 +822,6 @@ def _journaled_pullback_summary(start_iso: str, end_iso: str, symbol: Optional[s
     return {"journaled_count": journaled_count, "prime_suppressed_count": prime_suppressed_count}
 
 
-def _pullback_summary(conn: sqlite3.Connection, where_sql: str, params: list[Any], start_iso: str, end_iso: str, symbol: Optional[str]) -> dict[str, Any]:
-    """Aggregate pullback outcomes and stable blockers for operator reports."""
-    pullback_criteria = (
-        "pullback_trigger_candle",
-        "keltner_pullback_sequence",
-        "pullback_structure",
-        "pullback_15m_bridge",
-        "pullback_macd_hard_block",
-    )
-    placeholders = ", ".join("?" for _ in pullback_criteria)
-    pullback_sql = (
-        f"{where_sql} AND ("
-        "o.signal_type = 'pullback' OR LOWER(o.strategy) LIKE '%pullback%' OR "
-        f"EXISTS (SELECT 1 FROM criterion_results pc WHERE pc.opportunity_id = o.id AND pc.criterion_name IN ({placeholders}))"
-        ")"
-    )
-    pullback_params = [*params, *pullback_criteria]
-    totals = conn.execute(
-        f"""
-        SELECT
-            COUNT(*) AS evaluated_count,
-            SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
-            SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS emitted_count,
-            SUM(CASE WHEN o.near_miss = 1 THEN 1 ELSE 0 END) AS near_miss_count
-        FROM evaluated_opportunities o
-        WHERE {pullback_sql}
-        """,
-        pullback_params,
-    ).fetchone()
-    blocker_rows = conn.execute(
-        f"""
-        SELECT CAST(blocker.value AS TEXT) AS blocker, COUNT(DISTINCT o.id) AS count
-        FROM evaluated_opportunities o
-        JOIN json_each(o.all_blockers) blocker
-        WHERE {pullback_sql}
-          AND o.final_decision = 'rejected'
-        GROUP BY CAST(blocker.value AS TEXT)
-        ORDER BY count DESC, blocker ASC
-        """,
-        pullback_params,
-    ).fetchall()
-    journal_counts = _journaled_pullback_summary(start_iso, end_iso, symbol)
-    return {
-        "evaluated_count": int(totals["evaluated_count"] or 0) if totals else 0,
-        "rejected_count": int(totals["rejected_count"] or 0) if totals else 0,
-        "emitted_count": int(totals["emitted_count"] or 0) if totals else 0,
-        "near_miss_count": int(totals["near_miss_count"] or 0) if totals else 0,
-        "journaled_count": journal_counts["journaled_count"],
-        "prime_suppressed_count": journal_counts["prime_suppressed_count"],
-        "rejected_by_gate": {str(row["blocker"]): int(row["count"] or 0) for row in blocker_rows if row["blocker"]},
-    }
-
-
-def _count_by(conn: sqlite3.Connection, column: str, where_sql: str, params: list[Any], *, fallback: str = "unknown") -> dict[str, int]:
-    rows = conn.execute(
-        f"""
-        SELECT COALESCE(NULLIF({column}, ''), ?) AS name, COUNT(*) AS count
-        FROM evaluated_opportunities o
-        WHERE {where_sql}
-        GROUP BY COALESCE(NULLIF({column}, ''), ?)
-        """,
-        (fallback, *params, fallback),
-    ).fetchall()
-    return {str(row["name"]): int(row["count"] or 0) for row in rows}
-
-
 def get_summary(
     start: str,
     end: str,
@@ -1365,189 +830,24 @@ def get_summary(
     signal_type: Optional[str] = None,
     decision: Optional[str] = None,
     first_blocker: Optional[str] = None,
-    db_path: Path = DB_FILE,
     db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
-    if db is not None:
-        cached = get_cache().get_cached_strategy_summary({"start": start, "end": end, "symbol": symbol, "strategy": strategy, "signal_type": signal_type, "decision": decision, "first_blocker": first_blocker})
-        if cached is not None:
-            return cached
-        result = _get_summary_db(start, end, symbol, strategy, signal_type, decision, first_blocker, db)
-        get_cache().cache_strategy_summary({"start": start, "end": end, "symbol": symbol, "strategy": strategy, "signal_type": signal_type, "decision": decision, "first_blocker": first_blocker}, result)
-        return result
-    init_schema(db_path)
-    where_sql, params, start_iso, end_iso = _opportunity_filter_clauses(
-        start,
-        end,
-        symbol=symbol,
-        decision=decision,
-        strategy=strategy,
-        signal_type=signal_type,
-        first_blocker=first_blocker,
-        table_alias="o",
-    )
-
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        totals = conn.execute(
-            f"""
-            SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS emitted,
-                SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-                SUM(CASE WHEN o.final_decision = 'skipped' THEN 1 ELSE 0 END) AS skipped,
-                SUM(CASE WHEN o.final_decision = 'indeterminate' THEN 1 ELSE 0 END) AS indeterminate,
-                SUM(CASE WHEN o.near_miss = 1 THEN 1 ELSE 0 END) AS near_miss_count,
-                SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats = 1 THEN 1 ELSE 0 END) AS trade_opportunity_count,
-                SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats = 0 THEN 1 ELSE 0 END) AS stats_excluded_count,
-                SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats IS NULL THEN 1 ELSE 0 END) AS stats_unknown_eligibility_count,
-                SUM(CASE WHEN o.data_complete = 0 THEN 1 ELSE 0 END) AS incomplete_count,
-                COUNT(DISTINCT o.threshold_version) AS threshold_versions
-            FROM evaluated_opportunities o
-            WHERE {where_sql}
-            """,
-            params,
-        ).fetchone()
-        total = int(totals["total"] or 0)
-        emitted = int(totals["emitted"] or 0)
-        rejected = int(totals["rejected"] or 0)
-        skipped = int(totals["skipped"] or 0)
-        indeterminate = int(totals["indeterminate"] or 0)
-        near_miss_count = int(totals["near_miss_count"] or 0)
-        trade_opportunity_count = int(totals["trade_opportunity_count"] or 0)
-        stats_excluded_count = int(totals["stats_excluded_count"] or 0)
-        stats_unknown_eligibility_count = int(totals["stats_unknown_eligibility_count"] or 0)
-        threshold_version_counts = _count_by(conn, "o.threshold_version", where_sql, params)
-        strategy_counts = _count_by(conn, "o.strategy", where_sql, params)
-        signal_type_counts = _count_by(conn, "o.signal_type", where_sql, params)
-        stats_exclusion_counts = dict(
-            conn.execute(
-                f"""
-                SELECT COALESCE(NULLIF(o.stats_exclusion_reason, ''), 'unknown') AS reason, COUNT(*) AS count
-                FROM evaluated_opportunities o
-                WHERE {where_sql}
-                  AND o.final_decision = 'emitted'
-                  AND o.usable_for_strategy_stats = 0
-                GROUP BY COALESCE(NULLIF(o.stats_exclusion_reason, ''), 'unknown')
-                """,
-                params,
-            ).fetchall()
-        )
-        threshold_version_unknown_reasons = dict(
-            conn.execute(
-                f"""
-                SELECT COALESCE(NULLIF(o.threshold_version_unknown_reason, ''), 'legacy_or_missing_threshold_version') AS reason,
-                       COUNT(*) AS count
-                FROM evaluated_opportunities o
-                WHERE {where_sql}
-                  AND COALESCE(NULLIF(o.threshold_version, ''), 'unknown') = 'unknown'
-                GROUP BY COALESCE(NULLIF(o.threshold_version_unknown_reason, ''), 'legacy_or_missing_threshold_version')
-                """,
-                params,
-            ).fetchall()
-        )
-        near_miss_reason_counts = dict(
-            conn.execute(
-                f"""
-                SELECT o.near_miss_reason, COUNT(*) AS count
-                FROM evaluated_opportunities o
-                WHERE {where_sql}
-                  AND o.near_miss = 1
-                  AND o.near_miss_reason IS NOT NULL
-                GROUP BY o.near_miss_reason
-                """,
-                params,
-            ).fetchall()
-        )
-        blocker_rows = conn.execute(
-            f"""
-            SELECT DISTINCT CAST(blocker.value AS TEXT) AS blocker
-            FROM evaluated_opportunities o
-            JOIN json_each(o.all_blockers) blocker
-            WHERE {where_sql}
-            ORDER BY blocker
-            """,
-            params,
-        ).fetchall()
-        all_blockers = [row["blocker"] for row in blocker_rows if row["blocker"]]
-        first_blocker_row = conn.execute(
-            f"""
-            SELECT o.first_blocker, o.blocking_layer
-            FROM evaluated_opportunities o
-            WHERE {where_sql} AND o.first_blocker IS NOT NULL
-            ORDER BY o.evaluated_at ASC
-            LIMIT 1
-            """,
-            params,
-        ).fetchone()
-        summary_first_blocker = first_blocker_row["first_blocker"] if first_blocker_row else None
-        blocking_layer = first_blocker_row["blocking_layer"] if first_blocker_row else None
-        blocked_opportunity_count = int(
-            conn.execute(
-                f"SELECT COUNT(*) FROM evaluated_opportunities o WHERE {where_sql} AND o.all_blockers != '[]'",
-                params,
-            ).fetchone()[0]
-            or 0
-        )
-        warnings: list[str] = []
-        if total == 0:
-            warnings.append("No evaluated opportunities in selected period")
-        if int(totals["incomplete_count"] or 0):
-            warnings.append("Some opportunities have incomplete diagnostics")
-        if int(totals["threshold_versions"] or 0) > 1:
-            warnings.append("Strategy threshold version changed during selected period")
-
-        prime_summary = _prime_suppression_summary(start_iso, end_iso, symbol)
-        managed_summary = _managed_lifecycle_summary(start_iso, end_iso, symbol)
-        summary = DiagnosticSummary(
-            start=start_iso,
-            end=end_iso,
-            total_evaluated=total,
-            emitted_count=emitted,
-            rejected_count=rejected,
-            skipped_count=skipped,
-            indeterminate_count=indeterminate,
-            near_miss_count=near_miss_count,
-            trade_opportunity_count=trade_opportunity_count,
-            stats_excluded_count=stats_excluded_count,
-            stats_unknown_eligibility_count=stats_unknown_eligibility_count,
-            stats_exclusion_counts=stats_exclusion_counts,
-            total_prime_suppressed_signals=prime_summary["total_prime_suppressed_signals"],
-            prime_suppressed_signals_by_symbol=prime_summary["prime_suppressed_signals_by_symbol"],
-            prime_suppressed_same_direction_count=prime_summary["prime_suppressed_same_direction_count"],
-            prime_suppressed_opposite_direction_count=prime_summary["prime_suppressed_opposite_direction_count"],
-            prime_invalidated_by_prime_count=prime_summary["prime_invalidated_by_prime_count"],
-            inferred_tp_close_count=prime_summary["inferred_tp_close_count"],
-            inferred_sl_close_count=prime_summary["inferred_sl_close_count"],
-            ambiguous_prime_close_count=prime_summary["ambiguous_prime_close_count"],
-            criterion_summaries=_criterion_summaries(conn, where_sql, params),
-            top_blockers=_blocker_summaries(conn, where_sql, params, blocked_opportunity_count),
-            first_blocker=summary_first_blocker,
-            all_blockers=all_blockers,
-            blocking_layer=blocking_layer,
-            threshold_version_counts=threshold_version_counts,
-            strategy_counts=strategy_counts,
-            signal_type_counts=signal_type_counts,
-            pullback_summary=_pullback_summary(conn, where_sql, params, start_iso, end_iso, symbol),
-            managed_lifecycle_summary=managed_summary,
-            pullback_entries_opened=managed_summary["pullback_entries_opened"],
-            continuation_management_events_observed=managed_summary["continuation_management_events_observed"],
-            continuation_management_events_accepted=managed_summary["continuation_management_events_accepted"],
-            continuation_management_events_rejected=managed_summary["continuation_management_events_rejected"],
-            tp_extension_count=managed_summary["tp_extension_count"],
-            sl_tighten_count=managed_summary["sl_tighten_count"],
-            break_even_move_count=managed_summary["break_even_move_count"],
-            profit_protected_sl_win_count=managed_summary["profit_protected_sl_win_count"],
-            opposite_direction_continuation_warning_count=managed_summary["opposite_direction_continuation_warning_count"],
-            average_r_captured=managed_summary["average_r_captured"],
-            max_favorable_excursion_before_exit=managed_summary["max_favorable_excursion_before_exit"],
-            managed_vs_original_result_delta=managed_summary["managed_vs_original_result_delta"],
-            threshold_version_unknown_reasons=threshold_version_unknown_reasons,
-            near_miss_reason_counts=near_miss_reason_counts,
-            pipeline_funnel=_pipeline_funnel(conn, where_sql, params, total),
-            data_quality_warnings=warnings,
-        )
-        return summary.to_dict()
+    db = db or get_db()
+    filters = {
+        "start": start,
+        "end": end,
+        "symbol": symbol,
+        "strategy": strategy,
+        "signal_type": signal_type,
+        "decision": decision,
+        "first_blocker": first_blocker,
+    }
+    cached = get_cache().get_cached_strategy_summary(filters)
+    if cached is not None:
+        return cached
+    result = _get_summary_db(start, end, symbol, strategy, signal_type, decision, first_blocker, db)
+    get_cache().cache_strategy_summary(filters, result)
+    return result
 
 
 def compare_periods(
@@ -1556,11 +856,11 @@ def compare_periods(
     compare_start: str,
     compare_end: str,
     symbol: Optional[str] = None,
-    db_path: Path = DB_FILE,
     db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
-    baseline = DiagnosticSummary(**_summary_dataclass_kwargs(get_summary(base_start, base_end, symbol=symbol, db_path=db_path)))
-    comparison = DiagnosticSummary(**_summary_dataclass_kwargs(get_summary(compare_start, compare_end, symbol=symbol, db_path=db_path)))
+    db = db or get_db()
+    baseline = DiagnosticSummary(**_summary_dataclass_kwargs(get_summary(base_start, base_end, symbol=symbol, db=db)))
+    comparison = DiagnosticSummary(**_summary_dataclass_kwargs(get_summary(compare_start, compare_end, symbol=symbol, db=db)))
     base_top = baseline.top_blockers[0].criterion_name if baseline.top_blockers else None
     comp_top = comparison.top_blockers[0].criterion_name if comparison.top_blockers else None
     return ComparisonPeriod(
@@ -1594,9 +894,9 @@ def export_summary(
     decision: Optional[str] = None,
     first_blocker: Optional[str] = None,
     include_opportunities: bool = False,
-    db_path: Path = DB_FILE,
-    db: Optional[Any] = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
+    db = db or get_db()
     payload = {
         "summary": get_summary(
             start,
@@ -1606,7 +906,6 @@ def export_summary(
             signal_type=signal_type,
             decision=decision,
             first_blocker=first_blocker,
-            db_path=db_path,
             db=db,
         )
     }
@@ -1620,7 +919,6 @@ def export_summary(
             signal_type=signal_type,
             first_blocker=first_blocker,
             limit=config.STRATEGY_METRICS_MAX_OPPORTUNITIES,
-            db_path=db_path,
             db=db,
         )
     return payload
@@ -1630,73 +928,11 @@ def export_summary(
 
 
 def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
-    """Append-only insert of an opportunity and its criteria via the persistence layer."""
-    db.execute(
-        """
-        INSERT INTO evaluated_opportunities (
-            id, evaluated_at, symbol, timeframe, mode, strategy, signal_type, direction, trend,
-            final_decision, decision_reason, confidence, failed_criteria_count,
-            near_miss, data_complete, data_quality_notes, threshold_version, created_at,
-            first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
-            near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
-            stats_exclusion_reason,
-            volatility_shock_detected, shock_timeframe, shock_candle_time, shock_true_range,
-            shock_atr, shock_atr_multiple, shock_lookback_bars, shock_direction,
-            shock_suppression_until, shock_suppression_candles_remaining,
-            raw_lr_1h, raw_lr_15m, raw_lr_5m,
-            filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
-            trend_changed_after_filter, market_validity_state, market_validity_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            opportunity.id,
-            opportunity.evaluated_at,
-            opportunity.symbol,
-            opportunity.timeframe,
-            opportunity.mode,
-            opportunity.strategy,
-            opportunity.signal_type,
-            opportunity.direction,
-            opportunity.trend,
-            opportunity.final_decision,
-            opportunity.decision_reason,
-            opportunity.confidence,
-            opportunity.failed_criteria_count,
-            int(opportunity.near_miss),
-            int(opportunity.data_complete),
-            json.dumps(opportunity.data_quality_notes),
-            opportunity.threshold_version,
-            opportunity.created_at,
-            opportunity.first_blocker,
-            json.dumps(opportunity.all_blockers),
-            opportunity.blocking_layer,
-            json.dumps(opportunity.trend_decision) if opportunity.trend_decision is not None else None,
-            opportunity.pipeline_state,
-            opportunity.near_miss_reason,
-            opportunity.threshold_version_unknown_reason,
-            None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
-            opportunity.stats_exclusion_reason,
-            int(opportunity.volatility_shock_detected),
-            opportunity.shock_timeframe,
-            opportunity.shock_candle_time,
-            opportunity.shock_true_range,
-            opportunity.shock_atr,
-            opportunity.shock_atr_multiple,
-            opportunity.shock_lookback_bars,
-            opportunity.shock_direction,
-            opportunity.shock_suppression_until,
-            opportunity.shock_suppression_candles_remaining,
-            opportunity.raw_lr_1h,
-            opportunity.raw_lr_15m,
-            opportunity.raw_lr_5m,
-            opportunity.filtered_lr_1h,
-            opportunity.filtered_lr_15m,
-            opportunity.filtered_lr_5m,
-            int(opportunity.trend_changed_after_filter),
-            opportunity.market_validity_state,
-            opportunity.market_validity_reason,
-        ),
-    )
+    """Append-only insert of an opportunity and its criteria via the persistence layer.
+
+    The opportunity row and its criterion rows are written inside a single
+    transaction so the diagnostic is never persisted half-written.
+    """
     criterion_rows = [
         (
             opportunity.id,
@@ -1720,18 +956,85 @@ def _record_opportunity_db(opportunity: EvaluatedOpportunity, db: Any) -> None:
         )
         for criterion in opportunity.criteria
     ]
-    if criterion_rows:
-        db.executemany(
+    with db.transaction():
+        db.execute(
             """
-            INSERT INTO criterion_results (
-                opportunity_id, evaluated_at, criterion_name, layer, measured_value, threshold_value,
-                threshold_operator, passed, expected_pass, pass_mismatch, margin,
-                normalized_margin, required, blocked_signal, data_quality, diagnostic_state,
-                reason, context
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO evaluated_opportunities (
+                id, evaluated_at, symbol, timeframe, mode, strategy, signal_type, direction, trend,
+                final_decision, decision_reason, confidence, failed_criteria_count,
+                near_miss, data_complete, data_quality_notes, threshold_version, created_at,
+                first_blocker, all_blockers, blocking_layer, trend_decision, pipeline_state,
+                near_miss_reason, threshold_version_unknown_reason, usable_for_strategy_stats,
+                stats_exclusion_reason,
+                volatility_shock_detected, shock_timeframe, shock_candle_time, shock_true_range,
+                shock_atr, shock_atr_multiple, shock_lookback_bars, shock_direction,
+                shock_suppression_until, shock_suppression_candles_remaining,
+                raw_lr_1h, raw_lr_15m, raw_lr_5m,
+                filtered_lr_1h, filtered_lr_15m, filtered_lr_5m,
+                trend_changed_after_filter, market_validity_state, market_validity_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            criterion_rows,
+            (
+                opportunity.id,
+                opportunity.evaluated_at,
+                opportunity.symbol,
+                opportunity.timeframe,
+                opportunity.mode,
+                opportunity.strategy,
+                opportunity.signal_type,
+                opportunity.direction,
+                opportunity.trend,
+                opportunity.final_decision,
+                opportunity.decision_reason,
+                opportunity.confidence,
+                opportunity.failed_criteria_count,
+                int(opportunity.near_miss),
+                int(opportunity.data_complete),
+                json.dumps(opportunity.data_quality_notes),
+                opportunity.threshold_version,
+                opportunity.created_at,
+                opportunity.first_blocker,
+                json.dumps(opportunity.all_blockers),
+                opportunity.blocking_layer,
+                json.dumps(opportunity.trend_decision) if opportunity.trend_decision is not None else None,
+                opportunity.pipeline_state,
+                opportunity.near_miss_reason,
+                opportunity.threshold_version_unknown_reason,
+                None if opportunity.usable_for_strategy_stats is None else int(opportunity.usable_for_strategy_stats),
+                opportunity.stats_exclusion_reason,
+                int(opportunity.volatility_shock_detected),
+                opportunity.shock_timeframe,
+                opportunity.shock_candle_time,
+                opportunity.shock_true_range,
+                opportunity.shock_atr,
+                opportunity.shock_atr_multiple,
+                opportunity.shock_lookback_bars,
+                opportunity.shock_direction,
+                opportunity.shock_suppression_until,
+                opportunity.shock_suppression_candles_remaining,
+                opportunity.raw_lr_1h,
+                opportunity.raw_lr_15m,
+                opportunity.raw_lr_5m,
+                opportunity.filtered_lr_1h,
+                opportunity.filtered_lr_15m,
+                opportunity.filtered_lr_5m,
+                int(opportunity.trend_changed_after_filter),
+                opportunity.market_validity_state,
+                opportunity.market_validity_reason,
+            ),
         )
+        if criterion_rows:
+            db.executemany(
+                """
+                INSERT INTO criterion_results (
+                    opportunity_id, evaluated_at, criterion_name, layer, measured_value, threshold_value,
+                    threshold_operator, passed, expected_pass, pass_mismatch, margin,
+                    normalized_margin, required, blocked_signal, data_quality, diagnostic_state,
+                    reason, context
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                criterion_rows,
+            )
 
 
 def _get_opportunities_db(
@@ -1800,6 +1103,227 @@ def _get_opportunities_db(
     return result
 
 
+_SUMMARY_LIGHTWEIGHT_COLUMNS = (
+    "id, evaluated_at, final_decision, near_miss, data_complete, threshold_version, "
+    "threshold_version_unknown_reason, strategy, signal_type, usable_for_strategy_stats, "
+    "stats_exclusion_reason, near_miss_reason, decision_reason, pipeline_state, "
+    "all_blockers, first_blocker, blocking_layer"
+)
+
+_PULLBACK_CRITERIA = (
+    "pullback_trigger_candle",
+    "keltner_pullback_sequence",
+    "pullback_structure",
+    "pullback_15m_bridge",
+    "pullback_macd_hard_block",
+)
+
+
+def _count_by_fallback(value: Any, fallback: str = "unknown") -> str:
+    """Mirror SQL COALESCE(NULLIF(col, ''), fallback) for Python-side grouping."""
+    text = "" if value is None else str(value)
+    return text if text != "" else fallback
+
+
+def _criterion_summaries_db(db: Any, where_sql: str, params: list[Any]) -> list[CriterionSummary]:
+    """Per-criterion pass/fail aggregation via portable SQL (no json functions)."""
+    rows = db.fetchall(
+        f"""
+        SELECT c.criterion_name AS criterion_name,
+               COUNT(*) AS evaluated_count,
+               SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS pass_count,
+               SUM(CASE WHEN c.passed = 0 THEN 1 ELSE 0 END) AS fail_count,
+               SUM(CASE WHEN c.data_quality != 'complete' THEN 1 ELSE 0 END) AS incomplete_count,
+               AVG(CASE WHEN c.passed = 0 THEN ABS(c.margin) ELSE NULL END) AS average_failure_margin,
+               SUM(CASE WHEN o.near_miss = 1 AND c.blocked_signal = 1 THEN 1 ELSE 0 END) AS near_miss_contribution
+        FROM criterion_results c
+        JOIN evaluated_opportunities o ON o.id = c.opportunity_id AND o.evaluated_at = c.evaluated_at
+        WHERE {where_sql}
+        GROUP BY c.criterion_name
+        ORDER BY c.criterion_name
+        """,
+        params,
+    )
+    summaries = []
+    for row in rows:
+        evaluated = int(row.get("evaluated_count") or 0)
+        passed = int(row.get("pass_count") or 0)
+        failed = int(row.get("fail_count") or 0)
+        avg_margin = row.get("average_failure_margin")
+        summaries.append(
+            CriterionSummary(
+                criterion_name=_canonical_criterion_name(row.get("criterion_name")),
+                evaluated_count=evaluated,
+                pass_count=passed,
+                fail_count=failed,
+                pass_rate=round(passed / evaluated, 4) if evaluated else 0.0,
+                fail_rate=round(failed / evaluated, 4) if evaluated else 0.0,
+                near_miss_contribution=int(row.get("near_miss_contribution") or 0),
+                average_failure_margin=None if avg_margin is None else round(float(avg_margin), 6),
+                incomplete_count=int(row.get("incomplete_count") or 0),
+            )
+        )
+    return summaries
+
+
+def _funnel_candle_rules_db(db: Any, where_sql: str, params: list[Any]) -> tuple[int, int, int]:
+    """Return (candle_passed, candle_waiting_or_failed, signal_rules_evaluated) opp counts."""
+    def _count(criteria_clause: str, extra: tuple) -> int:
+        row = db.fetchone(
+            f"""
+            SELECT COUNT(*) AS cnt FROM (
+                SELECT DISTINCT c.opportunity_id, c.evaluated_at
+                FROM criterion_results c
+                JOIN evaluated_opportunities o ON o.id = c.opportunity_id AND o.evaluated_at = c.evaluated_at
+                WHERE {where_sql} AND {criteria_clause}
+            ) t
+            """,
+            (*params, *extra),
+        )
+        return int(row.get("cnt") or 0) if row else 0
+
+    rules_placeholders = ", ".join("?" for _ in ("stoch_rsi", "macd", "keltner", "confidence"))
+    candle_passed = _count("c.criterion_name = 'candle_close_gate' AND c.passed = 1", ())
+    candle_waiting = _count("c.criterion_name = 'candle_close_gate' AND (c.passed = 0 OR c.passed IS NULL)", ())
+    rules = _count(f"c.criterion_name IN ({rules_placeholders})", ("stoch_rsi", "macd", "keltner", "confidence"))
+    return candle_passed, candle_waiting, rules
+
+
+def _top_blockers_db(
+    db: Any,
+    where_sql: str,
+    params: list[Any],
+    lightweight_rows: list[dict[str, Any]],
+    blocked_opportunity_count: int,
+) -> list[BlockerSummary]:
+    """Score blockers in Python from parsed all_blockers + blocked-opp criteria.
+
+    Mirrors the SQLite ``_blocker_summaries`` weighting (frequency 0.40,
+    margin 0.30, quality 0.30) without relying on json_each / GROUP_CONCAT.
+    """
+    if not blocked_opportunity_count:
+        return []
+    crit_rows = db.fetchall(
+        f"""
+        SELECT c.opportunity_id AS opportunity_id, c.evaluated_at AS evaluated_at,
+               c.criterion_name AS criterion_name, c.normalized_margin AS normalized_margin,
+               c.required AS required, c.passed AS passed
+        FROM criterion_results c
+        JOIN evaluated_opportunities o ON o.id = c.opportunity_id AND o.evaluated_at = c.evaluated_at
+        WHERE {where_sql} AND o.all_blockers != '[]'
+        LIMIT {config.STRATEGY_METRICS_MAX_OPPORTUNITIES * 50}
+        """,
+        params,
+    )
+    criteria_by_opp: dict[tuple, list[dict[str, Any]]] = {}
+    for c in crit_rows:
+        criteria_by_opp.setdefault((c["opportunity_id"], c["evaluated_at"]), []).append(c)
+
+    data: dict[str, dict[str, Any]] = {}
+    for row in lightweight_rows:
+        blockers = _parse_blockers(row.get("all_blockers"))
+        if not blockers:
+            continue
+        crits = criteria_by_opp.get((row["id"], row["evaluated_at"]), [])
+        required = [c for c in crits if c["required"]]
+        total_required = len(required)
+        passed_required = sum(1 for c in required if c["passed"] == 1)
+        quality_val = (passed_required / (total_required - 1)) if total_required > 1 else 0.0
+        for name in set(blockers):
+            bucket = data.setdefault(name, {"ids": set(), "margins": [], "qualities": []})
+            bucket["ids"].add(row["id"])
+            matching = [c for c in crits if c["criterion_name"] == name]
+            for c in (matching or [None]):
+                bucket["qualities"].append(quality_val)
+                if c is not None and c["normalized_margin"] is not None:
+                    nm = float(c["normalized_margin"])
+                    bucket["margins"].append(0.0 if abs(nm) > 1.0 else 1.0 - abs(nm))
+
+    result = []
+    for name, bucket in data.items():
+        blocked_count = len(bucket["ids"])
+        frequency = blocked_count / blocked_opportunity_count
+        margin = max(0.0, min(1.0, sum(bucket["margins"]) / len(bucket["margins"]))) if bucket["margins"] else 0.0
+        quality = max(0.0, min(1.0, sum(bucket["qualities"]) / len(bucket["qualities"]))) if bucket["qualities"] else 0.0
+        combined = (frequency * 0.40) + (margin * 0.30) + (quality * 0.30)
+        result.append(
+            BlockerSummary(
+                criterion_name=name,
+                blocked_count=blocked_count,
+                frequency_component=round(frequency, 4),
+                margin_component=round(margin, 4),
+                quality_component=round(quality, 4),
+                combined_score=round(combined, 4),
+                example_opportunity_ids=sorted(bucket["ids"])[:5],
+            )
+        )
+    result.sort(key=lambda b: (-b.combined_score, -b.blocked_count, b.criterion_name))
+    return result[:50]
+
+
+def _pullback_summary_db(
+    db: Any, where_sql: str, params: list[Any], start_iso: str, end_iso: str, symbol: Optional[str]
+) -> dict[str, Any]:
+    """Pullback outcomes via portable SQL EXISTS + Python blocker counting."""
+    placeholders = ", ".join("?" for _ in _PULLBACK_CRITERIA)
+    pullback_sql = (
+        f"{where_sql} AND ("
+        "o.signal_type = 'pullback' OR LOWER(o.strategy) LIKE '%pullback%' OR "
+        "EXISTS (SELECT 1 FROM criterion_results pc WHERE pc.opportunity_id = o.id "
+        f"AND pc.evaluated_at = o.evaluated_at AND pc.criterion_name IN ({placeholders}))"
+        ")"
+    )
+    pullback_params = [*params, *_PULLBACK_CRITERIA]
+    totals = db.fetchone(
+        f"""
+        SELECT
+            COUNT(*) AS evaluated_count,
+            SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+            SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS emitted_count,
+            SUM(CASE WHEN o.near_miss = 1 THEN 1 ELSE 0 END) AS near_miss_count
+        FROM evaluated_opportunities o
+        WHERE {pullback_sql}
+        """,
+        pullback_params,
+    )
+    rejected_rows = db.fetchall(
+        f"SELECT o.id AS id, o.all_blockers AS all_blockers FROM evaluated_opportunities o "
+        f"WHERE {pullback_sql} AND o.final_decision = 'rejected'",
+        pullback_params,
+    )
+    rejected_by_gate: dict[str, set] = {}
+    for row in rejected_rows:
+        for blocker in set(_parse_blockers(row.get("all_blockers"))):
+            rejected_by_gate.setdefault(blocker, set()).add(row["id"])
+    gate_counts = sorted(
+        ((name, len(ids)) for name, ids in rejected_by_gate.items()),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    journal_counts = _journaled_pullback_summary(start_iso, end_iso, symbol)
+    return {
+        "evaluated_count": int(totals.get("evaluated_count") or 0) if totals else 0,
+        "rejected_count": int(totals.get("rejected_count") or 0) if totals else 0,
+        "emitted_count": int(totals.get("emitted_count") or 0) if totals else 0,
+        "near_miss_count": int(totals.get("near_miss_count") or 0) if totals else 0,
+        "journaled_count": journal_counts["journaled_count"],
+        "prime_suppressed_count": journal_counts["prime_suppressed_count"],
+        "rejected_by_gate": {name: count for name, count in gate_counts},
+    }
+
+
+def _parse_blockers(value: Any) -> list[str]:
+    """Parse an all_blockers column (TEXT JSON array) into a list of strings."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return [str(v) for v in parsed] if isinstance(parsed, list) else []
+
+
 def _get_summary_db(
     start: str,
     end: str,
@@ -1810,107 +1334,171 @@ def _get_summary_db(
     first_blocker: Optional[str],
     db: Any,
 ) -> dict[str, Any]:
+    """Backend-agnostic summary with full parity to the SQLite-connection path.
+
+    Scalar/criterion aggregates run as portable SQL; the JSON-array (all_blockers)
+    logic is computed in Python from a lightweight opportunity fetch so the same
+    code path serves both SQLite and Postgres backends.
+    """
     where_sql, params, start_iso, end_iso = _opportunity_filter_clauses(
         start, end, symbol=symbol, decision=decision, strategy=strategy,
         signal_type=signal_type, first_blocker=first_blocker, table_alias="o",
     )
-    totals = db.fetchone(
-        f"""
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN o.final_decision = 'emitted' THEN 1 ELSE 0 END) AS emitted,
-            SUM(CASE WHEN o.final_decision = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-            SUM(CASE WHEN o.final_decision = 'skipped' THEN 1 ELSE 0 END) AS skipped,
-            SUM(CASE WHEN o.final_decision = 'indeterminate' THEN 1 ELSE 0 END) AS indeterminate,
-            SUM(CASE WHEN o.near_miss = 1 THEN 1 ELSE 0 END) AS near_miss_count,
-            SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats = 1 THEN 1 ELSE 0 END) AS trade_opportunity_count,
-            SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats = 0 THEN 1 ELSE 0 END) AS stats_excluded_count,
-            SUM(CASE WHEN o.final_decision = 'emitted' AND o.usable_for_strategy_stats IS NULL THEN 1 ELSE 0 END) AS stats_unknown_eligibility_count,
-            SUM(CASE WHEN o.data_complete = 0 THEN 1 ELSE 0 END) AS incomplete_count,
-            COUNT(DISTINCT o.threshold_version) AS threshold_versions
-        FROM evaluated_opportunities o
-        WHERE {where_sql}
-        """,
+    rows = db.fetchall(
+        f"SELECT {_SUMMARY_LIGHTWEIGHT_COLUMNS} FROM evaluated_opportunities o WHERE {where_sql}",
         params,
     )
-    total = int(totals.get("total") or 0)
-    emitted = int(totals.get("emitted") or 0)
-    rejected = int(totals.get("rejected") or 0)
-    skipped = int(totals.get("skipped") or 0)
-    indeterminate = int(totals.get("indeterminate") or 0)
-    near_miss_count = int(totals.get("near_miss_count") or 0)
-    trade_opportunity_count = int(totals.get("trade_opportunity_count") or 0)
-    stats_excluded_count = int(totals.get("stats_excluded_count") or 0)
-    stats_unknown_eligibility_count = int(totals.get("stats_unknown_eligibility_count") or 0)
 
-    # Per-group counts via standard GROUP BY queries (no json_each needed)
-    threshold_version_counts = dict(
-        (r["val"], r["cnt"])
-        for r in db.fetchall(
-            f"""
-            SELECT threshold_version AS val, COUNT(*) AS cnt
-            FROM evaluated_opportunities o
-            WHERE {where_sql}
-            GROUP BY threshold_version
-            """,
-            params,
-        )
-    ) if total > 0 else {}
+    total = len(rows)
+    emitted = rejected = skipped = indeterminate = 0
+    near_miss_count = trade_opportunity_count = stats_excluded_count = 0
+    stats_unknown_eligibility_count = incomplete_count = 0
+    threshold_version_counts: dict[str, int] = {}
+    strategy_counts: dict[str, int] = {}
+    signal_type_counts: dict[str, int] = {}
+    stats_exclusion_counts: dict[str, int] = {}
+    threshold_version_unknown_reasons: dict[str, int] = {}
+    near_miss_reason_counts: dict[str, int] = {}
+    threshold_versions_seen: set = set()
+    all_blockers_set: set = set()
+    blocked_opportunity_count = 0
+    trend_skipped = signal_data_missing = 0
+    earliest_first_blocker: Optional[tuple] = None  # (evaluated_at, first_blocker, blocking_layer)
 
-    strategy_counts = dict(
-        (r["val"], r["cnt"])
-        for r in db.fetchall(
-            f"""
-            SELECT strategy AS val, COUNT(*) AS cnt
-            FROM evaluated_opportunities o
-            WHERE {where_sql}
-            GROUP BY strategy
-            """,
-            params,
-        )
-    ) if total > 0 else {}
+    for row in rows:
+        fd = row.get("final_decision")
+        if fd == "emitted":
+            emitted += 1
+        elif fd == "rejected":
+            rejected += 1
+        elif fd == "skipped":
+            skipped += 1
+        elif fd == "indeterminate":
+            indeterminate += 1
+        usable = row.get("usable_for_strategy_stats")
+        if fd == "emitted":
+            if usable == 1:
+                trade_opportunity_count += 1
+            elif usable == 0:
+                stats_excluded_count += 1
+                stats_exclusion_counts[_count_by_fallback(row.get("stats_exclusion_reason"))] = (
+                    stats_exclusion_counts.get(_count_by_fallback(row.get("stats_exclusion_reason")), 0) + 1
+                )
+            elif usable is None:
+                stats_unknown_eligibility_count += 1
+        if row.get("near_miss"):
+            near_miss_count += 1
+            reason = row.get("near_miss_reason")
+            if reason is not None:
+                near_miss_reason_counts[reason] = near_miss_reason_counts.get(reason, 0) + 1
+        if not row.get("data_complete"):
+            incomplete_count += 1
 
-    signal_type_counts = dict(
-        (r["val"], r["cnt"])
-        for r in db.fetchall(
-            f"""
-            SELECT signal_type AS val, COUNT(*) AS cnt
-            FROM evaluated_opportunities o
-            WHERE {where_sql}
-            GROUP BY signal_type
-            """,
-            params,
-        )
-    ) if total > 0 else {}
+        tv = _count_by_fallback(row.get("threshold_version"))
+        threshold_version_counts[tv] = threshold_version_counts.get(tv, 0) + 1
+        threshold_versions_seen.add(row.get("threshold_version"))
+        if tv == "unknown":
+            tvur = _count_by_fallback(row.get("threshold_version_unknown_reason"), "legacy_or_missing_threshold_version")
+            threshold_version_unknown_reasons[tvur] = threshold_version_unknown_reasons.get(tvur, 0) + 1
+        sc = _count_by_fallback(row.get("strategy"))
+        strategy_counts[sc] = strategy_counts.get(sc, 0) + 1
+        stc = _count_by_fallback(row.get("signal_type"))
+        signal_type_counts[stc] = signal_type_counts.get(stc, 0) + 1
 
-    # Simplified summaries — full parity with SQLite path will be completed in follow-up commit
-    return {
-        "start": start_iso,
-        "end": end_iso,
+        blockers = _parse_blockers(row.get("all_blockers"))
+        if blockers:
+            blocked_opportunity_count += 1
+            all_blockers_set.update(blockers)
+        if row.get("decision_reason") == "no_trend" or row.get("pipeline_state") == "trend_skipped" or any(
+            b.startswith("trend:") for b in blockers
+        ):
+            trend_skipped += 1
+        if (not row.get("data_complete")) or any(b.startswith("signal_engine_data:") for b in blockers):
+            signal_data_missing += 1
+        fb = row.get("first_blocker")
+        if fb is not None:
+            key = (row.get("evaluated_at"), fb, row.get("blocking_layer"))
+            if earliest_first_blocker is None or key[0] < earliest_first_blocker[0]:
+                earliest_first_blocker = key
+
+    summary_first_blocker = earliest_first_blocker[1] if earliest_first_blocker else None
+    blocking_layer = earliest_first_blocker[2] if earliest_first_blocker else None
+
+    candle_passed, candle_waiting, rules_evaluated = _funnel_candle_rules_db(db, where_sql, params)
+    trend_candidate_found = max(0, total - trend_skipped)
+    pipeline_funnel = {
         "total_evaluated": total,
-        "emitted_count": emitted,
-        "rejected_count": rejected,
-        "skipped_count": skipped,
-        "indeterminate_count": indeterminate,
-        "near_miss_count": near_miss_count,
-        "trade_opportunity_count": trade_opportunity_count,
-        "stats_excluded_count": stats_excluded_count,
-        "stats_unknown_eligibility_count": stats_unknown_eligibility_count,
-        "threshold_version_counts": threshold_version_counts,
-        "strategy_counts": strategy_counts,
-        "signal_type_counts": signal_type_counts,
-        "criterion_summaries": [],
-        "top_blockers": [],
-        "first_blocker": None,
-        "all_blockers": [],
-        "blocking_layer": None,
-        "pullback_summary": {},
-        "managed_lifecycle_summary": {},
-        "threshold_version_unknown_reasons": {},
-        "near_miss_reason_counts": {},
-        "pipeline_funnel": {},
-        "data_quality_warnings": [],
+        "trend_skipped": trend_skipped,
+        "trend_candidate_found": trend_candidate_found,
+        "signal_data_complete": max(0, trend_candidate_found - signal_data_missing),
+        "signal_data_missing": signal_data_missing,
+        "candle_close_gate_passed": candle_passed,
+        "candle_close_gate_waiting_or_failed": candle_waiting,
+        "signal_rules_evaluated": rules_evaluated,
+        "signal_rejected": rejected,
+        "signal_emitted": emitted,
+        "indeterminate": indeterminate,
     }
+
+    warnings: list[str] = []
+    if total == 0:
+        warnings.append("No evaluated opportunities in selected period")
+    if incomplete_count:
+        warnings.append("Some opportunities have incomplete diagnostics")
+    if len(threshold_versions_seen) > 1:
+        warnings.append("Strategy threshold version changed during selected period")
+
+    prime_summary = _prime_suppression_summary(start_iso, end_iso, symbol)
+    managed_summary = _managed_lifecycle_summary(start_iso, end_iso, symbol)
+    summary = DiagnosticSummary(
+        start=start_iso,
+        end=end_iso,
+        total_evaluated=total,
+        emitted_count=emitted,
+        rejected_count=rejected,
+        skipped_count=skipped,
+        indeterminate_count=indeterminate,
+        near_miss_count=near_miss_count,
+        trade_opportunity_count=trade_opportunity_count,
+        stats_excluded_count=stats_excluded_count,
+        stats_unknown_eligibility_count=stats_unknown_eligibility_count,
+        stats_exclusion_counts=stats_exclusion_counts,
+        total_prime_suppressed_signals=prime_summary["total_prime_suppressed_signals"],
+        prime_suppressed_signals_by_symbol=prime_summary["prime_suppressed_signals_by_symbol"],
+        prime_suppressed_same_direction_count=prime_summary["prime_suppressed_same_direction_count"],
+        prime_suppressed_opposite_direction_count=prime_summary["prime_suppressed_opposite_direction_count"],
+        prime_invalidated_by_prime_count=prime_summary["prime_invalidated_by_prime_count"],
+        inferred_tp_close_count=prime_summary["inferred_tp_close_count"],
+        inferred_sl_close_count=prime_summary["inferred_sl_close_count"],
+        ambiguous_prime_close_count=prime_summary["ambiguous_prime_close_count"],
+        criterion_summaries=_criterion_summaries_db(db, where_sql, params),
+        top_blockers=_top_blockers_db(db, where_sql, params, rows, blocked_opportunity_count),
+        first_blocker=summary_first_blocker,
+        all_blockers=sorted(b for b in all_blockers_set if b),
+        blocking_layer=blocking_layer,
+        threshold_version_counts=threshold_version_counts,
+        strategy_counts=strategy_counts,
+        signal_type_counts=signal_type_counts,
+        pullback_summary=_pullback_summary_db(db, where_sql, params, start_iso, end_iso, symbol),
+        managed_lifecycle_summary=managed_summary,
+        pullback_entries_opened=managed_summary["pullback_entries_opened"],
+        continuation_management_events_observed=managed_summary["continuation_management_events_observed"],
+        continuation_management_events_accepted=managed_summary["continuation_management_events_accepted"],
+        continuation_management_events_rejected=managed_summary["continuation_management_events_rejected"],
+        tp_extension_count=managed_summary["tp_extension_count"],
+        sl_tighten_count=managed_summary["sl_tighten_count"],
+        break_even_move_count=managed_summary["break_even_move_count"],
+        profit_protected_sl_win_count=managed_summary["profit_protected_sl_win_count"],
+        opposite_direction_continuation_warning_count=managed_summary["opposite_direction_continuation_warning_count"],
+        average_r_captured=managed_summary["average_r_captured"],
+        max_favorable_excursion_before_exit=managed_summary["max_favorable_excursion_before_exit"],
+        managed_vs_original_result_delta=managed_summary["managed_vs_original_result_delta"],
+        threshold_version_unknown_reasons=threshold_version_unknown_reasons,
+        near_miss_reason_counts=near_miss_reason_counts,
+        pipeline_funnel=pipeline_funnel,
+        data_quality_warnings=warnings,
+    )
+    return summary.to_dict()
 
 
 def write_state_snapshot(summary: dict[str, Any], state_file: Path = STATE_FILE) -> None:

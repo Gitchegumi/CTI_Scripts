@@ -17,20 +17,22 @@ from tradegumi.strategy_metrics import (
     export_summary,
     get_opportunities,
     get_summary,
-    init_schema,
     record_opportunity,
+    prune_retention,
     write_state_snapshot,
 )
+
+from tradegumi.tests._pg import requires_postgres, get_test_backend
+
+pytestmark = requires_postgres
 
 
 def iso(days: int = 0) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
 
-def temp_db(name: str = "metrics.db") -> Path:
-    base = Path(__file__).resolve().parents[3] / ".tmp" / "cti_strategy_metrics_tests" / uuid.uuid4().hex
-    base.mkdir(parents=True, exist_ok=True)
-    return base / name
+def temp_db(name: str = "metrics.db"):
+    return get_test_backend()
 
 
 def opportunity(
@@ -91,14 +93,13 @@ def write_journal_entries(path: Path, entries: list[dict]) -> None:
     path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
 
 
-def test_schema_near_miss_state_and_serialization():
+def test_schema_near_miss_state_and_serialization(tmp_path):
     db = temp_db()
-    state = db.with_name("strategy_metrics.json")
-    init_schema(db)
+    state = tmp_path / "strategy_metrics.json"
     recorded = record_opportunity(opportunity(1), db)
     assert recorded.near_miss is True
 
-    summary = get_summary(iso(-1), iso(1), db_path=db)
+    summary = get_summary(iso(-1), iso(1), db=db)
     assert summary["total_evaluated"] == 1
     assert summary["near_miss_count"] == 1
 
@@ -106,7 +107,7 @@ def test_schema_near_miss_state_and_serialization():
     assert state.exists()
     assert "near_miss_count" in state.read_text()
 
-    rows = get_opportunities(iso(-1), iso(1), near_miss=True, db_path=db)
+    rows = get_opportunities(iso(-1), iso(1), near_miss=True, db=db)
     assert rows[0]["criteria"][0]["criterion_name"] == "stoch_rsi"
 
 
@@ -116,7 +117,8 @@ def test_retention_prunes_old_rows():
     old.evaluated_at = iso(-120)
     record_opportunity(old, db)
     record_opportunity(opportunity(2), db)
-    summary = get_summary(iso(-200), iso(1), db_path=db)
+    prune_retention(db=db)
+    summary = get_summary(iso(-200), iso(1), db=db)
     assert summary["total_evaluated"] == 1
 
 
@@ -190,7 +192,7 @@ def test_additive_pipeline_fields_round_trip_and_json_compatible():
     )
     record_opportunity(opp, db)
 
-    exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+    exported = get_opportunities(iso(-1), iso(1), db=db)[0]
 
     assert exported["pipeline_state"] == "trend_candidate_signal_data_missing"
     assert exported["threshold_version_unknown_reason"] == "legacy_or_missing_threshold_version"
@@ -222,8 +224,8 @@ def test_legacy_signal_engine_data_typo_is_normalized():
     )
 
     record_opportunity(opp, db)
-    exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
-    summary = get_summary(iso(-1), iso(1), db_path=db)
+    exported = get_opportunities(iso(-1), iso(1), db=db)[0]
+    summary = get_summary(iso(-1), iso(1), db=db)
 
     assert exported["criteria"][0]["criterion_name"] == "signal_engine_data"
     assert summary["criterion_summaries"][0]["criterion_name"] == "signal_engine_data"
@@ -233,7 +235,7 @@ def test_criterion_summary_blockers_and_warnings():
     db = temp_db()
     record_opportunity(opportunity(1, failed=1, threshold_version="v1"), db)
     record_opportunity(opportunity(2, failed=2, threshold_version="v2"), db)
-    summary = get_summary(iso(-1), iso(1), db_path=db)
+    summary = get_summary(iso(-1), iso(1), db=db)
 
     assert summary["rejected_count"] == 2
     assert summary["criterion_summaries"]
@@ -251,11 +253,11 @@ def test_comparison_and_export():
     record_opportunity(first, db)
     record_opportunity(second, db)
 
-    comparison = compare_periods(iso(-14), iso(-7), iso(-1), iso(1), db_path=db)
+    comparison = compare_periods(iso(-14), iso(-7), iso(-1), iso(1), db=db)
     assert comparison["deltas"]["total_evaluated"] == 0
     assert comparison["deltas"]["emitted_count"] == 1
 
-    exported = export_summary(iso(-14), iso(1), include_opportunities=True, db_path=db)
+    exported = export_summary(iso(-14), iso(1), include_opportunities=True, db=db)
     assert len(exported["opportunities"]) == 2
 
 
@@ -263,7 +265,7 @@ def test_opportunity_export_includes_lifecycle_placeholders():
     db = temp_db()
     record_opportunity(opportunity(1, decision="emitted", failed=0, usable_for_strategy_stats=True), db)
 
-    exported = export_summary(iso(-1), iso(1), include_opportunities=True, db_path=db)
+    exported = export_summary(iso(-1), iso(1), include_opportunities=True, db=db)
     row = exported["opportunities"][0]
 
     assert row["lifecycle_role"] == "entry"
@@ -301,7 +303,7 @@ def test_continuation_only_samples_have_zero_pullback_entries(tmp_path, monkeypa
     )
     write_journal_entries(journal_file, rows)
 
-    summary = get_summary("2026-06-08", "2026-06-12", db_path=db)
+    summary = get_summary("2026-06-08", "2026-06-12", db=db)
 
     assert summary["pullback_summary"]["journaled_count"] == 0
     assert summary["pullback_entries_opened"] == 0
@@ -366,7 +368,7 @@ def test_managed_lifecycle_summary_counters_and_result_delta(tmp_path, monkeypat
         ],
     )
 
-    summary = get_summary("2026-06-11", "2026-06-12", db_path=db)
+    summary = get_summary("2026-06-11", "2026-06-12", db=db)
 
     assert summary["pullback_entries_opened"] == 1
     assert summary["continuation_management_events_observed"] == 3
@@ -388,8 +390,8 @@ def test_summary_counts_only_usable_emitted_signals_as_trade_opportunities():
     record_opportunity(opportunity(2, decision="emitted", failed=0, usable_for_strategy_stats=False, stats_exclusion_reason="duplicate_setup"), db)
     record_opportunity(opportunity(3, decision="emitted", failed=0), db)
 
-    summary = get_summary(iso(-1), iso(1), db_path=db)
-    exported = get_opportunities(iso(-1), iso(1), db_path=db)
+    summary = get_summary(iso(-1), iso(1), db=db)
+    exported = get_opportunities(iso(-1), iso(1), db=db)
 
     assert summary["emitted_count"] == 3
     assert summary["trade_opportunity_count"] == 1
@@ -413,7 +415,7 @@ def test_summary_includes_prime_suppression_metrics(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    summary = get_summary("2026-05-06", "2026-05-06", db_path=temp_db())
+    summary = get_summary("2026-05-06", "2026-05-06", db=temp_db())
 
     assert summary["total_prime_suppressed_signals"] == 4
     assert summary["prime_suppressed_signals_by_symbol"] == {"GBPJPY": 1, "EURUSD": 3}
@@ -434,9 +436,9 @@ def test_date_only_end_includes_selected_day_and_excludes_following_day():
     record_opportunity(selected_day, db)
     record_opportunity(following_day, db)
 
-    summary = get_summary("2026-05-06", "2026-05-06", db_path=db)
-    opportunities = get_opportunities("2026-05-06", "2026-05-06", db_path=db)
-    exported = export_summary("2026-05-06", "2026-05-06", include_opportunities=True, db_path=db)
+    summary = get_summary("2026-05-06", "2026-05-06", db=db)
+    opportunities = get_opportunities("2026-05-06", "2026-05-06", db=db)
+    exported = export_summary("2026-05-06", "2026-05-06", include_opportunities=True, db=db)
 
     assert summary["total_evaluated"] == 1
     assert opportunities[0]["id"] == "opp-1"
@@ -468,9 +470,9 @@ def test_metrics_filters_and_offset_pagination():
         signal_type="continuation",
         decision="rejected",
         first_blocker="stoch_rsi",
-        db_path=db,
+        db=db,
     )
-    page = get_opportunities("2026-05-06", "2026-05-06", limit=1, offset=1, db_path=db)
+    page = get_opportunities("2026-05-06", "2026-05-06", limit=1, offset=1, db=db)
 
     assert summary["total_evaluated"] == 1
     assert summary["strategy_counts"] == {"CTI-v2": 1}
@@ -483,7 +485,7 @@ def test_seeded_summary_performance():
     start = datetime.now(timezone.utc)
     for i in range(250):
         record_opportunity(opportunity(i, failed=1 if i % 2 else 2), db)
-    summary = get_summary(iso(-1), iso(1), db_path=db)
+    summary = get_summary(iso(-1), iso(1), db=db)
     elapsed = (datetime.now(timezone.utc) - start).total_seconds()
     assert summary["total_evaluated"] == 250
     assert elapsed < 5
@@ -600,7 +602,7 @@ class TestComputeThresholdPass:
             ),
             db,
         )
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)
+        exported = get_opportunities(iso(-1), iso(1), db=db)
         criterion = exported[0]["criteria"][0]
         assert criterion["expected_pass"] is True
         assert criterion["pass_mismatch"] is True
@@ -617,7 +619,6 @@ class TestComputeThresholdPass:
 class TestTopBlockers:
     def test_all_opportunities_blocked_top_blockers_not_empty(self):
         db = temp_db()
-        init_schema(db)
         # Record 5 rejected opportunities, all failing trend_1h
         for i in range(5):
             cr = CriterionResult(
@@ -631,13 +632,12 @@ class TestTopBlockers:
                 criteria=[cr],
             )
             record_opportunity(opp, db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
         assert len(summary["top_blockers"]) > 0
         assert summary["top_blockers"][0]["criterion_name"] == "trend_1h"
 
     def test_top_blocker_quality_component_uses_other_required_criteria(self):
         db = temp_db()
-        init_schema(db)
         opp = EvaluatedOpportunity(
             id="opp-quality",
             evaluated_at=iso(),
@@ -675,7 +675,7 @@ class TestTopBlockers:
         )
         record_opportunity(opp, db)
 
-        blocker = get_summary(iso(-1), iso(1), db_path=db)["top_blockers"][0]
+        blocker = get_summary(iso(-1), iso(1), db=db)["top_blockers"][0]
 
         assert blocker["criterion_name"] == "stoch_rsi"
         assert blocker["quality_component"] == 1.0
@@ -683,18 +683,16 @@ class TestTopBlockers:
 
     def test_blockers_require_rejected_decision(self):
         db = temp_db()
-        init_schema(db)
         cr = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.003, threshold_value=0.005, threshold_operator="abs_gte", passed=False, required=True)
         # Emitted (not rejected) — should not appear as blocker
         opp = EvaluatedOpportunity(id="opp-emit", evaluated_at=iso(), symbol="EURUSD", final_decision="emitted", decision_reason="ok", criteria=[cr])
         record_opportunity(opp, db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
         # Should still have blockers (empty list since no rejections)
         assert summary["rejected_count"] == 0
 
     def test_first_blocker_and_blocking_layer(self):
         db = temp_db()
-        init_schema(db)
         cr1 = CriterionResult(criterion_name="trend_1h", layer="trend", measured_value=0.003, threshold_value=0.005, threshold_operator="abs_gte", passed=False, required=True)
         cr2 = CriterionResult(criterion_name="macd", layer="signal_stack", measured_value=0.0, threshold_value="improves", threshold_operator="boolean", passed=False, required=True)
         opp = EvaluatedOpportunity(id="opp-multi", evaluated_at=iso(), symbol="EURUSD", final_decision="rejected", decision_reason="criteria_failed", criteria=[cr1, cr2])
@@ -706,7 +704,6 @@ class TestTopBlockers:
 
     def test_skipped_no_trend_classification_counts_as_top_blocker(self):
         db = temp_db()
-        init_schema(db)
         trend_decision = classify_trend_decision(0.009, 0.011, -0.003, 0.005, 0.008, 0.002)
         opp = EvaluatedOpportunity(
             id="opp-conflict",
@@ -724,7 +721,7 @@ class TestTopBlockers:
             ],
         )
         recorded = record_opportunity(opp, db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert recorded.first_blocker == "trend:direction_conflict"
         assert recorded.all_blockers == ["trend:direction_conflict"]
@@ -735,7 +732,6 @@ class TestTopBlockers:
 
     def test_indeterminate_signal_engine_missing_counts_as_top_blocker(self):
         db = temp_db()
-        init_schema(db)
         cr = CriterionResult(
             criterion_name="signal_engine_data",
             layer="data_quality",
@@ -758,7 +754,7 @@ class TestTopBlockers:
             criteria=[cr],
         )
         recorded = record_opportunity(opp, db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert recorded.first_blocker == "signal_engine_data:missing"
         assert recorded.all_blockers == ["signal_engine_data:missing"]
@@ -804,7 +800,7 @@ class TestTopBlockers:
         )
 
         recorded = record_opportunity(opp, db)
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
 
         assert recorded.final_decision == "indeterminate"
         assert recorded.decision_reason == "signal_stack_data_not_ready"
@@ -856,7 +852,7 @@ class TestTopBlockers:
             ),
             db,
         )
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
 
         assert recorded.final_decision == "indeterminate"
         assert recorded.blocking_layer == "data_quality"
@@ -895,7 +891,7 @@ class TestTopBlockers:
             criteria=[cr],
         )
         recorded = record_opportunity(opp, db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert recorded.near_miss is False
         assert recorded.pipeline_state == "trend_candidate_candle_close_waiting"
@@ -938,8 +934,8 @@ class TestTopBlockers:
             db,
         )
 
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert exported["criteria"][0]["context"]["seconds_since_close"] == 2.0
         assert exported["criteria"][0]["context"]["margin_units"] == "seconds"
@@ -948,7 +944,7 @@ class TestTopBlockers:
     def test_near_miss_reason_counts_explain_count(self):
         db = temp_db()
         record_opportunity(opportunity(1, failed=1), db)
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert summary["near_miss_count"] == 1
         assert sum(summary["near_miss_reason_counts"].values()) == 1
@@ -988,7 +984,7 @@ class TestTopBlockers:
         record_opportunity(opportunity(3, decision="emitted", failed=0), db)
         record_opportunity(opportunity(4, decision="rejected", failed=1), db)
 
-        funnel = get_summary(iso(-1), iso(1), db_path=db)["pipeline_funnel"]
+        funnel = get_summary(iso(-1), iso(1), db=db)["pipeline_funnel"]
 
         assert funnel["total_evaluated"] == 4
         assert funnel["trend_skipped"] == 1
@@ -1002,7 +998,7 @@ class TestTopBlockers:
         db = temp_db()
         record_opportunity(opportunity(1, threshold_version="unknown"), db)
 
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
 
         assert summary["threshold_version_counts"]["unknown"] == 1
         assert summary["threshold_version_unknown_reasons"]["legacy_or_missing_threshold_version"] == 1
@@ -1048,7 +1044,7 @@ class TestTrendDecisionDiagnostics:
             db,
         )
 
-        summary = get_summary(iso(-1), iso(1), db_path=db)
+        summary = get_summary(iso(-1), iso(1), db=db)
         assert summary["indeterminate_count"] == 1
         assert summary["skipped_count"] == 0
 
@@ -1116,7 +1112,7 @@ class TestShockAndFilteredLRFields:
         assert recorded.shock_timeframe == "M5"
         assert recorded.shock_atr_multiple == 7.14
 
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
         assert exported["volatility_shock_detected"] is True
         assert exported["shock_timeframe"] == "M5"
         assert exported["shock_atr_multiple"] == 7.14
@@ -1135,7 +1131,7 @@ class TestShockAndFilteredLRFields:
         assert recorded.volatility_shock_detected is False
         assert recorded.market_validity_state == "valid"
 
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
         assert exported["volatility_shock_detected"] is False
         assert exported["market_validity_state"] == "valid"
         assert exported["market_validity_reason"] is None
@@ -1148,7 +1144,7 @@ class TestShockAndFilteredLRFields:
         assert recorded.filtered_lr_1h == 0.001
         assert recorded.trend_changed_after_filter is True
 
-        exported = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+        exported = get_opportunities(iso(-1), iso(1), db=db)[0]
         assert exported["raw_lr_1h"] == 0.002
         assert exported["filtered_lr_1h"] == 0.001
         assert exported["trend_changed_after_filter"] is True
@@ -1185,7 +1181,7 @@ def test_strategy_and_signal_type_counts_are_summarized():
         db,
     )
 
-    summary = get_summary(iso(-1), iso(1), db_path=db)
+    summary = get_summary(iso(-1), iso(1), db=db)
 
     assert summary["strategy_counts"]["CTI-v1.1-continuation-test"] == 1
     assert summary["strategy_counts"]["CTI-v1.2-pullback"] == 1
@@ -1266,7 +1262,7 @@ def test_pullback_summary_counts_outcomes_blockers_and_journal_visibility(tmp_pa
         db,
     )
 
-    summary = get_summary("2026-06-01", "2026-06-05", db_path=db)
+    summary = get_summary("2026-06-01", "2026-06-05", db=db)
 
     assert summary["pullback_summary"]["evaluated_count"] == 2
     assert summary["pullback_summary"]["rejected_count"] == 1
@@ -1309,7 +1305,7 @@ def test_pullback_opportunity_rows_preserve_context_and_blockers():
         db,
     )
 
-    row = get_opportunities(iso(-1), iso(1), db_path=db)[0]
+    row = get_opportunities(iso(-1), iso(1), db=db)[0]
 
     assert row["strategy"] == "CTI-v1.2-pullback"
     assert row["signal_type"] == "pullback"
@@ -1318,55 +1314,3 @@ def test_pullback_opportunity_rows_preserve_context_and_blockers():
     assert row["all_blockers"] == ["pullback_trigger_candle_failed"]
     assert row["criteria"][0]["context"]["pattern"] == "shooting_star"
     assert row["criteria"][0]["context"]["value_area_relation"] == "above_midline"
-
-
-def test_unlinked_db_recreates_schema_on_write():
-    import gc
-    import time
-    db = temp_db()
-    opp = EvaluatedOpportunity(
-        id="recreation-test",
-        evaluated_at=iso(),
-        symbol="EURUSD",
-        strategy="CTI-v1.2-pullback",
-        signal_type="pullback",
-        final_decision="emitted",
-        decision_reason="emitted",
-        threshold_version="pullback-v2",
-    )
-    # First write initializes db and writes row successfully
-    record_opportunity(opp, db)
-    assert db.exists()
-
-    # Close the cached connection to release the Windows file lock
-    from tradegumi.strategy_metrics import _write_connections_by_db_path
-    db_key = str(db.resolve())
-    conn = _write_connections_by_db_path.pop(db_key, None)
-    if conn is not None:
-        conn.close()
-
-    # Force garbage collection to release any remaining SQLite references
-    gc.collect()
-
-    # Simulate DB unlinking/deletion (e.g. from a purge) with Windows retry tolerance
-    deleted = False
-    for _ in range(50):
-        try:
-            db.unlink()
-            deleted = True
-            break
-        except PermissionError:
-            gc.collect()
-            time.sleep(0.05)
-    
-    assert deleted, "Could not delete DB file due to lock"
-    assert not db.exists()
-
-    # The second write should automatically detect deletion, recreate schema, and succeed
-    record_opportunity(opp, db)
-    assert db.exists()
-
-    # Verify the row can be read from the recreated DB
-    row = get_opportunities(iso(-1), iso(1), db_path=db)[0]
-    assert row["id"] == "recreation-test"
-

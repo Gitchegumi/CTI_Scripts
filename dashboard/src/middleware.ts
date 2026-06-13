@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { trustedAuthentikUsername } from "@/lib/authentik";
 
 const COOKIE = "tg_journal_auth";
 
@@ -6,10 +7,11 @@ const COOKIE = "tg_journal_auth";
  * Authentik integration
  * =====================
  * When the dashboard is deployed behind an Authentik outpost, Authentik
- * injects forwarded headers after successful authentication.  The app trusts
- * these headers and skips the legacy JOURNAL_TOKEN cookie check.
+ * injects forwarded headers after successful authentication.  Those headers
+ * are trusted ONLY when AUTHENTIK_TRUST_PROXY_HEADERS=true and the proxy is
+ * known to strip client-supplied x-authentik-* headers (see src/lib/authentik.ts).
  *
- * Required Authentik proxy-provider header mappings (default):
+ * Authentik proxy-provider header mappings used when enabled:
  *   X-authentik-username
  *   X-authentik-email
  *   X-authentik-groups
@@ -18,9 +20,8 @@ const COOKIE = "tg_journal_auth";
  */
 
 export function isAuthed(req: NextRequest): boolean {
-  // 1. Authentik path — check forwarded headers from the outpost
-  const authentikUser = req.headers.get("x-authentik-username");
-  if (authentikUser) {
+  // 1. Authentik path — only when header trust is explicitly enabled
+  if (trustedAuthentikUsername(req)) {
     return true;
   }
 

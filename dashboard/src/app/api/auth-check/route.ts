@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { trustedAuthentikUsername } from "@/lib/authentik";
 
 const COOKIE = "tg_journal_auth";
 
 function isAuthed(req: NextRequest): boolean {
-  // Authentik path
-  if (req.headers.get("x-authentik-username")) {
+  // Authentik path — only when header trust is explicitly enabled
+  if (trustedAuthentikUsername(req)) {
     return true;
   }
   // Legacy fallback
@@ -15,6 +16,6 @@ function isAuthed(req: NextRequest): boolean {
 
 export async function GET(req: NextRequest) {
   const authed = isAuthed(req);
-  const username = req.headers.get("x-authentik-username") || null;
+  const username = trustedAuthentikUsername(req);
   return NextResponse.json({ authed, username });
 }

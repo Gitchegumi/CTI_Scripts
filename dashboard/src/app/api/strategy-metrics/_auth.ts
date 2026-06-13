@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  AUTHENTIK_FORWARD_HEADERS,
+  authentikHeadersTrusted,
+  trustedAuthentikUsername,
+} from "@/lib/authentik";
 
 const COOKIE = "tg_journal_auth";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8199";
@@ -7,14 +12,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8199";
  * Authentik integration
  * =====================
  * When deployed behind an Authentik outpost, forwarded identity headers
- * replace the legacy JOURNAL_TOKEN cookie auth.  The API proxy reads
- * these headers to decide whether a request is authenticated.
+ * replace the legacy JOURNAL_TOKEN cookie auth.  The proxy reads these headers
+ * only when AUTHENTIK_TRUST_PROXY_HEADERS=true (see src/lib/authentik.ts);
+ * otherwise the legacy cookie check is used.
  */
 
 export function isAuthed(req: NextRequest): boolean {
-  // Authentik path — trust forwarded headers
-  const authentikUser = req.headers.get("x-authentik-username");
-  if (authentikUser) {
+  // Authentik path — only when header trust is explicitly enabled
+  if (trustedAuthentikUsername(req)) {
     return true;
   }
 
@@ -26,18 +31,14 @@ export function isAuthed(req: NextRequest): boolean {
 
 function getApiHeaders(req: NextRequest): Record<string, string> {
   const headers: Record<string, string> = {};
-  // Forward Authentik identity headers to the backend (if present)
-  const fwd = [
-    "x-authentik-username",
-    "x-authentik-email",
-    "x-authentik-groups",
-    "x-authentik-uid",
-    "x-authentik-name",
-  ];
-  for (const h of fwd) {
-    const v = req.headers.get(h);
-    if (v) {
-      headers[h] = v;
+  // Forward Authentik identity headers to the backend only when trusted, so a
+  // client cannot smuggle forged identity headers through the proxy.
+  if (authentikHeadersTrusted()) {
+    for (const h of AUTHENTIK_FORWARD_HEADERS) {
+      const v = req.headers.get(h);
+      if (v) {
+        headers[h] = v;
+      }
     }
   }
   // Legacy X-API-Key fallback

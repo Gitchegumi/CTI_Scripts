@@ -78,10 +78,9 @@ TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS = float(os.getenv("TRADEGUMI_STREAM_BACKOFF
 TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS = int(os.getenv("TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS", "5"))
 
 # ── Database / Cache ────────────────────────────────────────────────────────
-TRADEGUMI_DB_BACKEND = os.getenv("TRADEGUMI_DB_BACKEND", "sqlite").lower()
+# Postgres is required (durable source of truth); there is no SQLite fallback.
 TRADEGUMI_DATABASE_URL = os.getenv("TRADEGUMI_DATABASE_URL", "")
 TRADEGUMI_REDIS_URL = os.getenv("TRADEGUMI_REDIS_URL", "")
-TRADEGUMI_SQLITE_FALLBACK = os.getenv("TRADEGUMI_SQLITE_FALLBACK", "true").lower() in ("true", "1", "yes")
 TRADEGUMI_POSTGRES_PASSWORD = os.getenv("TRADEGUMI_POSTGRES_PASSWORD", "")
 
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────

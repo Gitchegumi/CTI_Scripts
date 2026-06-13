@@ -42,6 +42,7 @@ from tradegumi.strategy_metrics import (
     record_opportunity,
     write_state_snapshot,
 )
+from tradegumi.persistence import get_db
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
@@ -298,10 +299,13 @@ def check_and_execute(
     """
     def persist(opportunity: EvaluatedOpportunity) -> None:
         try:
-            record_opportunity(opportunity)
+            # Write diagnostics to the configured backend (Postgres primary,
+            # SQLite fallback) so runtime writes match the dashboard read path.
+            db = get_db()
+            record_opportunity(opportunity, db=db)
             end = datetime.now(CT_TZ)
             start = end.replace(hour=0, minute=0, second=0, microsecond=0)
-            write_state_snapshot(get_summary(start.isoformat(), end.isoformat()))
+            write_state_snapshot(get_summary(start.isoformat(), end.isoformat(), db=db))
         except Exception as exc:
             log.warning("%s: failed to persist strategy diagnostic: %s", symbol, exc)
 

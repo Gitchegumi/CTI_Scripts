@@ -16,7 +16,7 @@ Real-time signal engine for the City Traders Imperium (CTI) prop firm strategy, 
 
 TradeGumi records diagnostics for every evaluated opportunity so no-signal periods can be reviewed without changing signal behavior. The dashboard route `/strategy-metrics` shows date-range summaries, near-misses, criterion pass/fail rates, blocker rankings, period comparison, and JSON export.
 
-Diagnostic history is stored locally in `src/tradegumi/data/strategy_metrics.db`, with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
+Diagnostic history is stored in Postgres (the durable source of truth), with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
 
 Signal journal exports separate emitted signal outcomes from tradable setup outcomes. A signal only counts as a strategy-stat trade opportunity when `usable_for_strategy_stats` is true; duplicates, missed entries, late signals, stale signals, and manual invalidations are excluded. Tune setup grouping and entry validity with `SIGNAL_SETUP_GROUP_WINDOW_MINUTES`, `SIGNAL_ENTRY_TOLERANCE_ATR`, and `SIGNAL_STALE_BARS`.
 
@@ -396,13 +396,26 @@ volumes:
 ### Required `.env` variables
 
 ```ini
-TRADEGUMI_DB_BACKEND=postgres
 TRADEGUMI_DATABASE_URL=postgresql://tradegumi:your_password@postgres:5432/tradegumi
 TRADEGUMI_REDIS_URL=redis://redis:6379/0
-TRADEGUMI_SQLITE_FALLBACK=true
 ```
 
-When `TRADEGUMI_DB_BACKEND=postgres`, strategy metrics and signal journal writes go to Postgres. If Postgres is unreachable and `TRADEGUMI_SQLITE_FALLBACK=true`, the app silently falls back to the existing SQLite files. Redis caches hot runtime state (latest prices, active signals, watchlist, strategy summary) and is safe to lose — the source of truth remains Postgres.
+Postgres is **required** — it is the durable source of truth for strategy metrics and the signal journal. There is no SQLite fallback: if `TRADEGUMI_DATABASE_URL` is unset or Postgres is unreachable, persistence operations fail rather than silently writing elsewhere. Redis caches hot runtime state (latest prices, active signals, watchlist, strategy summary) and is safe to lose — the source of truth remains Postgres.
+
+### Dashboard auth behind Authentik
+
+By default the dashboard is gated by the `JOURNAL_TOKEN` cookie. When you deploy behind an [Authentik](https://goauthentik.io/) outpost, the proxy injects forwarded identity headers (`x-authentik-*`) after it authenticates the request. To trust those headers instead of the cookie, set:
+
+```ini
+AUTHENTIK_TRUST_PROXY_HEADERS=true
+```
+
+**Only enable this when both conditions hold:**
+
+1. The dashboard is unreachable except through the Authentik proxy (e.g. it is not exposed directly on `:3000`).
+2. The proxy is configured to **strip any client-supplied `x-authentik-*` headers** before forwarding.
+
+Without those guarantees a caller could forge `x-authentik-username` and bypass authentication entirely. When the flag is `false` or unset, the `x-authentik-*` headers are ignored and the `JOURNAL_TOKEN` cookie check is used.
 
 ## Oanda Setup
 

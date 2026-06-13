@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add Postgres and Redis services to the TradeGumi deployment, create a persistence abstraction layer, migrate strategy metrics and signal journal from SQLite/JSONL to Postgres-backed storage, use Redis for hot runtime state and summary caching, and update the dashboard/API layer to read from the new stores while keeping SQLite as a fallback.
+Add Postgres and Redis services to the TradeGumi deployment, create a persistence layer, migrate strategy metrics and signal journal from SQLite/JSONL to Postgres-backed storage, use Redis for hot runtime state and summary caching, and update the dashboard/API layer to read from the new stores. Postgres is the single source of truth — the SQLite fallback was dropped.
 
 ## Technical Context
 
@@ -13,10 +13,10 @@ Add Postgres and Redis services to the TradeGumi deployment, create a persistenc
 **Primary Dependencies**: psycopg3 (postgres), redis-py (redis); existing SQLite3, pandas, numpy, ta-lib, discord.py  
 **Storage**: SQLite (`strategy_metrics.db`, `manual_trades.db`), JSONL (`signal_journal.jsonl`) → Postgres (`tradegumi` db); Redis for cache  
 **Testing**: pytest in `src/tradegumi/tests/`; dashboard checks via `npm run lint` and `npm run build` when UI/types change  
-**Target Platform**: Docker Compose deployment; local dev fallback via SQLite  
+**Target Platform**: Docker Compose deployment; Postgres required (no SQLite fallback)  
 **Project Type**: Python trading signal backend + Next.js dashboard  
 **Performance Goals**: Strategy metrics queries < 500ms for 30-day ranges; Redis cache hit < 10ms; journal export < 2s for 1,000 rows  
-**Constraints**: Do not remove SQLite path (keep as fallback); do not break existing JSONL audit trail; preserve all existing API response shapes; no hardcoded connection strings; all new deps added to `pyproject.toml`; migrations must be idempotent  
+**Constraints**: Postgres is required (SQLite path removed); do not break existing JSONL audit trail; preserve all existing API response shapes; no hardcoded connection strings; all new deps added to `pyproject.toml`; migrations must be idempotent  
 
 ## Constitution Check
 

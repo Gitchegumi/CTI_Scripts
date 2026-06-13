@@ -53,19 +53,20 @@ Update local/container deployment to include:
 Suggested env vars:
 
 ```env
-TRADEGUMI_DB_BACKEND=postgres
 TRADEGUMI_DATABASE_URL=postgresql://tradegumi:***@postgres:5432/tradegumi
 TRADEGUMI_REDIS_URL=redis://redis:6379/0
-TRADEGUMI_SQLITE_FALLBACK=true
 ```
 
-### 2. Add a persistence abstraction layer
+> **Update:** the SQLite fallback was dropped. Postgres is required; there is no
+> `TRADEGUMI_DB_BACKEND` / `TRADEGUMI_SQLITE_FALLBACK` toggle.
 
-Create a database access layer so the application is not hardwired directly to SQLite file paths.
+### 2. Add a persistence layer
+
+Create a database access layer so the application is not hardwired directly to file paths.
 
 Requirements:
 
-- Keep SQLite support as a fallback/local-dev path for now.
+- Postgres is the single source of truth — no SQLite fallback.
 - Add Postgres support as the primary service deployment path.
 - Avoid scattering raw connection logic across the codebase.
 - Add migrations for Postgres schema creation.
@@ -124,8 +125,7 @@ Redis can also support pub/sub later, but that should not be required for the in
 Dashboard/API routes should prefer:
 
 1. Redis for hot runtime state and short-lived cached summaries.
-2. Postgres for durable historical data.
-3. JSON/SQLite only as compatibility fallback during migration.
+2. Postgres for durable historical data (single source of truth).
 
 ## Acceptance Criteria
 
@@ -137,6 +137,6 @@ Dashboard/API routes should prefer:
 - [ ] JSONL is no longer required for normal dashboard summary queries.
 - [ ] Redis stores latest runtime/dashboard state.
 - [ ] Redis caches expensive strategy summary responses using filter-aware cache keys.
-- [ ] SQLite remains available as a fallback for local/simple runs.
+- [ ] Postgres is required; the SQLite path/fallback is removed.
 - [ ] Existing dashboard/API behavior remains functional after migration.
 - [ ] README/deployment docs are updated with the new architecture and env vars.

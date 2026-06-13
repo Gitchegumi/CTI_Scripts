@@ -2,12 +2,22 @@
 """
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from tradegumi import purge
+
+
+class _FakeDB:
+    """Records executed SQL so tests can assert TRUNCATE behaviour."""
+
+    def __init__(self):
+        self.executed: list[str] = []
+
+    def execute(self, sql, params=None):
+        self.executed.append(sql)
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -24,16 +34,39 @@ def _reset_data_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(purge, "TRADE_CORRELATIONS_FILE", tmp_path / "trade_correlations.json")
 
 
-class TestPurgeJournal:
-    def test_purge_empty_journal_is_safe(self):
-        assert purge.purge_journal() is False
-        assert not purge.JOURNAL_FILE.exists()
+@pytest.fixture(autouse=True)
+def _fake_pg(monkeypatch):
+    """Stub out the Postgres backend so purge tests run without a database."""
+    fake = _FakeDB()
+    monkeypatch.setattr(purge, "get_db", lambda: fake)
+    return fake
 
-    def test_purge_removes_entries(self):
+
+class TestTruncatePostgres:
+    def test_truncate_runs_expected_sql(self, _fake_pg):
+        assert purge._truncate_postgres("journal_entries") is True
+        assert _fake_pg.executed == ["TRUNCATE journal_entries RESTART IDENTITY CASCADE"]
+
+    def test_truncate_reports_failure_when_unavailable(self, monkeypatch):
+        def boom():
+            raise RuntimeError("postgres unavailable")
+
+        monkeypatch.setattr(purge, "get_db", boom)
+        assert purge._truncate_postgres("journal_entries") is False
+
+
+class TestPurgeJournal:
+    def test_purge_empty_journal_truncates_postgres(self, _fake_pg):
+        assert purge.purge_journal() is True
+        assert not purge.JOURNAL_FILE.exists()
+        assert any("journal_entries" in sql for sql in _fake_pg.executed)
+
+    def test_purge_removes_entries(self, _fake_pg):
         purge.JOURNAL_FILE.write_text(json.dumps({"signal_id": "TEST:1"}) + "\n", encoding="utf-8")
         assert purge.purge_journal() is True
         assert purge.JOURNAL_FILE.exists()
         assert purge.JOURNAL_FILE.read_text() == ""
+        assert any("journal_entries" in sql for sql in _fake_pg.executed)
 
     def test_purge_creates_backup_when_requested(self, tmp_path):
         purge.JOURNAL_FILE.write_text(json.dumps({"signal_id": "TEST:2"}) + "\n", encoding="utf-8")
@@ -43,19 +76,32 @@ class TestPurgeJournal:
         assert len(backups) == 1
         assert "TEST:2" in backups[0].read_text()
 
+    def test_jsonl_cleared_even_if_postgres_fails(self, monkeypatch):
+        def boom():
+            raise RuntimeError("postgres unavailable")
+
+        monkeypatch.setattr(purge, "get_db", boom)
+        purge.JOURNAL_FILE.write_text(json.dumps({"signal_id": "TEST:3"}) + "\n", encoding="utf-8")
+        assert purge.purge_journal() is False
+        assert purge.JOURNAL_FILE.read_text() == ""
+
 
 class TestPurgeStrategyMetrics:
-    def test_purge_nonexistent_db_is_safe(self):
+    def test_purge_truncates_postgres_tables(self, _fake_pg):
         assert purge.purge_strategy_metrics() is True
-        assert not purge.STRATEGY_METRICS_DB.exists()
+        assert any(
+            "evaluated_opportunities" in sql and "criterion_results" in sql
+            for sql in _fake_pg.executed
+        )
 
-    def test_purge_deletes_db_and_state(self):
-        # Create a dummy DB
+    def test_purge_deletes_legacy_file_and_state(self, _fake_pg):
+        # A pre-migration install may still have the SQLite file + state snapshot.
         purge.STRATEGY_METRICS_DB.write_text("sqlite", encoding="utf-8")
         purge.STRATEGY_METRICS_STATE.write_text(json.dumps({"total": 42}), encoding="utf-8")
         assert purge.purge_strategy_metrics() is True
         assert not purge.STRATEGY_METRICS_DB.exists()
         assert not purge.STRATEGY_METRICS_STATE.exists()
+        assert any("evaluated_opportunities" in sql for sql in _fake_pg.executed)
 
     def test_purge_creates_backup_when_requested(self, tmp_path):
         purge.STRATEGY_METRICS_DB.write_text("sqlite", encoding="utf-8")
@@ -64,6 +110,13 @@ class TestPurgeStrategyMetrics:
         purge.purge_strategy_metrics(backup_dir=backup_dir)
         assert len(list(backup_dir.glob("strategy_metrics.db.*"))) == 1
         assert len(list(backup_dir.glob("strategy_metrics.json.*"))) == 1
+
+    def test_purge_reports_failure_when_postgres_unavailable(self, monkeypatch):
+        def boom():
+            raise RuntimeError("postgres unavailable")
+
+        monkeypatch.setattr(purge, "get_db", boom)
+        assert purge.purge_strategy_metrics() is False
 
 
 class TestPurgeManualTrades:
