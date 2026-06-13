@@ -1268,12 +1268,12 @@ def _pullback_summary_db(
     placeholders = ", ".join("?" for _ in _PULLBACK_CRITERIA)
     pullback_sql = (
         f"{where_sql} AND ("
-        "o.signal_type = 'pullback' OR LOWER(o.strategy) LIKE '%pullback%' OR "
+        "o.signal_type = 'pullback' OR LOWER(o.strategy) LIKE ? OR "
         "EXISTS (SELECT 1 FROM criterion_results pc WHERE pc.opportunity_id = o.id "
         f"AND pc.evaluated_at = o.evaluated_at AND pc.criterion_name IN ({placeholders}))"
         ")"
     )
-    pullback_params = [*params, *_PULLBACK_CRITERIA]
+    pullback_params = [*params, "%pullback%", *_PULLBACK_CRITERIA]
     totals = db.fetchone(
         f"""
         SELECT
