@@ -89,11 +89,17 @@ Keep indexes for the main dashboard/query patterns:
 - criterion name
 - opportunity ID
 
-### 4. Move Signal Journal data out of JSONL query path
+### 4. Mirror the Signal Journal into Postgres
 
-The append-only JSONL file can remain as an export/audit artifact if desired, but it should not be the primary query source for dashboard summaries.
+> **Reconciled decision:** the append-only JSONL file remains the authoritative
+> source of truth for the signal journal — every bot/dashboard read and all
+> mutations (append, grade, purge) go through it. Each write is additionally
+> mirrored, best-effort, into a Postgres `journal_entries` table for ad-hoc
+> SQL/BI access. That table is never read back by the application and a failed
+> sync never affects the JSONL source. (Strategy metrics, by contrast, are
+> relational analytics data and live in Postgres as their durable store.)
 
-Create a Postgres-backed signal journal table or set of tables that supports:
+Provide a Postgres-backed `journal_entries` mirror that supports:
 
 - filtering by date range
 - symbol
@@ -133,8 +139,8 @@ Dashboard/API routes should prefer:
 - [ ] Application can connect to Postgres and Redis using env vars.
 - [ ] Strategy metrics can be written to Postgres.
 - [ ] Strategy metrics summary/opportunity queries can read from Postgres.
-- [ ] Signal journal records are stored/queryable in Postgres or migration path is implemented.
-- [ ] JSONL is no longer required for normal dashboard summary queries.
+- [ ] Signal journal records are mirrored into a queryable Postgres `journal_entries` table.
+- [ ] Signal journal source of truth is reconciled: JSONL remains authoritative; Postgres is a best-effort mirror kept consistent across append/grade/purge.
 - [ ] Redis stores latest runtime/dashboard state.
 - [ ] Redis caches expensive strategy summary responses using filter-aware cache keys.
 - [ ] Postgres is required; the SQLite path/fallback is removed.

@@ -622,6 +622,28 @@ def test_purge_journal_entries_scopes_to_filter(journal_file):
     assert journal.purge_journal_entries("TP_HIT") == {"removed_count": 0, "remaining_count": 1}
 
 
+def test_purge_journal_entries_deletes_from_db_mirror(journal_file, monkeypatch):
+    write_entries(
+        journal_file,
+        [
+            {"signal_id": "sig-1", "grade": "PENDING"},
+            {"signal_id": "sig-2", "grade": "TP_HIT"},
+        ],
+    )
+    executed: list[tuple] = []
+
+    class FakeDB:
+        def execute(self, sql, params=None):
+            executed.append((sql, params))
+
+    monkeypatch.setattr(journal, "get_db", lambda: FakeDB())
+    journal.purge_journal_entries("TP_HIT")
+
+    # The Postgres mirror is kept consistent: removed ids are deleted there too.
+    assert any("DELETE FROM journal_entries" in sql for sql, _ in executed)
+    assert any(params and "sig-2" in params for _, params in executed)
+
+
 def test_reset_signal_to_pending_preserves_signal_data_and_notes(journal_file):
     write_entries(
         journal_file,

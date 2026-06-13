@@ -108,38 +108,43 @@ class RedisCache:
         return self.get(key)
 
     def invalidate_strategy_summary(self, symbol: Optional[str] = None, strategy: Optional[str] = None, signal_type: Optional[str] = None) -> bool:
-        """Invalidate strategy summary cache keys matching given filters.
+        """Invalidate cached strategy summaries that could include a new write.
 
-        If no filters are provided, invalidates ALL strategy summary keys
-        (blunt hammer — use sparingly).
+        Summary cache keys embed the full filter dict (start/end/symbol/strategy/
+        signal_type/decision/first_blocker).  A subset-permutation guess never
+        matches those keys, so instead scan the cached keys, parse each embedded
+        filter, and delete any whose symbol/strategy/signal_type filter is either
+        unset (matches all) or equal to the written value.  With no filters, all
+        summary keys are invalidated.
         """
         client = self._get_client()
         if client is None:
             return False
+
+        def _compatible(cached: Any, value: Optional[str]) -> bool:
+            # A cached summary includes the new write if it does not filter this
+            # dimension (None) or filters to the same value.  When the caller
+            # does not constrain a dimension (value is None), treat as a match.
+            return cached is None or value is None or cached == value
+
+        prefix = self._key("strategy_summary:")
         try:
-            if symbol is None and strategy is None and signal_type is None:
-                for k in client.scan_iter(match=self._key("strategy_summary:*")):
-                    client.delete(k)
-                return True
-            # Build all permutations of the provided filter values
-            import itertools
-            filters = {}
-            if symbol:
-                filters["symbol"] = symbol
-            if strategy:
-                filters["strategy"] = strategy
-            if signal_type:
-                filters["signal_type"] = signal_type
-            keys_to_invalidate: set[str] = set()
-            for r in range(1, len(filters) + 1):
-                for combo in itertools.combinations(filters.items(), r):
-                    sub = dict(combo)
-                    key = f"strategy_summary:{json.dumps(sub, sort_keys=True, default=str)}"
-                    keys_to_invalidate.add(self._key(key))
-            # Also invalidate the fully-unfiltered key
-            keys_to_invalidate.add(self._key("strategy_summary:{}"))
-            for k in keys_to_invalidate:
-                client.delete(k)
+            for full_key in client.scan_iter(match=self._key("strategy_summary:*")):
+                raw = full_key[len(prefix):] if full_key.startswith(prefix) else None
+                if raw is None:
+                    continue
+                try:
+                    cached_filters = json.loads(raw)
+                except (TypeError, ValueError):
+                    # Unparseable key — drop it to stay safe.
+                    client.delete(full_key)
+                    continue
+                if (
+                    _compatible(cached_filters.get("symbol"), symbol)
+                    and _compatible(cached_filters.get("strategy"), strategy)
+                    and _compatible(cached_filters.get("signal_type"), signal_type)
+                ):
+                    client.delete(full_key)
             return True
         except Exception as exc:
             log.warning("Redis invalidate_strategy_summary failed: %s", exc)

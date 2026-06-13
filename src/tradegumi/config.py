@@ -329,5 +329,10 @@ def validate_config():
         errors.append(f"Invalid TRADEGUMI_MODE={TRADEGUMI_MODE}")
     if TRADEGUMI_MARKET_DATA_MODE not in ("streaming", "polling"):
         errors.append(f"Invalid TRADEGUMI_MARKET_DATA_MODE={TRADEGUMI_MARKET_DATA_MODE}")
+    if not TRADEGUMI_DATABASE_URL:
+        errors.append(
+            "TRADEGUMI_DATABASE_URL is required — Postgres is the durable store "
+            "and there is no SQLite fallback"
+        )
     if errors:
         raise ValueError("Config errors: " + "; ".join(errors))

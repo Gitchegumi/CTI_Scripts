@@ -24,29 +24,50 @@ _runtime_state: dict = {}
 _runtime_lock = threading.Lock()
 
 
+def _json_safe_state(state: dict) -> dict:
+    """Return the JSON-serializable subset of the runtime state.
+
+    Live objects such as the execution client are dropped — they cannot be
+    serialized and must never round-trip through Redis (a stringified client
+    would break callers that expect the real object).
+    """
+    safe: dict = {}
+    for key, value in state.items():
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        safe[key] = value
+    return safe
+
+
 def set_runtime_state(state: dict) -> None:
-    """Called from main.py to share the current runtime state."""
+    """Called from main.py to share the current runtime state.
+
+    The authoritative copy is the in-process ``_runtime_state`` (it retains live
+    objects like the execution client).  Redis receives a JSON-safe snapshot of
+    the *full merged* state for cross-process observability of the dashboard
+    view, never just the partial update.
+    """
     with _runtime_lock:
         _runtime_state.update(state)
+        snapshot = _json_safe_state(_runtime_state)
     try:
         from tradegumi.persistence.redis import get_cache
-        get_cache().set("loop_state", state, ttl=10)
+        get_cache().set("loop_state", snapshot, ttl=10)
     except Exception as exc:
         log.debug("Redis runtime state cache update failed: %s", exc)
 
 
 def get_runtime_state() -> dict:
+    """Return the authoritative in-process runtime state.
+
+    This intentionally does NOT read back from Redis: the Redis snapshot is a
+    JSON-safe published view and lacks live objects (e.g. ``client``), so it
+    must not override the in-process state that callers rely on.
+    """
     with _runtime_lock:
-        local = dict(_runtime_state)
-    # Try Redis for potentially fresher state in multi-process / HA setups
-    try:
-        from tradegumi.persistence.redis import get_cache
-        cached = get_cache().get("loop_state")
-        if cached is not None:
-            return cached
-    except Exception as exc:
-        log.debug("Redis runtime state cache read failed: %s", exc)
-    return local
+        return dict(_runtime_state)
 
 
 class TradeGumiAPIHandler(BaseHTTPRequestHandler):

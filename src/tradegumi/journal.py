@@ -4,6 +4,20 @@ Each line is a self-contained JSON object. The file is never trimmed;
 it is the permanent record an AI agent uses to assess signal quality
 and inform trade discretion over time.
 
+Source of truth
+---------------
+The JSONL file (``signal_journal.jsonl``) is the authoritative store for the
+signal journal: every read used by the bot and dashboard (``read_journal``,
+exports, and the strategy-metrics journal aggregations) goes through it, and
+all mutations (append, grade, purge) write it.
+
+Each write is also mirrored, best-effort, into the Postgres ``journal_entries``
+table (see ``_sync_entry_to_db``). That table is a secondary, relational copy
+for ad-hoc SQL/BI access only — it is never read back by the application and a
+failed sync never affects the JSONL source of truth. Strategy metrics
+(evaluated opportunities / criterion results) live in Postgres as their durable
+store; the append-only journal deliberately keeps JSONL authoritative.
+
 Schema per entry
 ----------------
 signal_id:        "<symbol>:<direction>:<iso-timestamp>"
@@ -343,11 +357,13 @@ def _write_entries(entries: list[dict[str, Any]]) -> None:
 
 
 def _sync_entry_to_db(entry: dict[str, Any]) -> None:
-    """Persist a journal entry to the database layer (Postgres or SQLite) alongside JSONL.
+    """Mirror a journal entry into the Postgres ``journal_entries`` table.
 
-    Insert is append-only.  Grade updates (grade, grade_timestamp, notes,
-    lifecycle_role) are sent as a targeted UPDATE on signal_id so we don't
-    duplicate the full row history.
+    This maintains the secondary relational copy alongside the authoritative
+    JSONL file (see the module docstring). Inserts are append-only; grade
+    updates (grade, grade_timestamp, notes, lifecycle_role) are a targeted
+    UPDATE on signal_id. Failures are logged and swallowed — the JSONL write is
+    the source of truth and must not be blocked by a mirror error.
     """
     try:
         db = get_db()
@@ -1557,9 +1573,31 @@ def purge_journal_entries(grade: Optional[str] = None) -> dict[str, int]:
     with _lock:
         entries = _read_entries_oldest_first()
         remaining = [entry for entry in entries if not _entry_matches_grade(entry, grade)]
+        removed_ids = [
+            str(e.get("signal_id"))
+            for e in entries
+            if _entry_matches_grade(e, grade) and e.get("signal_id")
+        ]
         removed = len(entries) - len(remaining)
         _write_entries(remaining)
+    # Keep the Postgres mirror consistent with the authoritative JSONL.
+    _delete_entries_from_db(removed_ids)
     return {"removed_count": removed, "remaining_count": len(remaining)}
+
+
+def _delete_entries_from_db(signal_ids: list[str]) -> None:
+    """Best-effort removal of mirrored journal rows from Postgres."""
+    if not signal_ids:
+        return
+    try:
+        db = get_db()
+        placeholders = ", ".join("?" for _ in signal_ids)
+        db.execute(
+            f"DELETE FROM journal_entries WHERE signal_id IN ({placeholders})",
+            tuple(signal_ids),
+        )
+    except Exception as exc:
+        log.warning("Failed to delete %d journal rows from DB mirror: %s", len(signal_ids), exc)
 
 
 def invalidate_signal(signal_id: str, notes: str = "") -> bool:

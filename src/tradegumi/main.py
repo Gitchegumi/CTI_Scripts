@@ -477,6 +477,15 @@ def run(mode: str):
     log.info("TradeGumi starting in %s mode", mode)
     config.validate_config()
 
+    # Fail fast if the durable store is unreachable, rather than erroring lazily
+    # on the first write mid-loop. get_db() connects and initialises the schema.
+    try:
+        get_db()
+        log.info("Connected to Postgres persistence backend")
+    except Exception as exc:
+        log.error("Cannot reach Postgres via TRADEGUMI_DATABASE_URL: %s", exc)
+        raise
+
     client = make_client(mode)
 
     # Check which instruments are actually available on this Oanda account

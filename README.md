@@ -400,7 +400,7 @@ TRADEGUMI_DATABASE_URL=postgresql://tradegumi:your_password@postgres:5432/tradeg
 TRADEGUMI_REDIS_URL=redis://redis:6379/0
 ```
 
-Postgres is **required** — it is the durable source of truth for strategy metrics and the signal journal. There is no SQLite fallback: if `TRADEGUMI_DATABASE_URL` is unset or Postgres is unreachable, persistence operations fail rather than silently writing elsewhere. Redis caches hot runtime state (latest prices, active signals, watchlist, strategy summary) and is safe to lose — the source of truth remains Postgres.
+Postgres is **required** — it is the durable source of truth for strategy metrics (evaluated opportunities and criterion results). There is no SQLite fallback: if `TRADEGUMI_DATABASE_URL` is unset or Postgres is unreachable, the bot fails fast at startup rather than silently writing elsewhere. The signal journal keeps its append-only `signal_journal.jsonl` file as the authoritative source of truth and additionally mirrors each entry, best-effort, into a Postgres `journal_entries` table for ad-hoc SQL/BI (the app does not read that table back). Redis caches hot runtime state (latest loop state / dashboard view) and short-lived strategy-summary responses, and is safe to lose.
 
 ### Dashboard auth behind Authentik
 
