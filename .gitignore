@@ -181,6 +181,7 @@ dashboard/.next/
 dashboard/out/
 coverage/
 *.tmp
+.tmp/
 
 # Private Strategies (not committed to public repo)
 # Add your profitable strategy files here

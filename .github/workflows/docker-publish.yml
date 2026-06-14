@@ -42,7 +42,7 @@ jobs:
           push: false
           cache-from: type=gha
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://localhost:8199' }}
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://tradegumi-api:8199' }}
   # Calculate version, build, and push image — tag is NOT created yet
   build:
     if: github.event_name != 'pull_request'
@@ -138,7 +138,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://localhost:8199' }}
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://tradegumi-api:8199' }}
 
   # Create the git tag only after the image is successfully published
   tag:
