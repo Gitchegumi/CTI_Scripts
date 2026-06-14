@@ -3,6 +3,14 @@ TradeGumi Database Module
 
 SQLite schema and ORM for AI-augmented trading infrastructure.
 Enforces temporal firewall: all context captured at entry timestamp.
+
+LEGACY / DORMANT: This is the last SQLite code in the project. The subsystem
+(``TradeGumiDB`` + ``pattern_analyzer`` + ``context_snapshot`` + ``decision_engine``)
+is scaffolding that is never instantiated at runtime, so its SQLite usage is
+inert today. Postgres is the single source of truth (no SQLite fallback). Before
+this subsystem is wired into any runtime path it MUST be migrated to the shared
+``tradegumi.persistence`` Postgres backend — otherwise it reintroduces SQLite
+writes and would fail in the read-only API container. Tracked in issue #115.
 """
 
 import sqlite3
