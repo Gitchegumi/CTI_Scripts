@@ -1,9 +1,16 @@
 # ===========================================
-# TradeGumi Combined Container
+# TradeGumi multi-service image
 # ===========================================
-# Runs both the Python bot (port 8199) and Next.js dashboard (port 3000)
+# This Dockerfile produces TWO independent images via named build targets:
+#   --target python     → tradegumi-worker and tradegumi-api (Python; they
+#                          differ only by which entrypoint docker-compose runs)
+#   --target dashboard  → tradegumi-dashboard (Next.js on Node)
+#
+# The worker/API and the dashboard no longer share a process or an image — a
+# failure in one cannot take down the others (see specs/019-split-runtime-containers).
 
-FROM python:3.13-slim AS base
+# ── Python base (shared by worker + api) ──────────────────────
+FROM python:3.13-slim AS python-base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,9 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install poetry
 
 # ===========================================
-# Bot stage
+# Python application image (worker + api)
 # ===========================================
-FROM base AS bot
+FROM python-base AS python
 
 WORKDIR /app
 
@@ -36,17 +43,34 @@ RUN poetry install --no-interaction --no-ansi --no-root
 # Copy remaining source docs
 COPY src/README.md ./
 
+# Environment
+ENV PYTHONUNBUFFERED=1
+ENV POETRY_VIRTUALENVS_IN_PROJECT=1
+ENV PYTHONPATH=/app/src
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Only the API service publishes this port; the worker has no public port.
+EXPOSE 8199
+
+# Volume for runtime data
+VOLUME ["/app/src/tradegumi/data"]
+
+# Per-service entrypoints. docker-compose selects which one each service runs;
+# the image defaults to the worker.
+COPY entrypoint.worker.sh entrypoint.api.sh /
+RUN chmod +x /entrypoint.worker.sh /entrypoint.api.sh
+
+ENTRYPOINT ["/entrypoint.worker.sh"]
+
 # ===========================================
-# Dashboard stage
+# Dashboard build stage
 # ===========================================
-FROM node:22-alpine AS dashboard
+FROM node:22-alpine AS dashboard-build
 
 WORKDIR /app/dashboard
 
-# Copy dashboard source
-COPY dashboard/package.json dashboard/package-lock.json* ./
-
 # Install deps from the lockfile for reproducible dashboard builds
+COPY dashboard/package.json dashboard/package-lock.json* ./
 RUN npm ci
 
 # Copy dashboard source
@@ -62,46 +86,16 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 # ===========================================
-# Final combined image
+# Dashboard runtime image
 # ===========================================
-FROM base
+FROM node:22-alpine AS dashboard
 
-WORKDIR /app
+WORKDIR /app/dashboard
+ENV NODE_ENV=production
 
-# Copy from bot stage
-COPY --from=bot /app/.venv ./.venv
-COPY --from=bot /app/pyproject.toml /app/poetry.toml ./
-COPY --from=bot /app/src ./src
-COPY --from=bot /app/README.md ./
+# Copy the built dashboard (includes .next, node_modules, public, config)
+COPY --from=dashboard-build /app/dashboard ./
 
-# Copy from dashboard stage (full directory for npm start)
-COPY --from=dashboard /app/dashboard ./dashboard
+EXPOSE 3000
 
-# Recreate symlink for dashboard data access
-RUN mkdir -p /app/src/tradegumi/data /app/dashboard/public && \
-    rm -f /app/dashboard/public/data && \
-    ln -sf /app/src/tradegumi/data /app/dashboard/public/data
-
-# Environment
-ENV PYTHONUNBUFFERED=1
-ENV POETRY_VIRTUALENVS_IN_PROJECT=1
-ENV PYTHONPATH=/app/src
-ENV PATH="/app/.venv/bin:$PATH"
-ENV NEXT_PUBLIC_API_URL=http://localhost:8199
-
-# Ports
-EXPOSE 8199 3000
-
-# Volume for runtime data
-VOLUME ["/app/src/tradegumi/data"]
-
-# Install Node.js in final image (for dashboard npm start)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["npm", "start"]

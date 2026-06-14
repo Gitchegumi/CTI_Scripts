@@ -209,7 +209,16 @@ export default function TradeHistory({ trades, correlations, error = null }: Tra
         {trades.length === 0 ? (
           <div className="px-4 py-4 text-sm text-center">
             {error ? (
-              <span className="text-red-400">Trade history unavailable: {error}</span>
+              /\b401\b|unauthorized/i.test(error) ? (
+                // Trade history is intentionally gated (see specs/019); show a
+                // clean locked state on the public dashboard instead of a raw
+                // 401 error.
+                <a href="/journal/login" className="text-slate-500 hover:text-blue-400 transition-colors">
+                  🔒 Log in to view trade history
+                </a>
+              ) : (
+                <span className="text-red-400">Trade history unavailable: {error}</span>
+              )
             ) : (
               <span className="text-slate-500">No trade history</span>
             )}

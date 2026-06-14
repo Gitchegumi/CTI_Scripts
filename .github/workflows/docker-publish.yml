@@ -12,6 +12,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/cti-scripts
+  DASHBOARD_IMAGE_NAME: ${{ github.repository_owner }}/cti-scripts-dashboard
 
 jobs:
   # Lightweight build-only check on PRs — catches Dockerfile breakage before merge
@@ -24,9 +25,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      # The Dockerfile is multi-target: build each image explicitly so neither
+      # is silently published as the wrong stage.
+      - name: Validate python image (worker + api)
+        uses: docker/build-push-action@v6
         with:
           context: .
+          target: python
+          push: false
+          cache-from: type=gha
+      - name: Validate dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dashboard
           push: false
           cache-from: type=gha
           build-args: |
@@ -80,7 +92,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Extract metadata (python image — worker + api)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -92,13 +104,37 @@ jobs:
             type=sha,format=short,prefix=sha-
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build and push python image (worker + api)
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: python
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata (dashboard image)
+        id: meta_dashboard
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.DASHBOARD_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.full }}
+            type=raw,value=${{ steps.version.outputs.minor }}
+            type=raw,value=${{ steps.version.outputs.major }}
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and push dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dashboard
+          push: true
+          tags: ${{ steps.meta_dashboard.outputs.tags }}
+          labels: ${{ steps.meta_dashboard.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |

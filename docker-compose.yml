@@ -1,12 +1,16 @@
 services:
+  # Combined worker + API (the API still runs in-thread inside the worker
+  # process until user story US2 of specs/019-split-runtime-containers extracts
+  # it into its own tradegumi-api service). The dashboard has already been split
+  # out below, so a dashboard failure can no longer take down trading.
   tradegumi:
     image: ghcr.io/gitchegumi/cti-scripts:latest
     build:
       context: .
       dockerfile: Dockerfile
+      target: python
     ports:
       - "8199:8199"  # API server
-      - "3000:3000"  # Dashboard
     env_file:
       - .env
     volumes:
@@ -22,6 +26,36 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  tradegumi-dashboard:
+    image: ghcr.io/gitchegumi/cti-scripts-dashboard:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+      args:
+        # Baked into client bundles at build time.
+        NEXT_PUBLIC_API_URL: http://tradegumi:8199
+    ports:
+      - "3000:3000"  # Dashboard UI
+    env_file:
+      - .env
+    environment:
+      # The dashboard's Next server proxies /api/* to the API. Until US2 the API
+      # is served by the combined `tradegumi` service; US2 repoints this to the
+      # standalone tradegumi-api service. This override wins over the value in
+      # .env (which documents the post-US2 target).
+      NEXT_PUBLIC_API_URL: http://tradegumi:8199
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      tradegumi:
         condition: service_healthy
 
   postgres:

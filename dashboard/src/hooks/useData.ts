@@ -39,7 +39,7 @@ export function useWatchlist(marketOpen: boolean): UseWatchlistReturn {
   const fetchData = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch(`/data/watchlist.json?_=${Date.now()}`, {
+      const res = await fetch(`/api/data/watchlist?_=${Date.now()}`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -78,7 +78,7 @@ export function useSignals(marketOpen: boolean): UseSignalsReturn {
   useEffect(() => {
     const fetchSignals = async () => {
       try {
-        const res = await fetch(`/data/signals.json?_=${Date.now()}`, {
+        const res = await fetch(`/api/data/signals?_=${Date.now()}`, {
           cache: "no-store",
         });
         if (!res.ok) {

@@ -57,7 +57,7 @@ export default function Home() {
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
             Failed to load watchlist: {error}
           </div>
-        ) : data ? (
+        ) : data?.account ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Left column: Account + Settings + Signals + Open Trades */}
             <div className="lg:col-span-1 space-y-4">
@@ -79,7 +79,7 @@ export default function Home() {
         )}
       </main>
 
-      {data && <Footer data={data} apiStatus={apiStatus} />}
+      {data?.account && <Footer data={data} apiStatus={apiStatus} />}
     </div>
   );
 }

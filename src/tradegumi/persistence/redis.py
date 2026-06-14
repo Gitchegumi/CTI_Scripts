@@ -99,6 +99,25 @@ class RedisCache:
             log.warning("Redis publish failed for %s: %s", channel, exc)
             return False
 
+    def subscribe(self, channel: str):
+        """Return a Redis ``PubSub`` subscribed to the prefixed channel, or None.
+
+        The caller owns the returned object: it must read messages (e.g. via
+        ``get_message``/``listen``) and ``close()`` it when done.  Returns
+        ``None`` when Redis is unavailable so callers degrade to a no-op (the
+        worker keeps trading on its last-applied config) rather than crashing.
+        """
+        client = self._get_client()
+        if client is None:
+            return None
+        try:
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
+            pubsub.subscribe(self._key(channel))
+            return pubsub
+        except Exception as exc:
+            log.warning("Redis subscribe failed for %s: %s", channel, exc)
+            return None
+
     def cache_strategy_summary(self, filters: dict[str, Any], summary: dict[str, Any], ttl: int = 60) -> bool:
         key = f"strategy_summary:{json.dumps(filters, sort_keys=True, default=str)}"
         return self.set(key, summary, ttl)
@@ -160,3 +179,67 @@ def get_cache() -> RedisCache:
     if _cache_instance is None:
         _cache_instance = RedisCache()
     return _cache_instance
+
+
+# ── Cross-process channels/keys (worker / api / dashboard split) ───────────────
+# These back the data plane that replaces the in-memory state the worker and API
+# shared when they ran in one process.  All names are passed through
+# ``RedisCache._key`` and so are stored under the ``tradegumi:`` prefix.
+HEARTBEAT_KEY = "heartbeat:worker"
+COMMAND_CHANNEL = "commands"
+DESIRED_CONFIG_KEY = "desired_config"
+
+# The heartbeat TTL must be >= the staleness threshold the healthcheck uses, so
+# the key never expires between the worker's once-per-loop refreshes.  A TTL
+# shorter than the loop interval would make worker health flap.
+WORKER_HEARTBEAT_TTL_SECONDS = int(os.getenv("TRADEGUMI_WORKER_HEARTBEAT_TTL_SECONDS", "150"))
+
+
+def set_heartbeat(payload: dict[str, Any], ttl: Optional[int] = None) -> bool:
+    """Publish the worker liveness heartbeat to Redis with a TTL.
+
+    Parameters
+    ----------
+    payload:
+        Heartbeat contents, conventionally ``{"ts", "loop_count", "mode"}``.
+    ttl:
+        Override the default ``WORKER_HEARTBEAT_TTL_SECONDS``.
+
+    Returns ``False`` (no-op) when Redis is unavailable.
+    """
+    return get_cache().set(HEARTBEAT_KEY, payload, ttl=ttl or WORKER_HEARTBEAT_TTL_SECONDS)
+
+
+def get_heartbeat() -> Optional[dict[str, Any]]:
+    """Return the latest worker heartbeat, or ``None`` if missing/expired."""
+    return get_cache().get(HEARTBEAT_KEY)
+
+
+def publish_command(command: dict[str, Any]) -> bool:
+    """Publish an operator command on the command channel (fast path).
+
+    Durable delivery (so a command issued while the worker is down is still
+    applied) is the caller's responsibility via :func:`set_desired_config`.
+    Returns ``False`` when the publish could not be delivered — callers MUST NOT
+    report success in that case (FR-010).
+    """
+    return get_cache().publish(COMMAND_CHANNEL, command)
+
+
+def subscribe_commands():
+    """Subscribe to the command channel; returns a PubSub or ``None``."""
+    return get_cache().subscribe(COMMAND_CHANNEL)
+
+
+def set_desired_config(config: dict[str, Any]) -> bool:
+    """Persist the desired worker config (last-write-wins, no TTL).
+
+    The worker reconciles against this on startup and each loop so a config
+    command survives a worker restart (recovery path for the command channel).
+    """
+    return get_cache().set(DESIRED_CONFIG_KEY, config)
+
+
+def get_desired_config() -> Optional[dict[str, Any]]:
+    """Return the durable desired worker config, or ``None`` if unset."""
+    return get_cache().get(DESIRED_CONFIG_KEY)
