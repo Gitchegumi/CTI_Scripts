@@ -43,6 +43,8 @@ from tradegumi.strategy_metrics import (
     write_state_snapshot,
 )
 from tradegumi.persistence import get_db
+from tradegumi.persistence.redis import set_heartbeat, subscribe_commands
+from tradegumi import commands
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
@@ -501,6 +503,19 @@ def run(mode: str):
     # set_runtime_state() for the API/dashboard to read. See specs/019.
     set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
+    # Observability: announce worker start so the event is visible to the
+    # DockeGumi orchestration and logs (Constitution IV). The Redis heartbeat
+    # (published each loop below) carries ongoing liveness.
+    log.info("Worker started — mode=%s", mode)
+    send_status_callback({"event": "worker_started", "mode": mode})
+
+    # Subscribe to the operator command channel (US4) and apply any desired
+    # config set while the worker was down (recovery path / FR-010).
+    command_pubsub = subscribe_commands()
+    startup_changed = commands.reconcile_desired_config()
+    if startup_changed:
+        log.info("Applied desired config at startup: %s", startup_changed)
+
     # Start Discord bot (DM alerts + grade buttons); falls back to webhook if unconfigured
     from tradegumi.discord_bot import start_bot_thread, wait_until_ready
     start_bot_thread()
@@ -589,6 +604,22 @@ def run(mode: str):
         now_ny = datetime.now(NY_TZ)
         now_epoch = time.time()
         log.debug("Loop iteration at %s", now_ct.isoformat())
+
+        # ── Operator commands (US4) ──────────────────────────────────────────
+        # Apply commands delivered over pub/sub (fast path), then reconcile the
+        # durable desired-config key (recovery path for anything missed). Both
+        # are idempotent. A rescan command sets force_rescan, honored below.
+        for cmd in commands.drain_commands(command_pubsub):
+            if commands.apply_command(cmd):
+                log.info("Applied command %s (id=%s)", cmd.get("type"), cmd.get("command_id"))
+                send_status_callback({
+                    "event": "command_applied",
+                    "type": cmd.get("type"),
+                    "command_id": cmd.get("command_id"),
+                })
+        reconciled = commands.reconcile_desired_config()
+        if reconciled:
+            log.info("Reconciled desired config: %s", reconciled)
 
         # ── Scheduled watchlist re-scan (every 30 min during market hours) ──
         today_str = now_ct.strftime("%Y-%m-%d")
@@ -769,6 +800,30 @@ def run(mode: str):
                 "loop_count": perf_stats.loop_count,
                 "loop_state": payload,
                 "market_data": market_health,
+                # The worker owns config post-split; publish it so the API's
+                # /api/status mirrors the worker's live config (US4).
+                "config": {
+                    "mode": config.TRADEGUMI_MODE,
+                    "program": config.CTI_PROGRAM,
+                    "phase": config.CTI_PHASE,
+                    "challenge_type": config.CTI_CHALLENGE_TYPE,
+                    "daily_loss_pct": config.CTI_DAILY_LOSS_PCT,
+                    "max_dd_pct": config.CTI_MAX_DD_PCT,
+                    "tiers": (
+                        config.CTI_CHALLENGE_TIERS
+                        if config.CTI_CHALLENGE_TYPE != "instant"
+                        else config.CTI_INSTANT_TIERS
+                    ),
+                },
+            })
+            # Worker liveness heartbeat for the docker healthcheck and the API's
+            # worker_live flag. Refreshed each loop; the TTL is much larger than
+            # the loop interval so the key never expires between refreshes
+            # (see specs/019-split-runtime-containers R4).
+            set_heartbeat({
+                "ts": time.time(),
+                "loop_count": perf_stats.loop_count,
+                "mode": config.TRADEGUMI_MODE,
             })
             log.debug("Perf dashboard/API state update work %.4fs", time.perf_counter() - started)
 
@@ -848,6 +903,12 @@ def main():
     # Graceful shutdown on SIGINT/SIGTERM
     def shutdown(signum, frame):
         log.warning("Shutdown signal received — exiting main loop")
+        # Observability: announce worker stop (Constitution IV). Best-effort —
+        # never block shutdown on the notification.
+        try:
+            send_status_callback({"event": "worker_stopping", "signal": int(signum)})
+        except Exception as exc:
+            log.debug("worker_stopping callback failed: %s", exc)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)

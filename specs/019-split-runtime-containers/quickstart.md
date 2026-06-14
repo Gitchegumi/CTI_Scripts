@@ -49,6 +49,9 @@ These map directly to the success criteria in `spec.md`.
 >   killing `tradegumi-worker` left `tradegumi-api` serving (`/api/status` 200)
 >   and the dashboard rendering persisted analytics; a Postgres outage mid-loop
 >   did not crash the worker.
+> - **SC-003 + SC-004 — ✅ VERIFIED 2026-06-14** (US3): restarting any one
+>   service left the other two running; a single-service failure turned only that
+>   service's health red (worker health via the Redis heartbeat).
 
 ```bash
 # SC-001: kill the dashboard mid-loop; worker keeps trading, API stays up

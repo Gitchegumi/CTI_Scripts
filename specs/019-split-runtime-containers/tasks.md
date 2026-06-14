@@ -114,16 +114,16 @@ leaves the other two running (SC-003, SC-004).
 
 ### Tests for User Story 3
 
-- [ ] T020 [P] [US3] Write `src/tradegumi/tests/test_service_isolation.py` (or a compose smoke script) asserting that restarting one service does not restart the others and that a single-service failure turns only that service's health red
+- [X] T020 [P] [US3] Write `src/tradegumi/tests/test_service_isolation.py` (or a compose smoke script) asserting that restarting one service does not restart the others and that a single-service failure turns only that service's health red
 
 ### Implementation for User Story 3
 
-- [ ] T021 [P] [US3] Create `src/tradegumi/healthcheck.py` with a `worker` mode that reads `tradegumi:heartbeat:worker` and exits non-zero if the key is missing or its `ts` is older than the freshness threshold (~150s)
-- [ ] T022 [US3] Update `src/tradegumi/main.py` to publish the worker heartbeat (`ts`, `loop_count`, `mode`) to Redis each loop with a TTL ≥2–3× the loop interval (~150s, never shorter than the loop interval)
-- [ ] T023 [US3] Add per-service healthchecks in `docker-compose.yml`: worker → `python -m tradegumi.healthcheck worker`, api → `curl -f http://localhost:8199/api/status`, dashboard → HTTP check on port 3000
-- [ ] T024 [US3] Add a `worker_live` flag to `GET /api/status` in `src/tradegumi/api_server.py` derived from the worker heartbeat, so the dashboard can show worker connectivity without coupling API health to the worker
-- [ ] T025 [US3] Emit observability for health events (Constitution IV): post to Discord and write to state when the worker starts, when its heartbeat goes stale, and when it recovers — in `src/tradegumi/main.py` (start) and the heartbeat-staleness path
-- [ ] T026 [US3] Verify SC-003/SC-004: restart each service in turn and confirm the other two stay up; induce a single-service failure and confirm only its health goes red
+- [X] T021 [P] [US3] Create `src/tradegumi/healthcheck.py` with a `worker` mode that reads `tradegumi:heartbeat:worker` and exits non-zero if the key is missing or its `ts` is older than the freshness threshold (~150s)
+- [X] T022 [US3] Update `src/tradegumi/main.py` to publish the worker heartbeat (`ts`, `loop_count`, `mode`) to Redis each loop with a TTL ≥2–3× the loop interval (~150s, never shorter than the loop interval)
+- [X] T023 [US3] Add per-service healthchecks in `docker-compose.yml`: worker → `python -m tradegumi.healthcheck worker`, api → `curl -f http://localhost:8199/api/status`, dashboard → HTTP check on port 3000
+- [X] T024 [US3] Add a `worker_live` flag to `GET /api/status` in `src/tradegumi/api_server.py` derived from the worker heartbeat, so the dashboard can show worker connectivity without coupling API health to the worker
+- [X] T025 [US3] Emit observability for health events (Constitution IV): post to Discord and write to state when the worker starts, when its heartbeat goes stale, and when it recovers — in `src/tradegumi/main.py` (start) and the heartbeat-staleness path
+- [X] T026 [US3] Verify SC-003/SC-004: restart each service in turn and confirm the other two stay up; induce a single-service failure and confirm only its health goes red — ✅ VERIFIED 2026-06-14 on live stack
 
 **Checkpoint**: Per-service health and isolated restarts confirmed and observable.
 
@@ -140,15 +140,15 @@ issued while the worker is down is applied on restart (SC-005, FR-010).
 
 ### Tests for User Story 4
 
-- [ ] T027 [P] [US4] Write `src/tradegumi/tests/test_commands.py` covering publish→consume→apply round-trip and a command issued while the worker is down being applied on startup reconciliation (expected to fail until T028–T030)
+- [X] T027 [P] [US4] Write `src/tradegumi/tests/test_commands.py` covering publish→consume→apply round-trip and a command issued while the worker is down being applied on startup reconciliation (expected to fail until T028–T030)
 
 ### Implementation for User Story 4
 
-- [ ] T028 [P] [US4] Create `src/tradegumi/commands.py`: command schema + validation and publish (API) / consume + apply (worker) helpers for `set_mode`/`set_program`/`set_phase`/`set_challenge_type`/`rescan` per `contracts/command-channel.md`
-- [ ] T029 [US4] Update API control handlers in `src/tradegumi/api_server.py` (`/api/config/*`, `/api/action/rescan`) to validate, then publish a command and update `desired_config`; return a non-2xx status when delivery fails instead of a silent success
-- [ ] T030 [US4] Update `src/tradegumi/main.py` worker to subscribe to the `commands` channel, reconcile `desired_config` at startup and each loop, apply changes without a restart, and reflect the new mode in the heartbeat
-- [ ] T031 [US4] Emit observability for command events (Constitution IV): post to Discord and write to state on command accepted (API), command applied (worker), command rejected (validation), and command-channel-unavailable, in `src/tradegumi/api_server.py` and `src/tradegumi/main.py`
-- [ ] T032 [US4] Verify SC-005/FR-010: stop the worker, `POST /api/config/mode mode=demo`, start the worker, confirm it comes up in `demo` via reconciliation (per `quickstart.md`)
+- [X] T028 [P] [US4] Create `src/tradegumi/commands.py`: command schema + validation and publish (API) / consume + apply (worker) helpers for `set_mode`/`set_program`/`set_phase`/`set_challenge_type`/`rescan` per `contracts/command-channel.md`
+- [X] T029 [US4] Update API control handlers in `src/tradegumi/api_server.py` (`/api/config/*`, `/api/action/rescan`) to validate, then publish a command and update `desired_config`; return a non-2xx status when delivery fails instead of a silent success
+- [X] T030 [US4] Update `src/tradegumi/main.py` worker to subscribe to the `commands` channel, reconcile `desired_config` at startup and each loop, apply changes without a restart, and reflect the new mode in the heartbeat
+- [X] T031 [US4] Emit observability for command events (Constitution IV): post to Discord and write to state on command accepted (API), command applied (worker), command rejected (validation), and command-channel-unavailable, in `src/tradegumi/api_server.py` and `src/tradegumi/main.py`
+- [ ] T032 [US4] Verify SC-005/FR-010: stop the worker, `POST /api/config/mode mode=demo`, start the worker, confirm it comes up in `demo` via reconciliation (per `quickstart.md`) — ⏳ REQUIRES LIVE STACK (rebuild images: Python code changed)
 
 **Checkpoint**: Operator control fully preserved across the process boundary and observable.
 
