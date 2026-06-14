@@ -60,14 +60,69 @@ def set_runtime_state(state: dict) -> None:
 
 
 def get_runtime_state() -> dict:
-    """Return the authoritative in-process runtime state.
+    """Return the current runtime state.
 
-    This intentionally does NOT read back from Redis: the Redis snapshot is a
-    JSON-safe published view and lacks live objects (e.g. ``client``), so it
-    must not override the in-process state that callers rely on.
+    In the combined/worker process the authoritative copy is the in-process
+    ``_runtime_state`` (it retains live objects like the execution client), so
+    that is returned when present.
+
+    In the standalone API process the worker runs in a different process and
+    never populates ``_runtime_state``; there we fall back to the JSON-safe
+    snapshot the worker publishes to Redis under ``loop_state``. That snapshot
+    intentionally lacks live objects (e.g. ``client``) — the API uses its own
+    read-only client via :func:`get_api_execution_client`. Returns ``{}`` when
+    neither source is available so callers degrade gracefully.
     """
     with _runtime_lock:
-        return dict(_runtime_state)
+        if _runtime_state:
+            return dict(_runtime_state)
+    try:
+        from tradegumi.persistence.redis import get_cache
+        snapshot = get_cache().get("loop_state")
+        if isinstance(snapshot, dict):
+            return snapshot
+    except Exception as exc:
+        log.debug("Redis runtime-state read failed: %s", exc)
+    return {}
+
+
+# ── Read-only execution client for the standalone API process ─────────────────
+_api_client: Optional[Any] = None
+_api_client_lock = threading.Lock()
+
+
+def get_api_execution_client():
+    """Return an execution client for the API's READ-ONLY endpoints.
+
+    Prefers the worker's live client when running in the combined/worker process
+    (shared via ``_runtime_state``). In the standalone API process there is no
+    shared client, so one is built lazily from config and used solely for reads
+    (``get_open_positions``, account info, ``get_trade_history``).
+
+    The API exposes no order-placement route and MUST NOT place orders — order
+    placement remains worker-only (Constitution III, Risk-First). Returns
+    ``None`` when a client cannot be built so callers return ``503`` rather than
+    crashing (e.g. broker creds absent in the API service).
+    """
+    live = get_runtime_state().get("client")
+    if live is not None:
+        return live
+    global _api_client
+    if _api_client is not None:
+        return _api_client
+    with _api_client_lock:
+        if _api_client is None:
+            try:
+                if config.TRADEGUMI_MODE == "live":
+                    from tradegumi.api.matchtrader_client import MatchTraderClient
+                    _api_client = MatchTraderClient()
+                else:
+                    from tradegumi.api.oanda_client import OandaClient
+                    _api_client = OandaClient()
+            except Exception as exc:
+                log.warning("API: could not build read-only execution client: %s", exc)
+                return None
+    return _api_client
 
 
 class TradeGumiAPIHandler(BaseHTTPRequestHandler):
@@ -159,7 +214,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def _source_trade_history(self, count: int = 1000) -> list:
         """Return broker/source trade history when a runtime client is available."""
-        client = get_runtime_state().get("client")
+        client = get_api_execution_client()
         if not client:
             return []
         safe_count = max(1, min(int(count or 50), 500))
@@ -405,7 +460,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/positions":
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if not client:
                 self._send_json({"error": "client not available"}, 503)
                 return
@@ -453,7 +508,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/trades") and not path.startswith("/api/trades/manual"):
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if not client:
                 self._send_json({"error": "client not available"}, 503)
                 return
@@ -657,12 +712,18 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             _update_env("CTI_CHALLENGE_TYPE", challenge_type)
             log.info("API: Challenge type changed to %s", challenge_type)
             # Immediately refresh account metrics in watchlist.json
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if client:
-                from tradegumi.pre_session_scanner import refresh_account_metrics
-                metrics = refresh_account_metrics(client)
-                if metrics:
-                    log.info("API: Account metrics refreshed immediately")
+                # Best-effort: in the standalone API process the data volume is
+                # mounted read-only, so refreshing watchlist.json may fail. Never
+                # fail the config change because of a metrics-refresh write.
+                try:
+                    from tradegumi.pre_session_scanner import refresh_account_metrics
+                    metrics = refresh_account_metrics(client)
+                    if metrics:
+                        log.info("API: Account metrics refreshed immediately")
+                except Exception as exc:
+                    log.warning("API: account-metrics refresh skipped: %s", exc)
             self._send_json({
                 "challenge_type": config.CTI_CHALLENGE_TYPE,
                 "phase": config.CTI_PHASE,
@@ -688,12 +749,18 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             _update_env("CTI_PHASE", str(config.CTI_PHASE))
             log.info("API: Phase changed to %d", config.CTI_PHASE)
             # Immediately refresh account metrics in watchlist.json
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if client:
-                from tradegumi.pre_session_scanner import refresh_account_metrics
-                metrics = refresh_account_metrics(client)
-                if metrics:
-                    log.info("API: Account metrics refreshed immediately")
+                # Best-effort: in the standalone API process the data volume is
+                # mounted read-only, so refreshing watchlist.json may fail. Never
+                # fail the config change because of a metrics-refresh write.
+                try:
+                    from tradegumi.pre_session_scanner import refresh_account_metrics
+                    metrics = refresh_account_metrics(client)
+                    if metrics:
+                        log.info("API: Account metrics refreshed immediately")
+                except Exception as exc:
+                    log.warning("API: account-metrics refresh skipped: %s", exc)
             self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
 
         elif path == "/api/journal/grade":

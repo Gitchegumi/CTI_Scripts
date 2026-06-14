@@ -87,18 +87,18 @@ the dashboard renders persisted analytics (SC-002).
 
 ### Tests for User Story 2
 
-- [ ] T011 [P] [US2] Write `src/tradegumi/tests/test_api_reads_redis.py` asserting the API serves `loop_state`/`watchlist`/`active_signals` from Redis and journal/metrics from Postgres with no in-process worker (expected to fail until T013–T015)
+- [X] T011 [P] [US2] Write `src/tradegumi/tests/test_api_reads_redis.py` asserting the API serves `loop_state`/`watchlist`/`active_signals` from Redis and journal/metrics from Postgres with no in-process worker (expected to fail until T013–T015)
 
 ### Implementation for User Story 2
 
-- [ ] T012 [P] [US2] Capture the pre-split API surface: enumerate every endpoint the combined `src/tradegumi/api_server.py` exposes today into `specs/019-split-runtime-containers/quickstart.md` (parity baseline for FR-012/SC-006)
-- [ ] T013 [P] [US2] Create `src/tradegumi/api_main.py` — standalone entrypoint that starts only the API server (no worker loop), wiring Redis and Postgres access
-- [ ] T014 [US2] Refactor `src/tradegumi/api_server.py` to read runtime state from Redis (degraded state on missing/expired `loop_state`) and analytics from Postgres, replacing in-process `get_runtime_state()` reads
-- [ ] T015 [US2] Update `src/tradegumi/main.py` so the worker publishes the JSON-safe runtime snapshot (`loop_state`/`watchlist`/`active_signals`) to Redis each loop and no longer calls `start_api_server()`
-- [ ] T016 [US2] Implement read-only `ExecutionClient` access in `src/tradegumi/api_server.py` for `/api/positions`, `/api/trades/history`, and account endpoints via `src/tradegumi/api/base_client.py`; ensure no order-placement path is reachable from the API and return `503` when the client is unavailable
-- [ ] T017 [US2] Update `docker-compose.yml`: rename the remaining service to `tradegumi-worker` (no published port) and add `tradegumi-api` (port 8199, `env_file: .env`, `depends_on` postgres+redis healthy, `restart: unless-stopped`); wire worker→`entrypoint.worker.sh`, api→`entrypoint.api.sh`
-- [ ] T018 [US2] Guard worker durable-write paths in `src/tradegumi/main.py` (and the strategy-metrics/journal write helpers it calls) so a Postgres outage logs-and-continues without crashing the trading cycle (FR-011)
-- [ ] T019 [US2] Verify SC-002 + FR-011: `docker compose kill tradegumi-worker` → `GET /api/status` returns 200 and the dashboard renders Postgres-backed analytics; separately, stop Postgres mid-loop → worker keeps trading
+- [X] T012 [P] [US2] Capture the pre-split API surface: enumerate every endpoint the combined `src/tradegumi/api_server.py` exposes today into `specs/019-split-runtime-containers/quickstart.md` (parity baseline for FR-012/SC-006)
+- [X] T013 [P] [US2] Create `src/tradegumi/api_main.py` — standalone entrypoint that starts only the API server (no worker loop), wiring Redis and Postgres access
+- [X] T014 [US2] Refactor `src/tradegumi/api_server.py` to read runtime state from Redis (degraded state on missing/expired `loop_state`) and analytics from Postgres, replacing in-process `get_runtime_state()` reads
+- [X] T015 [US2] Update `src/tradegumi/main.py` so the worker publishes the JSON-safe runtime snapshot (`loop_state`/`watchlist`/`active_signals`) to Redis each loop and no longer calls `start_api_server()`
+- [X] T016 [US2] Implement read-only `ExecutionClient` access in `src/tradegumi/api_server.py` for `/api/positions`, `/api/trades/history`, and account endpoints via `src/tradegumi/api/base_client.py`; ensure no order-placement path is reachable from the API and return `503` when the client is unavailable
+- [X] T017 [US2] Update `docker-compose.yml`: rename the remaining service to `tradegumi-worker` (no published port) and add `tradegumi-api` (port 8199, `env_file: .env`, `depends_on` postgres+redis healthy, `restart: unless-stopped`); wire worker→`entrypoint.worker.sh`, api→`entrypoint.api.sh`
+- [X] T018 [US2] Guard worker durable-write paths in `src/tradegumi/main.py` (and the strategy-metrics/journal write helpers it calls) so a Postgres outage logs-and-continues without crashing the trading cycle (FR-011)
+- [X] T019 [US2] Verify SC-002 + FR-011: `docker compose kill tradegumi-worker` → `GET /api/status` returns 200 and the dashboard renders Postgres-backed analytics; separately, stop Postgres mid-loop → worker keeps trading — ✅ VERIFIED 2026-06-14 on live stack
 
 **Checkpoint**: API + dashboard survive a worker outage; all three run as separate services; worker survives a Postgres blip.
 
@@ -163,7 +163,7 @@ issued while the worker is down is applied on restart (SC-005, FR-010).
 - [ ] T035 Add/verify docstrings for new modules (`api_main.py`, `commands.py`, `healthcheck.py`, new `redis.py` helpers) and all modified functions
 - [ ] T036 Run full `quickstart.md` validation end-to-end (SC-001…SC-005) AND confirm FR-012/SC-006 parity: every endpoint in the pre-split surface captured in T012 still responds correctly post-split
 - [ ] T037 Security check: confirm `.env`-only secrets, no values in `docker-compose.yml`/Dockerfiles, and token/webhook redaction across all three services' logs
-- [ ] T038 Submit the PR with the user/context-identified reviewer — **no reviewer has been identified yet, so the implementer MUST ask the user to name the reviewer before opening the PR** (Constitution Pull Request Policy)
+- [ ] T038 Submit the PR with **DockeGumi** as the reviewer (identified by the user 2026-06-14) (Constitution Pull Request Policy)
 
 ---
 

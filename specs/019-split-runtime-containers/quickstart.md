@@ -45,6 +45,10 @@ These map directly to the success criteria in `spec.md`.
 >   still runs in-thread with the worker in the `tradegumi` service): killing
 >   `tradegumi-dashboard` left the worker trading with no errors in the docker
 >   logs; `postgres`, `redis`, and `tradegumi` were unaffected.
+> - **SC-002 + FR-011 — ✅ VERIFIED 2026-06-14** (US2 three-service layout):
+>   killing `tradegumi-worker` left `tradegumi-api` serving (`/api/status` 200)
+>   and the dashboard rendering persisted analytics; a Postgres outage mid-loop
+>   did not crash the worker.
 
 ```bash
 # SC-001: kill the dashboard mid-loop; worker keeps trading, API stays up
@@ -96,6 +100,36 @@ cd dashboard && NEXT_PUBLIC_API_URL=http://localhost:8199 npm run dev
 cd src && poetry run pytest tradegumi/tests/test_commands.py \
                             tradegumi/tests/test_api_reads_redis.py -q
 ```
+
+## Pre-split API surface (FR-012 / SC-006 parity baseline)
+
+Every endpoint the combined `api_server.py` exposed must still respond after the
+split. Captured 2026-06-14 from `src/tradegumi/api_server.py`. Post-split each is
+served by the standalone `tradegumi-api` from the source noted below.
+
+| Endpoint | Method | Post-split source |
+| --- | --- | --- |
+| `/api/status` | GET | config + worker Redis snapshot (`loop_state`) |
+| `/api/data/loop_state` | GET | Redis snapshot, else `loop_state.json` (volume ro) |
+| `/api/data/watchlist` | GET | `watchlist.json` (volume ro) |
+| `/api/data/signals` | GET | `signals.json` (volume ro) |
+| `/api/data/trade_correlations` | GET | `trade_correlations.json` (volume ro) |
+| `/api/prices` | GET | worker price state (Redis/file) |
+| `/api/positions` | GET | API read-only execution client |
+| `/api/trades/history`, `/api/trades` | GET | API read-only execution client (+ Postgres merge) |
+| `/api/data/journal`, `/api/journal`, `/api/journal/export` | GET | Postgres |
+| `/api/strategy-metrics/{summary,opportunities,compare,export}` | GET | Postgres |
+| `/api/trades/manual`, `/manual/export`, `/manual/stats`, `/api/manual-trades/*` | GET | Postgres |
+| `/api/config/{mode,challenge_type,program,phase}` | POST | config mutation* |
+| `/api/action/{rescan,restart}` | POST | runtime control* |
+| `/api/journal/{grade,invalidate,notes,reset}` | POST | Postgres |
+| `/api/purge` | POST | Postgres |
+| `/api/trades/manual` | POST/PUT/DELETE | Postgres |
+
+\* **US2 caveat**: config/action POSTs currently mutate the **API process's** own
+config and do not yet reach the worker process. Cross-process delivery is wired
+in **US4** via the Redis command channel (T028–T032). Until then, mode/phase
+changes from the dashboard affect API responses but not the running worker.
 
 ## Rollback
 

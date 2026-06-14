@@ -48,7 +48,7 @@ from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_bla
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
 from tradegumi.trailing_sl import TrailingSLManager
 from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
-from tradegumi.api_server import start_api_server, set_runtime_state, get_runtime_state
+from tradegumi.api_server import set_runtime_state, get_runtime_state
 from tradegumi.market_data import (
     MODE_STREAMING,
     ObservationDispatcher,
@@ -496,8 +496,9 @@ def run(mode: str):
 
     log.info("Connected to Oanda — account=%s", config.OANDA_ACCOUNT_ID)
 
-    # Start API server for dashboard
-    api_server = start_api_server()
+    # The API server now runs as its own service (tradegumi-api). The worker no
+    # longer serves HTTP; it publishes a JSON-safe runtime snapshot to Redis via
+    # set_runtime_state() for the API/dashboard to read. See specs/019.
     set_runtime_state({"running": True, "loop_count": 0, "client": client})
 
     # Start Discord bot (DM alerts + grade buttons); falls back to webhook if unconfigured

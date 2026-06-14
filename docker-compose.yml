@@ -1,20 +1,45 @@
 services:
-  # Combined worker + API (the API still runs in-thread inside the worker
-  # process until user story US2 of specs/019-split-runtime-containers extracts
-  # it into its own tradegumi-api service). The dashboard has already been split
-  # out below, so a dashboard failure can no longer take down trading.
-  tradegumi:
+  # Trading engine: market data, scanning, signals, alerts, metric/journal
+  # writes. No public HTTP port. Publishes a JSON-safe runtime snapshot to Redis
+  # for the API/dashboard to read. A crash here restarts only this container.
+  tradegumi-worker:
     image: ghcr.io/gitchegumi/cti-scripts:latest
     build:
       context: .
       dockerfile: Dockerfile
       target: python
+    # Default image ENTRYPOINT is entrypoint.worker.sh (the trading loop).
+    env_file:
+      - .env
+    volumes:
+      - tradegumi-data:/app/src/tradegumi/data
+    restart: unless-stopped
+    # NOTE: the worker has no HTTP port; a heartbeat-based healthcheck is added
+    # in user story US3 (tradegumi.healthcheck reading the Redis heartbeat key).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # HTTP API service: analytics + control on port 8199. Reads hot state from the
+  # worker's Redis snapshot + the shared data volume (read-only) and durable
+  # analytics from Postgres. Builds its own read-only execution client; never
+  # places orders.
+  tradegumi-api:
+    image: ghcr.io/gitchegumi/cti-scripts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: python
+    entrypoint: ["/entrypoint.api.sh"]
     ports:
       - "8199:8199"  # API server
     env_file:
       - .env
     volumes:
-      - tradegumi-data:/app/src/tradegumi/data
+      # Read-only: the API serves worker-produced state files but never writes them.
+      - tradegumi-data:/app/src/tradegumi/data:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8199/api/status"]
@@ -36,17 +61,14 @@ services:
       target: dashboard
       args:
         # Baked into client bundles at build time.
-        NEXT_PUBLIC_API_URL: http://tradegumi:8199
+        NEXT_PUBLIC_API_URL: http://tradegumi-api:8199
     ports:
       - "3000:3000"  # Dashboard UI
     env_file:
       - .env
     environment:
-      # The dashboard's Next server proxies /api/* to the API. Until US2 the API
-      # is served by the combined `tradegumi` service; US2 repoints this to the
-      # standalone tradegumi-api service. This override wins over the value in
-      # .env (which documents the post-US2 target).
-      NEXT_PUBLIC_API_URL: http://tradegumi:8199
+      # The dashboard's Next server proxies /api/* to the standalone API service.
+      NEXT_PUBLIC_API_URL: http://tradegumi-api:8199
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
@@ -55,7 +77,7 @@ services:
       retries: 3
       start_period: 30s
     depends_on:
-      tradegumi:
+      tradegumi-api:
         condition: service_healthy
 
   postgres:
