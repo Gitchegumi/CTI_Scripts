@@ -60,14 +60,90 @@ def set_runtime_state(state: dict) -> None:
 
 
 def get_runtime_state() -> dict:
-    """Return the authoritative in-process runtime state.
+    """Return the current runtime state.
 
-    This intentionally does NOT read back from Redis: the Redis snapshot is a
-    JSON-safe published view and lacks live objects (e.g. ``client``), so it
-    must not override the in-process state that callers rely on.
+    In the combined/worker process the authoritative copy is the in-process
+    ``_runtime_state`` (it retains live objects like the execution client), so
+    that is returned when present.
+
+    In the standalone API process the worker runs in a different process and
+    never populates ``_runtime_state``; there we fall back to the JSON-safe
+    snapshot the worker publishes to Redis under ``loop_state``. That snapshot
+    intentionally lacks live objects (e.g. ``client``) — the API uses its own
+    read-only client via :func:`get_api_execution_client`. Returns ``{}`` when
+    neither source is available so callers degrade gracefully.
     """
     with _runtime_lock:
-        return dict(_runtime_state)
+        if _runtime_state:
+            return dict(_runtime_state)
+    try:
+        from tradegumi.persistence.redis import get_cache
+        snapshot = get_cache().get("loop_state")
+        if isinstance(snapshot, dict):
+            return snapshot
+    except Exception as exc:
+        log.debug("Redis runtime-state read failed: %s", exc)
+    return {}
+
+
+# ── Read-only execution client for the standalone API process ─────────────────
+_api_client: Optional[Any] = None
+_api_client_lock = threading.Lock()
+
+
+def get_api_execution_client():
+    """Return an execution client for the API's READ-ONLY endpoints.
+
+    Prefers the worker's live client when running in the combined/worker process
+    (shared via ``_runtime_state``). In the standalone API process there is no
+    shared client, so one is built lazily from config and used solely for reads
+    (``get_open_positions``, account info, ``get_trade_history``).
+
+    The API exposes no order-placement route and MUST NOT place orders — order
+    placement remains worker-only (Constitution III, Risk-First). Returns
+    ``None`` when a client cannot be built so callers return ``503`` rather than
+    crashing (e.g. broker creds absent in the API service).
+    """
+    live = get_runtime_state().get("client")
+    if live is not None:
+        return live
+    global _api_client
+    if _api_client is not None:
+        return _api_client
+    with _api_client_lock:
+        if _api_client is None:
+            try:
+                if config.TRADEGUMI_MODE == "live":
+                    from tradegumi.api.matchtrader_client import MatchTraderClient
+                    _api_client = MatchTraderClient()
+                else:
+                    from tradegumi.api.oanda_client import OandaClient
+                    _api_client = OandaClient()
+            except Exception as exc:
+                log.warning("API: could not build read-only execution client: %s", exc)
+                return None
+    return _api_client
+
+
+def worker_live() -> bool:
+    """Return True if the worker's Redis heartbeat is present and fresh.
+
+    Lets the dashboard show worker connectivity without coupling API health to
+    the worker — the API stays up and serving even when the worker is down
+    (SC-002). Freshness uses the same threshold as the worker's docker
+    healthcheck. Any error (e.g. Redis down) reports not-live rather than raising.
+    """
+    try:
+        import os
+        import time as _time
+        from tradegumi.persistence.redis import get_heartbeat
+        heartbeat = get_heartbeat()
+        if not heartbeat or "ts" not in heartbeat:
+            return False
+        stale_after = int(os.getenv("TRADEGUMI_WORKER_HEARTBEAT_STALE_SECONDS", "150"))
+        return (_time.time() - float(heartbeat["ts"])) <= stale_after
+    except Exception:
+        return False
 
 
 class TradeGumiAPIHandler(BaseHTTPRequestHandler):
@@ -159,7 +235,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     def _source_trade_history(self, count: int = 1000) -> list:
         """Return broker/source trade history when a runtime client is available."""
-        client = get_runtime_state().get("client")
+        client = get_api_execution_client()
         if not client:
             return []
         safe_count = max(1, min(int(count or 50), 500))
@@ -180,20 +256,31 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         path = self._route_path()
 
         if path == "/api/status":
-            # Current config + runtime state
+            # Current config + runtime state. The worker owns config post-split;
+            # it publishes a "config" block in the runtime snapshot, so the API
+            # mirrors the worker's live config (a config command applied by the
+            # worker is reflected here on its next snapshot). Falls back to the
+            # local config in the combined process / tests.
             state = get_runtime_state()
+            cfg = state.get("config") or {}
+            default_tiers = (
+                config.CTI_CHALLENGE_TIERS
+                if config.CTI_CHALLENGE_TYPE != "instant"
+                else config.CTI_INSTANT_TIERS
+            )
             self._send_json({
-                "mode": config.TRADEGUMI_MODE,
-                "challenge_type": config.CTI_CHALLENGE_TYPE,
-                "program": config.CTI_PROGRAM,
-                "phase": config.CTI_PHASE,
-                "daily_loss_pct": config.CTI_DAILY_LOSS_PCT,
-                "max_dd_pct": config.CTI_MAX_DD_PCT,
+                "mode": cfg.get("mode", config.TRADEGUMI_MODE),
+                "challenge_type": cfg.get("challenge_type", config.CTI_CHALLENGE_TYPE),
+                "program": cfg.get("program", config.CTI_PROGRAM),
+                "phase": cfg.get("phase", config.CTI_PHASE),
+                "daily_loss_pct": cfg.get("daily_loss_pct", config.CTI_DAILY_LOSS_PCT),
+                "max_dd_pct": cfg.get("max_dd_pct", config.CTI_MAX_DD_PCT),
                 "running": state.get("running", False),
+                "worker_live": worker_live(),
                 "loop_count": state.get("loop_count", 0),
                 "last_signal_time": state.get("last_signal_time"),
                 "market_data": state.get("market_data"),
-                "tiers": config.CTI_CHALLENGE_TIERS if config.CTI_CHALLENGE_TYPE != "instant" else config.CTI_INSTANT_TIERS,
+                "tiers": cfg.get("tiers", default_tiers),
             })
             return
 
@@ -405,7 +492,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/positions":
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if not client:
                 self._send_json({"error": "client not available"}, 503)
                 return
@@ -453,7 +540,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/trades") and not path.startswith("/api/trades/manual"):
-            client = get_runtime_state().get("client")
+            client = get_api_execution_client()
             if not client:
                 self._send_json({"error": "client not available"}, 503)
                 return
@@ -630,71 +717,48 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
     # ── POST endpoints ────────────────────────────────────────────────────
 
+    def _publish_command(self, cmd_type: str, payload: Optional[dict]) -> None:
+        """Validate and publish an operator command to the worker.
+
+        Responds 400 on a bad command, 503 when the command channel is
+        unavailable (never a silent success — FR-010), else 202-style
+        ``{"status": "accepted", "command_id": ...}``. Logs each outcome for
+        observability (Constitution IV); the worker logs/announces application.
+        """
+        from tradegumi import commands
+        try:
+            cmd = commands.build_command(cmd_type, payload, source="api")
+        except commands.CommandError as exc:
+            log.info("API: rejected command %s: %s", cmd_type, exc)
+            self._send_json({"error": str(exc)}, 400)
+            return
+        if commands.publish(cmd):
+            log.info("API: command %s accepted (id=%s)", cmd_type, cmd["command_id"])
+            self._send_json({"status": "accepted", "command_id": cmd["command_id"]})
+        else:
+            log.warning("API: command %s not delivered — command channel unavailable", cmd_type)
+            self._send_json(
+                {"error": "command not delivered — command channel unavailable", "type": cmd_type},
+                503,
+            )
+
     def do_POST(self):
         body = self._read_body()
         path = self._route_path()
 
         if path == "/api/config/mode":
-            mode = body.get("mode", "").lower()
-            if mode not in ("alert_only", "demo", "live"):
-                self._send_json({"error": "invalid mode. Use: alert_only, demo, live"}, 400)
-                return
-            previous = config.TRADEGUMI_MODE
-            config.TRADEGUMI_MODE = mode
-            _update_env("TRADEGUMI_MODE", mode)
-            log.info("API: Mode changed from %s to %s", previous, mode)
-            # Notify DockeGumi
-            from tradegumi.callback import send_mode_change_callback
-            send_mode_change_callback(mode, previous)
-            self._send_json({"mode": config.TRADEGUMI_MODE})
+            # Delivered to the worker via the Redis command channel; the worker
+            # applies it and reflects it in the next runtime snapshot (US4).
+            self._publish_command("set_mode", {"mode": body.get("mode", "")})
 
         elif path == "/api/config/challenge_type":
-            challenge_type = body.get("challenge_type", "").lower()
-            if challenge_type not in ("1-step", "2-step", "instant"):
-                self._send_json({"error": "invalid challenge_type. Use: 1-step, 2-step, or instant"}, 400)
-                return
-            config.CTI_CHALLENGE_TYPE = challenge_type
-            _update_env("CTI_CHALLENGE_TYPE", challenge_type)
-            log.info("API: Challenge type changed to %s", challenge_type)
-            # Immediately refresh account metrics in watchlist.json
-            client = get_runtime_state().get("client")
-            if client:
-                from tradegumi.pre_session_scanner import refresh_account_metrics
-                metrics = refresh_account_metrics(client)
-                if metrics:
-                    log.info("API: Account metrics refreshed immediately")
-            self._send_json({
-                "challenge_type": config.CTI_CHALLENGE_TYPE,
-                "phase": config.CTI_PHASE,
-            })
+            self._publish_command("set_challenge_type", {"challenge_type": body.get("challenge_type", "")})
 
         elif path == "/api/config/program":
-            program = body.get("program", "").lower()
-            if program not in ("challenge", "instant"):
-                self._send_json({"error": "invalid program. Use: challenge, instant"}, 400)
-                return
-            config.CTI_PROGRAM = program
-            _update_env("CTI_PROGRAM", program)
-            # If instant, phase doesn't matter
-            log.info("API: Program changed to %s", program)
-            self._send_json({"program": config.CTI_PROGRAM, "phase": config.CTI_PHASE})
+            self._publish_command("set_program", {"program": body.get("program", "")})
 
         elif path == "/api/config/phase":
-            phase = body.get("phase")
-            if phase is None or int(phase) not in (1, 2, 3):
-                self._send_json({"error": "invalid phase. Use: 1, 2, or 3"}, 400)
-                return
-            config.CTI_PHASE = int(phase)
-            _update_env("CTI_PHASE", str(config.CTI_PHASE))
-            log.info("API: Phase changed to %d", config.CTI_PHASE)
-            # Immediately refresh account metrics in watchlist.json
-            client = get_runtime_state().get("client")
-            if client:
-                from tradegumi.pre_session_scanner import refresh_account_metrics
-                metrics = refresh_account_metrics(client)
-                if metrics:
-                    log.info("API: Account metrics refreshed immediately")
-            self._send_json({"phase": config.CTI_PHASE, "program": config.CTI_PROGRAM})
+            self._publish_command("set_phase", {"phase": body.get("phase")})
 
         elif path == "/api/journal/grade":
             signal_id = body.get("signal_id", "").strip()
@@ -804,12 +868,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             return
 
         elif path == "/api/action/rescan":
-            # Trigger an immediate re-scan
-            state = get_runtime_state()
-            state["force_rescan"] = True
-            set_runtime_state(state)
-            log.info("API: Re-scan triggered via API")
-            self._send_json({"status": "rescan_triggered"})
+            # Delivered to the worker via the Redis command channel (US4).
+            self._publish_command("rescan", {})
 
         elif path == "/api/action/restart":
             # Signal main loop to restart (set flag)
@@ -837,35 +897,6 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
 
         else:
             self._send_json({"error": "not found"}, 404)
-
-
-def _update_env(key: str, value: str) -> None:
-    """Update .env file with a new value, creating the file if needed."""
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    lines = []
-    if env_path.exists():
-        with open(env_path) as f:
-            lines = f.readlines()
-
-    found = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(f"{key}="):
-            new_lines.append(f"{key}={value}\n")
-            found = True
-        else:
-            new_lines.append(line)
-
-    if not found:
-        new_lines.append(f"{key}={value}\n")
-
-    with open(env_path, "w") as f:
-        f.writelines(new_lines)
-
-    # Also update the runtime environment
-    import os
-    os.environ[key] = value
 
 
 def start_api_server(port: int = API_PORT) -> HTTPServer:

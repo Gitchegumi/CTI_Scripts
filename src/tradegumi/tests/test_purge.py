@@ -120,13 +120,35 @@ class TestPurgeStrategyMetrics:
 
 
 class TestPurgeManualTrades:
-    def test_purge_nonexistent_db_is_safe(self):
+    def test_purge_truncates_postgres_tables(self, _fake_pg):
         assert purge.purge_manual_trades() is True
+        assert any(
+            "TRUNCATE" in sql
+            and "manual_trades" in sql
+            and "trade_annotations" in sql
+            and "trade_overrides" in sql
+            for sql in _fake_pg.executed
+        )
 
-    def test_purge_deletes_manual_trades_db(self):
+    def test_purge_deletes_legacy_file_and_truncates(self, _fake_pg):
+        # A pre-migration install may still have the SQLite file on disk.
         purge.MANUAL_TRADES_DB.write_text("sqlite", encoding="utf-8")
         assert purge.purge_manual_trades() is True
         assert not purge.MANUAL_TRADES_DB.exists()
+        assert any("TRUNCATE" in sql and "manual_trades" in sql for sql in _fake_pg.executed)
+
+    def test_purge_creates_backup_when_requested(self, tmp_path):
+        purge.MANUAL_TRADES_DB.write_text("sqlite", encoding="utf-8")
+        backup_dir = tmp_path / "backups"
+        purge.purge_manual_trades(backup_dir=backup_dir)
+        assert len(list(backup_dir.glob("manual_trades.db.*"))) == 1
+
+    def test_purge_reports_failure_when_postgres_unavailable(self, monkeypatch):
+        def boom():
+            raise RuntimeError("postgres unavailable")
+
+        monkeypatch.setattr(purge, "get_db", boom)
+        assert purge.purge_manual_trades() is False
 
 
 class TestPurgeSignalsState:

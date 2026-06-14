@@ -122,13 +122,32 @@ def purge_strategy_metrics(*, backup_dir: Optional[Path] = None) -> bool:
 
 
 def purge_manual_trades(*, backup_dir: Optional[Path] = None) -> bool:
-    """Drop and recreate the manual_trades SQLite database."""
-    if backup_dir:
-        _backup_sqlite(MANUAL_TRADES_DB, backup_dir)
+    """Clear manual trades from Postgres and clean up any legacy SQLite file.
+
+    Manual trades, their mode-scoped annotations, and local overrides live in
+    Postgres (``manual_trades``, ``trade_annotations``, ``trade_overrides``).
+    Any leftover SQLite database from a pre-migration install is also removed.
+    Success reflects whether the durable Postgres tables were truncated — so the
+    operator is never told manual trades were cleared while the rows survive.
+    """
+    # Clean up any leftover legacy SQLite file from before the Postgres migration.
     if MANUAL_TRADES_DB.exists():
+        if backup_dir:
+            _backup_sqlite(MANUAL_TRADES_DB, backup_dir)
         MANUAL_TRADES_DB.unlink()
-        log.info("Deleted %s", MANUAL_TRADES_DB)
-    return True
+        log.info("Deleted legacy SQLite file %s", MANUAL_TRADES_DB)
+    # The manual-trade tables are created by manual_trades.init_schema, not the
+    # core get_db() schema, so ensure they exist on this backend before
+    # truncating. Failures report False so the operator is never told the store
+    # was cleared when it was not.
+    try:
+        from tradegumi.manual_trades import init_schema
+
+        init_schema(get_db())
+    except Exception as exc:
+        log.error("Failed to ensure manual-trade schema before purge: %s", exc)
+        return False
+    return _truncate_postgres("manual_trades, trade_annotations, trade_overrides")
 
 
 def purge_signals_state(*, backup_dir: Optional[Path] = None) -> bool:

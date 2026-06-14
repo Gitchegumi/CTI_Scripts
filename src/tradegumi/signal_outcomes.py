@@ -7,6 +7,7 @@ signals, or executes trades.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,8 @@ from typing import Any, Optional
 
 from tradegumi import journal
 from tradegumi.price_observations import DASHBOARD_POLL, PriceObservation
+
+log = logging.getLogger(__name__)
 
 LIVE_OBSERVATION_SOURCE = "live_price_observation_1s"
 LIVE_OBSERVATION_MID_SOURCE = "live_price_observation_1s_mid"
@@ -329,6 +332,15 @@ def evaluate_price_observation(observation: PriceObservation) -> OutcomeEvaluati
             if summary is not None:
                 updated.append(summary)
         if updated:
-            journal._write_entries(index.entries)
-            _refresh_pending_index(index.entries)
+            try:
+                journal._write_entries(index.entries)
+                _refresh_pending_index(index.entries)
+            except Exception as exc:
+                # FR-011: a durable-store outage must not crash the observation
+                # pipeline. Skip this best-effort outcome persistence; the
+                # affected entries stay pending and are re-evaluated on a later
+                # observation once Postgres recovers (the index is reloaded from
+                # the store each call, so nothing is silently marked resolved).
+                log.warning("Journal outcome write skipped (store unavailable): %s", exc)
+                updated = []
     return OutcomeEvaluationSummary(evaluated_count=len(entries_for_symbol), updated=tuple(updated))

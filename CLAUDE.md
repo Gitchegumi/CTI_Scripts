@@ -4,6 +4,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-specs/017-tune-pullback-signals/plan.md
+specs/019-split-runtime-containers/plan.md
 
 <!-- SPECKIT END -->

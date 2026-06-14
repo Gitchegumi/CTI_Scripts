@@ -1,16 +1,50 @@
 services:
-  tradegumi:
+  # Trading engine: market data, scanning, signals, alerts, metric/journal
+  # writes. No public HTTP port. Publishes a JSON-safe runtime snapshot to Redis
+  # for the API/dashboard to read. A crash here restarts only this container.
+  tradegumi-worker:
     image: ghcr.io/gitchegumi/cti-scripts:latest
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8199:8199"  # API server
-      - "3000:3000"  # Dashboard
+      target: python
+    # Default image ENTRYPOINT is entrypoint.worker.sh (the trading loop).
     env_file:
       - .env
     volumes:
       - tradegumi-data:/app/src/tradegumi/data
+    restart: unless-stopped
+    # The worker has no HTTP port; health is the freshness of its Redis heartbeat.
+    healthcheck:
+      test: ["CMD", "python", "-m", "tradegumi.healthcheck", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # HTTP API service: analytics + control on port 8199. Reads hot state from the
+  # worker's Redis snapshot + the shared data volume (read-only) and durable
+  # analytics from Postgres. Builds its own read-only execution client; never
+  # places orders.
+  tradegumi-api:
+    image: ghcr.io/gitchegumi/cti-scripts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: python
+    entrypoint: ["/entrypoint.api.sh"]
+    ports:
+      - "8199:8199"  # API server
+    env_file:
+      - .env
+    volumes:
+      # Read-only: the API serves worker-produced state files but never writes them.
+      - tradegumi-data:/app/src/tradegumi/data:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8199/api/status"]
@@ -22,6 +56,33 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  tradegumi-dashboard:
+    image: ghcr.io/gitchegumi/cti-scripts-dashboard:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+      args:
+        # Baked into client bundles at build time.
+        NEXT_PUBLIC_API_URL: http://tradegumi-api:8199
+    ports:
+      - "3000:3000"  # Dashboard UI
+    env_file:
+      - .env
+    environment:
+      # The dashboard's Next server proxies /api/* to the standalone API service.
+      NEXT_PUBLIC_API_URL: http://tradegumi-api:8199
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      tradegumi-api:
         condition: service_healthy
 
   postgres:
