@@ -5,6 +5,10 @@ from io import StringIO
 import pytest
 
 from tradegumi import journal
+from tradegumi.tests._pg import requires_postgres, get_test_backend
+
+# The signal journal is Postgres-authoritative; these tests need a test DB.
+pytestmark = requires_postgres
 
 
 class FakeSignal:
@@ -52,11 +56,15 @@ class FakeSignal:
 
 
 def write_entries(path, entries):
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    """Seed the authoritative Postgres journal (and refresh the JSONL backup)."""
+    journal._write_entries(list(entries))
 
 
 @pytest.fixture
 def journal_file(tmp_path, monkeypatch):
+    # Point the app's get_db() at the truncated test database and redirect the
+    # JSONL backup to a temp file so the real data file is never touched.
+    get_test_backend()
     path = tmp_path / "signal_journal.jsonl"
     monkeypatch.setattr(journal, "JOURNAL_FILE", path)
     return path
@@ -622,7 +630,8 @@ def test_purge_journal_entries_scopes_to_filter(journal_file):
     assert journal.purge_journal_entries("TP_HIT") == {"removed_count": 0, "remaining_count": 1}
 
 
-def test_purge_journal_entries_deletes_from_db_mirror(journal_file, monkeypatch):
+def test_application_query_path_reads_from_postgres(journal_file):
+    """read_journal() reflects Postgres rows even when the JSONL backup is gone."""
     write_entries(
         journal_file,
         [
@@ -630,18 +639,14 @@ def test_purge_journal_entries_deletes_from_db_mirror(journal_file, monkeypatch)
             {"signal_id": "sig-2", "grade": "TP_HIT"},
         ],
     )
-    executed: list[tuple] = []
+    # Data is in Postgres, not sourced from the JSONL file.
+    count = journal.get_db().fetchone("SELECT COUNT(*) AS c FROM journal_entries")["c"]
+    assert count == 2
 
-    class FakeDB:
-        def execute(self, sql, params=None):
-            executed.append((sql, params))
-
-    monkeypatch.setattr(journal, "get_db", lambda: FakeDB())
-    journal.purge_journal_entries("TP_HIT")
-
-    # The Postgres mirror is kept consistent: removed ids are deleted there too.
-    assert any("DELETE FROM journal_entries" in sql for sql, _ in executed)
-    assert any(params and "sig-2" in params for _, params in executed)
+    # Delete the JSONL backup entirely; the application read path still works.
+    journal.JOURNAL_FILE.unlink(missing_ok=True)
+    ids = sorted(entry["signal_id"] for entry in journal.read_journal())
+    assert ids == ["sig-1", "sig-2"]
 
 
 def test_reset_signal_to_pending_preserves_signal_data_and_notes(journal_file):

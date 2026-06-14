@@ -90,7 +90,8 @@ def opportunity(
 
 
 def write_journal_entries(path: Path, entries: list[dict]) -> None:
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    """Seed the authoritative Postgres journal (JOURNAL_FILE is the backup path)."""
+    journal._write_entries(list(entries))
 
 
 def test_schema_near_miss_state_and_serialization(tmp_path):
@@ -402,20 +403,24 @@ def test_summary_counts_only_usable_emitted_signals_as_trade_opportunities():
 
 
 def test_summary_includes_prime_suppression_metrics(tmp_path, monkeypatch):
+    db = temp_db()
     journal_file = tmp_path / "signal_journal.jsonl"
     monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
-    journal_file.write_text(
-        "\n".join(
-            [
-                '{"signal_id":"sig-1","symbol":"EURUSD","signal_timestamp":"2026-05-06T12:00:00+00:00","prime_suppressed_signal_count":3,"prime_suppressed_same_direction_count":1,"prime_suppressed_opposite_direction_count":2,"prime_suppressed_signal_outcomes":[{"outcome":"invalidated_by_prime"},{"outcome":"invalidated_by_prime"},{"outcome":"invalidated_by_prime"}],"prime_closed_reason":"inferred_sl","prime_close_ambiguous":true}',
-                '{"signal_id":"sig-2","symbol":"GBPJPY","signal_timestamp":"2026-05-06T13:00:00+00:00","prime_suppressed_signal_count":1,"prime_suppressed_same_direction_count":1,"prime_closed_reason":"inferred_tp","prime_close_ambiguous":false}',
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
+    write_journal_entries(
+        journal_file,
+        [
+            {"signal_id": "sig-1", "symbol": "EURUSD", "signal_timestamp": "2026-05-06T12:00:00+00:00",
+             "prime_suppressed_signal_count": 3, "prime_suppressed_same_direction_count": 1,
+             "prime_suppressed_opposite_direction_count": 2,
+             "prime_suppressed_signal_outcomes": [{"outcome": "invalidated_by_prime"}, {"outcome": "invalidated_by_prime"}, {"outcome": "invalidated_by_prime"}],
+             "prime_closed_reason": "inferred_sl", "prime_close_ambiguous": True},
+            {"signal_id": "sig-2", "symbol": "GBPJPY", "signal_timestamp": "2026-05-06T13:00:00+00:00",
+             "prime_suppressed_signal_count": 1, "prime_suppressed_same_direction_count": 1,
+             "prime_closed_reason": "inferred_tp", "prime_close_ambiguous": False},
+        ],
     )
 
-    summary = get_summary("2026-05-06", "2026-05-06", db=temp_db())
+    summary = get_summary("2026-05-06", "2026-05-06", db=db)
 
     assert summary["total_prime_suppressed_signals"] == 4
     assert summary["prime_suppressed_signals_by_symbol"] == {"GBPJPY": 1, "EURUSD": 3}
@@ -1193,23 +1198,17 @@ def test_pullback_summary_counts_outcomes_blockers_and_journal_visibility(tmp_pa
     db = temp_db()
     journal_file = tmp_path / "signal_journal.jsonl"
     monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
-    journal_file.write_text(
-        "\n".join(
-            [
-                (
-                    '{"signal_id":"journaled-pullback","symbol":"EURUSD","strategy":"CTI-v1.2-pullback",'
-                    '"signal_type":"pullback","signal_timestamp":"2026-06-03T12:00:00+00:00"}'
-                ),
-                (
-                    '{"signal_id":"prime","symbol":"EURUSD","strategy":"CTI-v1.2-pullback","signal_type":"pullback",'
-                    '"signal_timestamp":"2026-06-03T12:05:00+00:00","prime_suppressed_signal_count":1,'
-                    '"prime_suppressed_signal_outcomes":[{"signal_id":"suppressed-pullback","symbol":"EURUSD",'
-                    '"strategy":"CTI-v1.2-pullback","signal_type":"pullback","outcome":"invalidated_by_prime"}]}'
-                ),
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
+    write_journal_entries(
+        journal_file,
+        [
+            {"signal_id": "journaled-pullback", "symbol": "EURUSD", "strategy": "CTI-v1.2-pullback",
+             "signal_type": "pullback", "signal_timestamp": "2026-06-03T12:00:00+00:00"},
+            {"signal_id": "prime", "symbol": "EURUSD", "strategy": "CTI-v1.2-pullback", "signal_type": "pullback",
+             "signal_timestamp": "2026-06-03T12:05:00+00:00", "prime_suppressed_signal_count": 1,
+             "prime_suppressed_signal_outcomes": [{"signal_id": "suppressed-pullback", "symbol": "EURUSD",
+                                                   "strategy": "CTI-v1.2-pullback", "signal_type": "pullback",
+                                                   "outcome": "invalidated_by_prime"}]},
+        ],
     )
 
     record_opportunity(

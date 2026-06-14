@@ -17,34 +17,31 @@ requires_postgres = pytest.mark.skipif(
     reason="Set TRADEGUMI_TEST_DATABASE_URL to run Postgres-backed tests",
 )
 
-_shared_backend = None
-
 
 def get_test_backend():
-    """Return a shared Postgres backend with freshly truncated tables.
+    """Return the application Postgres backend, pointed at the test database.
 
-    Skips the calling test when no test DSN is configured.  Also disables the
-    hourly retention auto-prune so record/read assertions stay deterministic.
+    Uses the process-wide ``get_db()`` singleton (so app-internal calls such as
+    the signal journal's reads/writes hit the same database the test inspects),
+    pointed at ``TRADEGUMI_TEST_DATABASE_URL`` and with all tables truncated for
+    a clean slate.  Skips the calling test when no test DSN is configured.  Also
+    disables the hourly retention auto-prune so record/read assertions stay
+    deterministic.
     """
     if not TEST_DSN:
         pytest.skip("Set TRADEGUMI_TEST_DATABASE_URL to run Postgres-backed tests")
 
-    global _shared_backend
-    from tradegumi.persistence import PostgresBackend
+    # Ensure the app's no-arg get_db() (used inside journal/strategy_metrics)
+    # resolves to the throwaway test database, never a real one.
+    os.environ["TRADEGUMI_DATABASE_URL"] = TEST_DSN
+    from tradegumi.persistence import get_db
 
-    if (
-        _shared_backend is None
-        or _shared_backend._conn is None
-        or getattr(_shared_backend._conn, "closed", False)
-    ):
-        _shared_backend = PostgresBackend(dsn=TEST_DSN)
-        _shared_backend.init_schema()
-
-    _shared_backend.execute(
+    db = get_db(database_url=TEST_DSN)
+    db.execute(
         "TRUNCATE journal_entries, criterion_results, evaluated_opportunities RESTART IDENTITY CASCADE"
     )
 
     import tradegumi.strategy_metrics as sm
     sm._last_prune_at = datetime.now(timezone.utc)
 
-    return _shared_backend
+    return db

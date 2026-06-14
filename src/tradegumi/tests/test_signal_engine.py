@@ -17,6 +17,7 @@ from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
 from tradegumi import journal
 from tradegumi.signal_engine import Signal
 from tradegumi.signal_processor import lifecycle_state_for_signal
+from tradegumi.tests._pg import requires_postgres, get_test_backend
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 
 
@@ -80,7 +81,9 @@ def test_live_trigger_price_uses_latest_shared_observation():
     assert _live_trigger_price("ZZZUSD", "SELL", 1.0) == 1.2
 
 
+@requires_postgres
 def test_continuation_detection_state_is_preserved_without_entry_creation(tmp_path, monkeypatch):
+    get_test_backend()  # journal is Postgres-authoritative; point it at the test DB
     journal_file = tmp_path / "signal_journal.jsonl"
     monkeypatch.setattr(journal, "JOURNAL_FILE", journal_file)
     monkeypatch.setattr(journal, "_now_iso", lambda: "2026-06-11T15:00:00+00:00")

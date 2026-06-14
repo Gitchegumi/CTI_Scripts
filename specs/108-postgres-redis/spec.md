@@ -89,17 +89,17 @@ Keep indexes for the main dashboard/query patterns:
 - criterion name
 - opportunity ID
 
-### 4. Mirror the Signal Journal into Postgres
+### 4. Move the Signal Journal into Postgres
 
-> **Reconciled decision:** the append-only JSONL file remains the authoritative
-> source of truth for the signal journal — every bot/dashboard read and all
-> mutations (append, grade, purge) go through it. Each write is additionally
-> mirrored, best-effort, into a Postgres `journal_entries` table for ad-hoc
-> SQL/BI access. That table is never read back by the application and a failed
-> sync never affects the JSONL source. (Strategy metrics, by contrast, are
-> relational analytics data and live in Postgres as their durable store.)
+> **Reconciled decision:** Postgres `journal_entries` is the authoritative store
+> for the signal journal. Every application read (`read_journal`, exports, the
+> strategy-metrics journal aggregations, and the append/grade/management logic)
+> reads from Postgres, and every mutation (append, grade, purge) persists to
+> Postgres. The append-only `signal_journal.jsonl` file is legacy: it is kept as
+> a best-effort export/backup snapshot and can be imported into a fresh database
+> with `backfill_from_jsonl`, but the application never reads it for queries.
 
-Provide a Postgres-backed `journal_entries` mirror that supports:
+Provide a Postgres-backed `journal_entries` table that supports:
 
 - filtering by date range
 - symbol

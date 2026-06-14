@@ -55,13 +55,15 @@ class PostgresBackend:
     def connect(self) -> Any:
         return self._get_conn()
 
-    def _translate(self, sql: str) -> str:
+    @staticmethod
+    def _translate(sql: str) -> str:
         """Translate ?-style placeholders to psycopg %s.
 
-        Safe for our controlled SQL; keep SQL strings free of literal ? inside
-        string literals.
+        Literal ``%`` (e.g. in ``LIKE '%pullback%'``) is first escaped to ``%%``
+        so psycopg does not mistake it for a placeholder, then ``?`` becomes
+        ``%s``.  Keep SQL strings free of literal ``?`` inside string literals.
         """
-        return sql.replace("?", "%s")
+        return sql.replace("%", "%%").replace("?", "%s")
 
     def init_schema(self) -> None:
         with self._lock:
@@ -158,10 +160,10 @@ class PostgresBackend:
                 """
                 CREATE TABLE IF NOT EXISTS journal_entries (
                     id SERIAL PRIMARY KEY,
-                    signal_id TEXT UNIQUE NOT NULL,
-                    signal_timestamp TIMESTAMPTZ NOT NULL,
-                    symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
+                    signal_id TEXT,
+                    signal_timestamp TIMESTAMPTZ,
+                    symbol TEXT,
+                    direction TEXT,
                     strategy TEXT,
                     signal_type TEXT,
                     lifecycle_role TEXT,
@@ -177,7 +179,7 @@ class PostgresBackend:
                     notes TEXT,
                     discord_msg_id TEXT,
                     data JSONB NOT NULL DEFAULT '{}',
-                    created_at TIMESTAMPTZ NOT NULL
+                    created_at TIMESTAMPTZ
                 )
                 """
             )

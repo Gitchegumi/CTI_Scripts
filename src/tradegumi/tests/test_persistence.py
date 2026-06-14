@@ -111,6 +111,15 @@ class TestPostgresBackend:
         assert db.fetchall("SELECT * FROM evaluated_opportunities WHERE id = ?", ("opp-rb",)) == []
 
 
+class TestTranslate:
+    def test_escapes_literal_percent_and_converts_placeholders(self):
+        sql = "SELECT * FROM t WHERE LOWER(s) LIKE '%pullback%' AND x = ? AND y = ?"
+        translated = PostgresBackend._translate(sql)
+        # Literal % doubled to %% (valid psycopg literal), ? -> %s placeholders.
+        assert translated == "SELECT * FROM t WHERE LOWER(s) LIKE '%%pullback%%' AND x = %s AND y = %s"
+        assert "?" not in translated
+
+
 class TestGetDbFactory:
     def test_get_db_requires_database_url(self, monkeypatch):
         """With no DSN, get_db() raises (no SQLite fallback)."""
