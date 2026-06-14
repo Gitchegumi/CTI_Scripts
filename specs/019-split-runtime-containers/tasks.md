@@ -163,7 +163,7 @@ issued while the worker is down is applied on restart (SC-005, FR-010).
 - [X] T035 Add/verify docstrings for new modules (`api_main.py`, `commands.py`, `healthcheck.py`, new `redis.py` helpers) and all modified functions
 - [ ] T036 Run full `quickstart.md` validation end-to-end (SC-001…SC-005) AND confirm FR-012/SC-006 parity: every endpoint in the pre-split surface captured in T012 still responds correctly post-split — SC-001…SC-005 ✅ verified live; ⏳ SC-006 endpoint-parity sweep pending (exercise the pre-split surface in quickstart against the running api)
 - [X] T037 Security check: confirm `.env`-only secrets, no values in `docker-compose.yml`/Dockerfiles, and token/webhook redaction across all three services' logs — verified; new code logs only command type/id and mode
-- [ ] T038 Submit the PR with **DockeGumi** as the reviewer (identified by the user 2026-06-14) (Constitution Pull Request Policy)
+- [X] T038 Submit the PR with **DockeGumi** as the reviewer (identified by the user 2026-06-14) (Constitution Pull Request Policy) — ✅ PR #114 opened with DockeGumi requested as reviewer
 
 ---
 
