@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Iterable, Optional
+
+from tradegumi.persistence import DBBackend, get_db
 
 log = logging.getLogger(__name__)
 
-DB_FILE = Path(__file__).parent / "data" / "manual_trades.db"
 VALID_MODES = {"alert_only", "demo", "live"}
 ALERT_ONLY = "alert_only"
 AGENT_EXPORT_SCHEMA_NAME = "Agent Export"
@@ -60,21 +59,20 @@ class TradeNotFoundError(LookupError):
     """Raised when a trade identity cannot be found in the current mode."""
 
 
-def _get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
-    """Return a SQLite connection for the manual trade store.
+def _db(db: Optional[DBBackend] = None) -> DBBackend:
+    """Return the Postgres backend for the manual-trade store.
 
     Args:
-        db_path: Optional database path used by tests or callers that need an
-            isolated store.
-
-    Returns:
-        SQLite connection with row access by column name.
+        db: Optional backend override used by tests for isolation; defaults to
+            the shared application backend (Postgres — the durable source of
+            truth, consistent with the rest of the persistence layer).
     """
-    path = Path(db_path) if db_path is not None else DB_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db or get_db()
+
+
+# Backends whose manual-trade schema has been initialized this process, so the
+# idempotent DDL runs once per backend instead of on every operation.
+_initialized_backends: set[int] = set()
 
 
 def _now_iso() -> str:
@@ -101,98 +99,94 @@ def _json_loads(value: Any, default: Any) -> Any:
 
 
 def _json_dumps(value: Any) -> str:
-    """Encode local structured values deterministically for SQLite storage."""
+    """Encode local structured values deterministically for storage."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def init_schema(db_path: Path | str | None = None) -> None:
-    """Initialize and migrate local trade-history tables.
+def init_schema(db: Optional[DBBackend] = None) -> None:
+    """Initialize and migrate local trade-history tables (Postgres).
 
-    Existing records are preserved. Missing bot-mode values are left nullable in
-    storage but interpreted as alert_only by all read paths.
+    Idempotent and run once per backend per process. Existing records are
+    preserved. Missing bot-mode values are left nullable in storage but
+    interpreted as alert_only by all read paths.
     """
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS manual_trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                direction TEXT NOT NULL CHECK(direction IN ('long', 'short')),
-                entry_price REAL NOT NULL,
-                exit_price REAL,
-                entry_time TEXT NOT NULL,
-                exit_time TEXT,
-                volume REAL,
-                fees REAL DEFAULT 0.0,
-                pnl REAL DEFAULT 0.0,
-                pnl_percent REAL DEFAULT 0.0,
-                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'closed')),
-                notes TEXT DEFAULT '',
-                tags TEXT DEFAULT '[]',
-                bot_mode TEXT DEFAULT 'alert_only',
-                source TEXT DEFAULT 'manual',
-                source_trade_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
+    backend = _db(db)
+    if id(backend) in _initialized_backends:
+        return
+    backend.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manual_trades (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL CHECK(direction IN ('long', 'short')),
+            entry_price REAL NOT NULL,
+            exit_price REAL,
+            entry_time TEXT NOT NULL,
+            exit_time TEXT,
+            volume REAL,
+            fees REAL DEFAULT 0.0,
+            pnl REAL DEFAULT 0.0,
+            pnl_percent REAL DEFAULT 0.0,
+            status TEXT DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+            notes TEXT DEFAULT '',
+            tags TEXT DEFAULT '[]',
+            bot_mode TEXT DEFAULT 'alert_only',
+            source TEXT DEFAULT 'manual',
+            source_trade_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
-        _ensure_column(cursor, "manual_trades", "volume", "REAL")
-        _ensure_column(cursor, "manual_trades", "fees", "REAL DEFAULT 0.0")
-        _ensure_column(cursor, "manual_trades", "tags", "TEXT DEFAULT '[]'")
-        _ensure_column(cursor, "manual_trades", "bot_mode", "TEXT DEFAULT 'alert_only'")
-        _ensure_column(cursor, "manual_trades", "source", "TEXT DEFAULT 'manual'")
-        _ensure_column(cursor, "manual_trades", "source_trade_id", "TEXT")
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trade_annotations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trade_identity TEXT NOT NULL,
-                source TEXT NOT NULL,
-                source_trade_id TEXT NOT NULL,
-                bot_mode TEXT DEFAULT 'alert_only',
-                notes TEXT DEFAULT '',
-                tags TEXT DEFAULT '[]',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(trade_identity, bot_mode)
-            )
-            """
+        """
+    )
+    _ensure_column(backend, "manual_trades", "volume", "REAL")
+    _ensure_column(backend, "manual_trades", "fees", "REAL DEFAULT 0.0")
+    _ensure_column(backend, "manual_trades", "tags", "TEXT DEFAULT '[]'")
+    _ensure_column(backend, "manual_trades", "bot_mode", "TEXT DEFAULT 'alert_only'")
+    _ensure_column(backend, "manual_trades", "source", "TEXT DEFAULT 'manual'")
+    _ensure_column(backend, "manual_trades", "source_trade_id", "TEXT")
+    backend.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trade_annotations (
+            id SERIAL PRIMARY KEY,
+            trade_identity TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_trade_id TEXT NOT NULL,
+            bot_mode TEXT DEFAULT 'alert_only',
+            notes TEXT DEFAULT '',
+            tags TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(trade_identity, bot_mode)
         )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trade_overrides (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trade_identity TEXT NOT NULL,
-                source TEXT NOT NULL,
-                source_trade_id TEXT NOT NULL,
-                bot_mode TEXT DEFAULT 'alert_only',
-                values_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(trade_identity, bot_mode)
-            )
-            """
+        """
+    )
+    backend.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trade_overrides (
+            id SERIAL PRIMARY KEY,
+            trade_identity TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_trade_id TEXT NOT NULL,
+            bot_mode TEXT DEFAULT 'alert_only',
+            values_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(trade_identity, bot_mode)
         )
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_symbol ON manual_trades(symbol)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_status ON manual_trades(status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_entry_time ON manual_trades(entry_time)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_mode ON manual_trades(bot_mode)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_annotations_identity_mode ON trade_annotations(trade_identity, bot_mode)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_overrides_identity_mode ON trade_overrides(trade_identity, bot_mode)")
-        conn.commit()
-    finally:
-        conn.close()
+        """
+    )
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_symbol ON manual_trades(symbol)")
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_status ON manual_trades(status)")
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_entry_time ON manual_trades(entry_time)")
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_manual_trades_mode ON manual_trades(bot_mode)")
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_annotations_identity_mode ON trade_annotations(trade_identity, bot_mode)")
+    backend.execute("CREATE INDEX IF NOT EXISTS idx_overrides_identity_mode ON trade_overrides(trade_identity, bot_mode)")
+    _initialized_backends.add(id(backend))
 
 
-def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, definition: str) -> None:
-    """Add a column to an existing SQLite table when it is missing."""
-    cursor.execute(f"PRAGMA table_info({table})")
-    columns = {row["name"] for row in cursor.fetchall()}
-    if column not in columns:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+def _ensure_column(backend: DBBackend, table: str, column: str, definition: str) -> None:
+    """Add a column to an existing table when it is missing (Postgres)."""
+    backend.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
 
 
 def _calculate_pnl(direction: str, entry_price: float, exit_price: float | None) -> tuple[float, float, str]:
@@ -227,7 +221,7 @@ def create_trade(
     bot_mode: str = ALERT_ONLY,
     volume: Optional[float] = None,
     fees: float = 0.0,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
     """Create a new manually entered trade for alert_only mode.
 
@@ -243,7 +237,7 @@ def create_trade(
         bot_mode: Current bot mode. Only alert_only may create manual trades.
         volume: Optional trade size.
         fees: Optional fee value.
-        db_path: Optional SQLite path.
+        db: Optional Postgres backend override (defaults to the shared backend).
 
     Returns:
         Created unified historical trade record.
@@ -259,46 +253,42 @@ def create_trade(
     if not symbol or direction not in {"long", "short"}:
         raise ManualTradeError("symbol and direction (long/short) are required")
 
-    init_schema(db_path)
+    backend = _db(db)
+    init_schema(backend)
     pnl, pnl_percent, status = _calculate_pnl(direction, float(entry_price), exit_price)
     now = _now_iso()
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO manual_trades
-            (symbol, direction, entry_price, exit_price, entry_time, exit_time,
-             volume, fees, pnl, pnl_percent, status, notes, tags, bot_mode,
-             source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)
-            """,
-            (
-                symbol.strip().upper(),
-                direction,
-                float(entry_price),
-                exit_price,
-                entry_time,
-                exit_time,
-                volume,
-                fees,
-                pnl,
-                pnl_percent,
-                status,
-                notes or "",
-                _json_dumps(_normalize_tags(tags)),
-                mode,
-                now,
-                now,
-            ),
-        )
-        trade_id = cursor.lastrowid
-        cursor.execute("UPDATE manual_trades SET source_trade_id = ? WHERE id = ?", (str(trade_id), trade_id))
-        conn.commit()
-        record = _get_manual_trade_by_id(trade_id, db_path)
-        return _manual_row_to_unified(record, mode)
-    finally:
-        conn.close()
+    row = backend.fetchone(
+        """
+        INSERT INTO manual_trades
+        (symbol, direction, entry_price, exit_price, entry_time, exit_time,
+         volume, fees, pnl, pnl_percent, status, notes, tags, bot_mode,
+         source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)
+        RETURNING id
+        """,
+        (
+            symbol.strip().upper(),
+            direction,
+            float(entry_price),
+            exit_price,
+            entry_time,
+            exit_time,
+            volume,
+            fees,
+            pnl,
+            pnl_percent,
+            status,
+            notes or "",
+            _json_dumps(_normalize_tags(tags)),
+            mode,
+            now,
+            now,
+        ),
+    )
+    trade_id = row["id"]
+    backend.execute("UPDATE manual_trades SET source_trade_id = ? WHERE id = ?", (str(trade_id), trade_id))
+    record = _get_manual_trade_by_id(trade_id, backend)
+    return _manual_row_to_unified(record, mode)
 
 
 def _normalize_tags(tags: Any) -> list[str]:
@@ -315,22 +305,17 @@ def _normalize_tags(tags: Any) -> list[str]:
     return normalized
 
 
-def _get_manual_trade_by_id(trade_id: int | str, db_path: Path | str | None = None) -> dict[str, Any]:
+def _get_manual_trade_by_id(trade_id: int | str, db: Optional[DBBackend] = None) -> dict[str, Any]:
     """Fetch a manual trade row by numeric id."""
-    init_schema(db_path)
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM manual_trades WHERE id = ?", (int(trade_id),))
-        row = cursor.fetchone()
-        return dict(row) if row else {}
-    finally:
-        conn.close()
+    backend = _db(db)
+    init_schema(backend)
+    row = backend.fetchone("SELECT * FROM manual_trades WHERE id = ?", (int(trade_id),))
+    return dict(row) if row else {}
 
 
-def get_trade_by_id(trade_id: int, db_path: Path | str | None = None) -> dict[str, Any]:
+def get_trade_by_id(trade_id: int, db: Optional[DBBackend] = None) -> dict[str, Any]:
     """Get a single manual trade by id for legacy callers."""
-    row = _get_manual_trade_by_id(trade_id, db_path)
+    row = _get_manual_trade_by_id(trade_id, db)
     if not row:
         return {}
     return _legacy_manual_record(row)
@@ -470,7 +455,7 @@ def get_unified_trade_history(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 100,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> list[dict[str, Any]]:
     """Return de-duplicated current-mode trade history.
 
@@ -483,22 +468,22 @@ def get_unified_trade_history(
         start_date: Optional lower date bound based on entry/open time.
         end_date: Optional upper date bound based on entry/open time.
         limit: Maximum records.
-        db_path: Optional SQLite path.
+        db: Optional Postgres backend override (defaults to the shared backend).
 
     Returns:
         Unified trade records sorted by close/entry time descending.
     """
-    init_schema(db_path)
+    init_schema(db)
     mode = _normal_mode(bot_mode)
     records: dict[str, dict[str, Any]] = {}
     for source_trade in source_trades or []:
         record = _source_trade_to_unified(source_trade, mode)
         records[record["id"]] = record
-    for row in _get_manual_rows(mode, db_path):
+    for row in _get_manual_rows(mode, db):
         record = _manual_row_to_unified(row, mode)
         records[record["id"]] = record
-    annotations = _get_annotations(mode, db_path)
-    overrides = _get_overrides(mode, db_path)
+    annotations = _get_annotations(mode, db)
+    overrides = _get_overrides(mode, db)
     merged = [_apply_local_layers(record, annotations, overrides, mode) for record in records.values()]
     filtered = [
         record for record in merged
@@ -508,46 +493,34 @@ def get_unified_trade_history(
     return filtered[: max(0, int(limit))]
 
 
-def _get_manual_rows(bot_mode: str, db_path: Path | str | None) -> list[dict[str, Any]]:
+def _get_manual_rows(bot_mode: str, db: Optional[DBBackend]) -> list[dict[str, Any]]:
     """Fetch manual rows that belong to the requested mode."""
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        if bot_mode == ALERT_ONLY:
-            cursor.execute("SELECT * FROM manual_trades WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
-        else:
-            cursor.execute("SELECT * FROM manual_trades WHERE bot_mode = ?", (bot_mode,))
-        return [dict(row) for row in cursor.fetchall()]
-    finally:
-        conn.close()
+    backend = _db(db)
+    if bot_mode == ALERT_ONLY:
+        rows = backend.fetchall("SELECT * FROM manual_trades WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
+    else:
+        rows = backend.fetchall("SELECT * FROM manual_trades WHERE bot_mode = ?", (bot_mode,))
+    return [dict(row) for row in rows]
 
 
-def _get_annotations(bot_mode: str, db_path: Path | str | None) -> dict[str, dict[str, Any]]:
+def _get_annotations(bot_mode: str, db: Optional[DBBackend]) -> dict[str, dict[str, Any]]:
     """Fetch mode-scoped annotations keyed by canonical trade identity."""
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        if bot_mode == ALERT_ONLY:
-            cursor.execute("SELECT * FROM trade_annotations WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
-        else:
-            cursor.execute("SELECT * FROM trade_annotations WHERE bot_mode = ?", (bot_mode,))
-        return {row["trade_identity"]: dict(row) for row in cursor.fetchall()}
-    finally:
-        conn.close()
+    backend = _db(db)
+    if bot_mode == ALERT_ONLY:
+        rows = backend.fetchall("SELECT * FROM trade_annotations WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
+    else:
+        rows = backend.fetchall("SELECT * FROM trade_annotations WHERE bot_mode = ?", (bot_mode,))
+    return {row["trade_identity"]: dict(row) for row in rows}
 
 
-def _get_overrides(bot_mode: str, db_path: Path | str | None) -> dict[str, dict[str, Any]]:
+def _get_overrides(bot_mode: str, db: Optional[DBBackend]) -> dict[str, dict[str, Any]]:
     """Fetch mode-scoped overrides keyed by canonical trade identity."""
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        if bot_mode == ALERT_ONLY:
-            cursor.execute("SELECT * FROM trade_overrides WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
-        else:
-            cursor.execute("SELECT * FROM trade_overrides WHERE bot_mode = ?", (bot_mode,))
-        return {row["trade_identity"]: dict(row) for row in cursor.fetchall()}
-    finally:
-        conn.close()
+    backend = _db(db)
+    if bot_mode == ALERT_ONLY:
+        rows = backend.fetchall("SELECT * FROM trade_overrides WHERE bot_mode = ? OR bot_mode IS NULL OR bot_mode = ''", (ALERT_ONLY,))
+    else:
+        rows = backend.fetchall("SELECT * FROM trade_overrides WHERE bot_mode = ?", (bot_mode,))
+    return {row["trade_identity"]: dict(row) for row in rows}
 
 
 def _apply_local_layers(
@@ -631,7 +604,7 @@ def get_all_trades(
     bot_mode: str = ALERT_ONLY,
     source_trades: Optional[Iterable[Any]] = None,
     tag: Optional[str] = None,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> list[dict[str, Any]]:
     """Get unified trade history for legacy manual-trade list callers."""
     return get_unified_trade_history(
@@ -643,7 +616,7 @@ def get_all_trades(
         start_date=start_date,
         end_date=end_date,
         limit=limit,
-        db_path=db_path,
+        db=db,
     )
 
 
@@ -656,7 +629,7 @@ def get_dashboard_trade_history(
     tag: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> list[dict[str, Any]]:
     """Return unified history records in the dashboard Trade History shape."""
     records = get_unified_trade_history(
@@ -667,7 +640,7 @@ def get_dashboard_trade_history(
         start_date=start_date,
         end_date=end_date,
         limit=count,
-        db_path=db_path,
+        db=db,
     )
     return [_dashboard_record(record) for record in records]
 
@@ -708,7 +681,7 @@ def update_trade(
     notes: Optional[str] = None,
     tags: Optional[list[str]] = None,
     bot_mode: str = ALERT_ONLY,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
     """Update a manual trade by numeric id for legacy callers."""
     payload = {
@@ -723,7 +696,7 @@ def update_trade(
             "tags": tags,
         }.items() if value is not None
     }
-    return update_trade_record(_manual_identity(trade_id), payload, bot_mode=bot_mode, db_path=db_path)
+    return update_trade_record(_manual_identity(trade_id), payload, bot_mode=bot_mode, db=db)
 
 
 def update_trade_record(
@@ -732,7 +705,7 @@ def update_trade_record(
     *,
     bot_mode: str,
     source_trades: Optional[Iterable[Any]] = None,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
     """Update a unified trade according to current-mode permissions.
 
@@ -741,7 +714,7 @@ def update_trade_record(
         updates: Fields requested by the client.
         bot_mode: Current bot mode.
         source_trades: Source trades used to resolve non-manual identities.
-        db_path: Optional SQLite path.
+        db: Optional Postgres backend override (defaults to the shared backend).
 
     Returns:
         Updated unified trade record.
@@ -750,9 +723,9 @@ def update_trade_record(
         TradeNotFoundError: If the identity is not in current-mode history.
         TradePermissionError: If the update attempts a disallowed mutation.
     """
-    init_schema(db_path)
+    init_schema(db)
     mode = _normal_mode(bot_mode)
-    records = {record["id"]: record for record in get_unified_trade_history(bot_mode=mode, source_trades=source_trades, limit=10_000, db_path=db_path)}
+    records = {record["id"]: record for record in get_unified_trade_history(bot_mode=mode, source_trades=source_trades, limit=10_000, db=db)}
     if identity not in records:
         raise TradeNotFoundError("Trade not found")
     record = records[identity]
@@ -764,12 +737,12 @@ def update_trade_record(
         raise TradePermissionError("Only notes and tags are editable outside alert_only mode")
 
     if record.get("is_manual") and mode == ALERT_ONLY:
-        _update_manual_record(identity, normalized_updates, db_path)
+        _update_manual_record(identity, normalized_updates, db)
     elif protected_updates:
-        _upsert_override(record, protected_updates, mode, db_path)
+        _upsert_override(record, protected_updates, mode, db)
     if annotation_updates or (not protected_updates and mode != ALERT_ONLY):
-        _upsert_annotation(record, annotation_updates, mode, db_path)
-    return _find_updated_record(identity, bot_mode=mode, source_trades=source_trades, db_path=db_path)
+        _upsert_annotation(record, annotation_updates, mode, db)
+    return _find_updated_record(identity, bot_mode=mode, source_trades=source_trades, db=db)
 
 
 def _normalize_update_payload(updates: dict[str, Any]) -> dict[str, Any]:
@@ -808,10 +781,10 @@ def _normalize_update_payload(updates: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _update_manual_record(identity: str, updates: dict[str, Any], db_path: Path | str | None) -> None:
+def _update_manual_record(identity: str, updates: dict[str, Any], db: Optional[DBBackend]) -> None:
     """Apply full-field updates to a manual trade row."""
     trade_id = identity.split(":", 1)[1]
-    current = _get_manual_trade_by_id(trade_id, db_path)
+    current = _get_manual_trade_by_id(trade_id, db)
     if not current:
         raise TradeNotFoundError("Trade not found")
     effective = dict(current)
@@ -843,91 +816,74 @@ def _update_manual_record(identity: str, updates: dict[str, Any], db_path: Path 
         set_values["tags"] = _json_dumps(_normalize_tags(set_values["tags"]))
     if "symbol" in set_values:
         set_values["symbol"] = str(set_values["symbol"]).upper()
-    _execute_update("manual_trades", set_values, "id = ?", [trade_id], db_path)
+    _execute_update("manual_trades", set_values, "id = ?", [int(trade_id)], db)
 
 
-def _execute_update(table: str, values: dict[str, Any], where_sql: str, where_params: list[Any], db_path: Path | str | None) -> None:
-    """Execute a simple SQLite UPDATE with named values."""
+def _execute_update(table: str, values: dict[str, Any], where_sql: str, where_params: list[Any], db: Optional[DBBackend]) -> None:
+    """Execute a simple UPDATE with named values."""
     if not values:
         return
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        assignments = ", ".join(f"{key} = ?" for key in values)
-        cursor.execute(f"UPDATE {table} SET {assignments} WHERE {where_sql}", list(values.values()) + where_params)
-        conn.commit()
-    finally:
-        conn.close()
+    backend = _db(db)
+    assignments = ", ".join(f"{key} = ?" for key in values)
+    backend.execute(f"UPDATE {table} SET {assignments} WHERE {where_sql}", list(values.values()) + where_params)
 
 
-def _upsert_annotation(record: dict[str, Any], updates: dict[str, Any], bot_mode: str, db_path: Path | str | None) -> None:
+def _upsert_annotation(record: dict[str, Any], updates: dict[str, Any], bot_mode: str, db: Optional[DBBackend]) -> None:
     """Insert or update notes/tags for a trade identity and mode."""
     now = _now_iso()
-    existing = _get_annotations(bot_mode, db_path).get(record["id"], {})
+    existing = _get_annotations(bot_mode, db).get(record["id"], {})
     notes = updates.get("notes", existing.get("notes", record.get("notes", "")))
     tags = _normalize_tags(updates.get("tags", existing.get("tags", record.get("tags", []))))
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO trade_annotations
-            (trade_identity, source, source_trade_id, bot_mode, notes, tags, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(trade_identity, bot_mode) DO UPDATE SET
-                notes = excluded.notes,
-                tags = excluded.tags,
-                updated_at = excluded.updated_at
-            """,
-            (
-                record["id"],
-                record["source"],
-                str(record["source_trade_id"]),
-                bot_mode,
-                notes or "",
-                _json_dumps(tags),
-                existing.get("created_at") or now,
-                now,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _db(db).execute(
+        """
+        INSERT INTO trade_annotations
+        (trade_identity, source, source_trade_id, bot_mode, notes, tags, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(trade_identity, bot_mode) DO UPDATE SET
+            notes = excluded.notes,
+            tags = excluded.tags,
+            updated_at = excluded.updated_at
+        """,
+        (
+            record["id"],
+            record["source"],
+            str(record["source_trade_id"]),
+            bot_mode,
+            notes or "",
+            _json_dumps(tags),
+            existing.get("created_at") or now,
+            now,
+        ),
+    )
 
 
-def _upsert_override(record: dict[str, Any], updates: dict[str, Any], bot_mode: str, db_path: Path | str | None) -> None:
+def _upsert_override(record: dict[str, Any], updates: dict[str, Any], bot_mode: str, db: Optional[DBBackend]) -> None:
     """Insert or update local override values for a non-manual source trade."""
     if bot_mode != ALERT_ONLY:
         raise TradePermissionError("Full-field overrides are allowed only in alert_only mode")
     now = _now_iso()
-    existing = _get_overrides(bot_mode, db_path).get(record["id"], {})
+    existing = _get_overrides(bot_mode, db).get(record["id"], {})
     values = _json_loads(existing.get("values_json"), {})
     values.update({key: value for key, value in updates.items() if key in PROTECTED_FIELDS})
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO trade_overrides
-            (trade_identity, source, source_trade_id, bot_mode, values_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(trade_identity, bot_mode) DO UPDATE SET
-                values_json = excluded.values_json,
-                updated_at = excluded.updated_at
-            """,
-            (
-                record["id"],
-                record["source"],
-                str(record["source_trade_id"]),
-                bot_mode,
-                _json_dumps(values),
-                existing.get("created_at") or now,
-                now,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _db(db).execute(
+        """
+        INSERT INTO trade_overrides
+        (trade_identity, source, source_trade_id, bot_mode, values_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(trade_identity, bot_mode) DO UPDATE SET
+            values_json = excluded.values_json,
+            updated_at = excluded.updated_at
+        """,
+        (
+            record["id"],
+            record["source"],
+            str(record["source_trade_id"]),
+            bot_mode,
+            _json_dumps(values),
+            existing.get("created_at") or now,
+            now,
+        ),
+    )
 
 
 def _find_updated_record(
@@ -935,59 +891,57 @@ def _find_updated_record(
     *,
     bot_mode: str,
     source_trades: Optional[Iterable[Any]],
-    db_path: Path | str | None,
+    db: Optional[DBBackend],
 ) -> dict[str, Any]:
     """Find a trade after mutation in the unified current-mode list."""
-    for record in get_unified_trade_history(bot_mode=bot_mode, source_trades=source_trades, limit=10_000, db_path=db_path):
+    for record in get_unified_trade_history(bot_mode=bot_mode, source_trades=source_trades, limit=10_000, db=db):
         if record["id"] == identity:
             return record
     raise TradeNotFoundError("Trade not found after update")
 
 
-def delete_trade(trade_id: int, bot_mode: str = ALERT_ONLY, db_path: Path | str | None = None) -> bool:
+def delete_trade(trade_id: int, bot_mode: str = ALERT_ONLY, db: Optional[DBBackend] = None) -> bool:
     """Delete a manual trade by numeric id when alert_only permissions allow it."""
-    return delete_trade_record(_manual_identity(trade_id), bot_mode=bot_mode, db_path=db_path)
+    return delete_trade_record(_manual_identity(trade_id), bot_mode=bot_mode, db=db)
 
 
 def delete_trade_record(
     identity: str,
     *,
     bot_mode: str,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> bool:
     """Delete a manually created trade from alert_only mode.
 
     Raises:
         TradePermissionError: If mode or origin does not allow deletion.
     """
-    init_schema(db_path)
+    init_schema(db)
     mode = _normal_mode(bot_mode)
     if mode != ALERT_ONLY:
         raise TradePermissionError("Trade deletion is allowed only in alert_only mode")
     if not identity.startswith("manual:"):
         raise TradePermissionError("Only manually created trades can be deleted")
     trade_id = identity.split(":", 1)[1]
-    conn = _get_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM manual_trades WHERE id = ? AND (bot_mode = ? OR bot_mode IS NULL OR bot_mode = '')", (trade_id, ALERT_ONLY))
-        deleted = cursor.rowcount > 0
-        if deleted:
-            cursor.execute("DELETE FROM trade_annotations WHERE trade_identity = ?", (identity,))
-            cursor.execute("DELETE FROM trade_overrides WHERE trade_identity = ?", (identity,))
-        conn.commit()
-        return deleted
-    finally:
-        conn.close()
+    backend = _db(db)
+    cursor = backend.execute(
+        "DELETE FROM manual_trades WHERE id = ? AND (bot_mode = ? OR bot_mode IS NULL OR bot_mode = '')",
+        (int(trade_id), ALERT_ONLY),
+    )
+    deleted = cursor.rowcount > 0
+    if deleted:
+        backend.execute("DELETE FROM trade_annotations WHERE trade_identity = ?", (identity,))
+        backend.execute("DELETE FROM trade_overrides WHERE trade_identity = ?", (identity,))
+    return deleted
 
 
 def get_summary_stats(
     bot_mode: str = ALERT_ONLY,
     source_trades: Optional[Iterable[Any]] = None,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
     """Get summary statistics for the current mode's unified trade history."""
-    records = get_unified_trade_history(bot_mode=bot_mode, source_trades=source_trades, limit=10_000, db_path=db_path)
+    records = get_unified_trade_history(bot_mode=bot_mode, source_trades=source_trades, limit=10_000, db=db)
     closed = [record for record in records if record.get("status") == "closed"]
     wins = [record for record in closed if float(record.get("pnl") or 0) >= 0]
     losses = [record for record in closed if float(record.get("pnl") or 0) < 0]
@@ -1017,7 +971,7 @@ def export_agent_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 1000,
-    db_path: Path | str | None = None,
+    db: Optional[DBBackend] = None,
 ) -> dict[str, Any]:
     """Build a mode-isolated Agent Export package for LLM workflows."""
     mode = _normal_mode(bot_mode)
@@ -1029,7 +983,7 @@ def export_agent_data(
         start_date=start_date,
         end_date=end_date,
         limit=limit,
-        db_path=db_path,
+        db=db,
     )
     return {
         "schema_version": AGENT_EXPORT_SCHEMA_VERSION,
@@ -1110,5 +1064,8 @@ def _agent_record(record: dict[str, Any]) -> dict[str, Any]:
 
 try:
     init_schema()
-except sqlite3.Error as exc:
+except Exception as exc:
+    # Importing this module must not require a reachable Postgres (e.g. during
+    # tests or before the DB is up). Schema creation is retried lazily on the
+    # first operation, so deferring here is safe.
     log.warning("Manual trade database initialization deferred: %s", exc)

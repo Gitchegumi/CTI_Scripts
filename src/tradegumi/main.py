@@ -444,8 +444,21 @@ def check_and_execute(
     })
     tag = f"{signal_obj.direction[0]}(conf={signal_obj.confidence:.2f})"
 
-    # Execute only in demo/live
-    if mode in ("demo", "live"):
+    # Execute only in demo/live, and only through a client that matches the mode
+    # (demo -> Oanda, live -> MatchTrader). A runtime mode change must never place
+    # orders through a mismatched client — e.g. switching to live before the
+    # MatchTrader client exists must not place Oanda orders (Risk-First).
+    can_execute = (
+        (mode == "demo" and isinstance(client, OandaClient))
+        or (mode == "live" and isinstance(client, MatchTraderClient))
+    )
+    if mode in ("demo", "live") and not can_execute:
+        log.error(
+            "%s: execution requested in %s mode but client %s is incompatible — "
+            "skipping order placement (no execution)",
+            symbol, mode, type(client).__name__,
+        )
+    if can_execute:
         order = OrderRequest(
             symbol=symbol,
             side=signal_obj.direction,
@@ -714,7 +727,9 @@ def run(mode: str):
             loop_state = []
             for symbol in scan_symbols:
                 started = time.perf_counter()
-                tag, trend, lr_1h, lr_15, lr_5 = check_and_execute(engine, client, symbol, mode, trailing_manager)
+                # Use the live config mode (not the startup arg) so a runtime
+                # mode change via the command channel actually gates execution.
+                tag, trend, lr_1h, lr_15, lr_5 = check_and_execute(engine, client, symbol, config.TRADEGUMI_MODE, trailing_manager)
                 elapsed = time.perf_counter() - started
                 perf_stats.symbols_signal_checked += 1
                 perf_stats.note_slowest_symbol(symbol, elapsed)
@@ -793,7 +808,7 @@ def run(mode: str):
         # ── Write loop state (every 1s) ──────────────────────────────────────
         try:
             started = time.perf_counter()
-            payload = _loop_state_payload(mode, loop_state)
+            payload = _loop_state_payload(config.TRADEGUMI_MODE, loop_state)
             market_health = market_data_provider.snapshot_health()
             set_runtime_state({
                 **get_runtime_state(),
