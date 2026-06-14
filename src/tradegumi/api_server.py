@@ -24,13 +24,48 @@ _runtime_state: dict = {}
 _runtime_lock = threading.Lock()
 
 
+def _json_safe_state(state: dict) -> dict:
+    """Return the JSON-serializable subset of the runtime state.
+
+    Live objects such as the execution client are dropped — they cannot be
+    serialized and must never round-trip through Redis (a stringified client
+    would break callers that expect the real object).
+    """
+    safe: dict = {}
+    for key, value in state.items():
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        safe[key] = value
+    return safe
+
+
 def set_runtime_state(state: dict) -> None:
-    """Called from main.py to share the current runtime state."""
+    """Called from main.py to share the current runtime state.
+
+    The authoritative copy is the in-process ``_runtime_state`` (it retains live
+    objects like the execution client).  Redis receives a JSON-safe snapshot of
+    the *full merged* state for cross-process observability of the dashboard
+    view, never just the partial update.
+    """
     with _runtime_lock:
         _runtime_state.update(state)
+        snapshot = _json_safe_state(_runtime_state)
+    try:
+        from tradegumi.persistence.redis import get_cache
+        get_cache().set("loop_state", snapshot, ttl=10)
+    except Exception as exc:
+        log.debug("Redis runtime state cache update failed: %s", exc)
 
 
 def get_runtime_state() -> dict:
+    """Return the authoritative in-process runtime state.
+
+    This intentionally does NOT read back from Redis: the Redis snapshot is a
+    JSON-safe published view and lacks live objects (e.g. ``client``), so it
+    must not override the in-process state that callers rely on.
+    """
     with _runtime_lock:
         return dict(_runtime_state)
 
@@ -193,6 +228,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/strategy-metrics/summary"):
             try:
                 from tradegumi.strategy_metrics import get_summary
+                from tradegumi.persistence import get_db
+                db = get_db()
                 start = self._get_query_param("start")
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
@@ -211,6 +248,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     signal_type=signal_type or None,
                     decision=decision or None,
                     first_blocker=first_blocker or None,
+                    db=db,
                 ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
@@ -221,6 +259,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/strategy-metrics/opportunities"):
             try:
                 from tradegumi.strategy_metrics import get_opportunities
+                from tradegumi.persistence import get_db
+                db = get_db()
                 start = self._get_query_param("start")
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
@@ -248,6 +288,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     near_miss=near_miss,
                     limit=limit,
                     offset=offset,
+                    db=db,
                 ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
@@ -258,6 +299,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/strategy-metrics/compare"):
             try:
                 from tradegumi.strategy_metrics import compare_periods
+                from tradegumi.persistence import get_db
+                db = get_db()
                 base_start = self._get_query_param("base_start")
                 base_end = self._get_query_param("base_end")
                 compare_start = self._get_query_param("compare_start")
@@ -266,7 +309,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 if not all([base_start, base_end, compare_start, compare_end]):
                     self._send_json({"error": "base_start, base_end, compare_start, and compare_end are required"}, 400)
                     return
-                self._send_json(compare_periods(base_start, base_end, compare_start, compare_end, symbol=symbol or None))
+                self._send_json(compare_periods(base_start, base_end, compare_start, compare_end, symbol=symbol or None, db=db))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
             except Exception as e:
@@ -276,6 +319,8 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/strategy-metrics/export"):
             try:
                 from tradegumi.strategy_metrics import export_summary
+                from tradegumi.persistence import get_db
+                db = get_db()
                 start = self._get_query_param("start")
                 end = self._get_query_param("end")
                 symbol = self._get_query_param("symbol")
@@ -296,6 +341,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     decision=decision or None,
                     first_blocker=first_blocker or None,
                     include_opportunities=include,
+                    db=db,
                 ))
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)

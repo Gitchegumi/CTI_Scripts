@@ -77,6 +77,12 @@ TRADEGUMI_STREAM_HEARTBEAT_TIMEOUT_SECONDS = float(os.getenv("TRADEGUMI_STREAM_H
 TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS = float(os.getenv("TRADEGUMI_STREAM_BACKOFF_MAX_SECONDS", "60"))
 TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS = int(os.getenv("TRADEGUMI_STREAM_MAX_RECONNECT_ATTEMPTS", "5"))
 
+# ── Database / Cache ────────────────────────────────────────────────────────
+# Postgres is required (durable source of truth); there is no SQLite fallback.
+TRADEGUMI_DATABASE_URL = os.getenv("TRADEGUMI_DATABASE_URL", "")
+TRADEGUMI_REDIS_URL = os.getenv("TRADEGUMI_REDIS_URL", "")
+TRADEGUMI_POSTGRES_PASSWORD = os.getenv("TRADEGUMI_POSTGRES_PASSWORD", "")
+
 # ── Webhook Callback (DockeGumi / external orchestrator) ────────────────────
 # TradeGumi POSTs structured signal data here on every signal event.
 # Set to DockeGumi's endpoint (e.g. http://10.0.0.210:8198/api/tradegumi/webhook)
@@ -323,5 +329,10 @@ def validate_config():
         errors.append(f"Invalid TRADEGUMI_MODE={TRADEGUMI_MODE}")
     if TRADEGUMI_MARKET_DATA_MODE not in ("streaming", "polling"):
         errors.append(f"Invalid TRADEGUMI_MARKET_DATA_MODE={TRADEGUMI_MARKET_DATA_MODE}")
+    if not TRADEGUMI_DATABASE_URL:
+        errors.append(
+            "TRADEGUMI_DATABASE_URL is required — Postgres is the durable store "
+            "and there is no SQLite fallback"
+        )
     if errors:
         raise ValueError("Config errors: " + "; ".join(errors))

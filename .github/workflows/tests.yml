@@ -1,0 +1,55 @@
+name: Python Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tradegumi
+          POSTGRES_PASSWORD: tradegumi
+          POSTGRES_DB: tradegumi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tradegumi -d tradegumi_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Postgres-backed tests run against the service above instead of skipping.
+      TRADEGUMI_TEST_DATABASE_URL: postgresql://tradegumi:tradegumi@localhost:5432/tradegumi_test
+      # Avoid slow Numba JIT during signal-engine imports in CI.
+      NUMBA_DISABLE_JIT: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        working-directory: src
+        run: poetry install --no-interaction --no-ansi --no-root --without back_testing
+
+      - name: Run tests
+        working-directory: src
+        run: poetry run pytest tradegumi/tests/ -q

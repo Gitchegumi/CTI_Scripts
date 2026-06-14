@@ -16,7 +16,7 @@ Real-time signal engine for the City Traders Imperium (CTI) prop firm strategy, 
 
 TradeGumi records diagnostics for every evaluated opportunity so no-signal periods can be reviewed without changing signal behavior. The dashboard route `/strategy-metrics` shows date-range summaries, near-misses, criterion pass/fail rates, blocker rankings, period comparison, and JSON export.
 
-Diagnostic history is stored locally in `src/tradegumi/data/strategy_metrics.db`, with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
+Diagnostic history is stored in Postgres (the durable source of truth), with a compact latest summary written to `src/tradegumi/data/strategy_metrics.json` for dashboard observability. By default, diagnostic retention is 90 days and can be adjusted with `STRATEGY_METRICS_RETENTION_DAYS`.
 
 Signal journal exports separate emitted signal outcomes from tradable setup outcomes. A signal only counts as a strategy-stat trade opportunity when `usable_for_strategy_stats` is true; duplicates, missed entries, late signals, stale signals, and manual invalidations are excluded. Tune setup grouping and entry validity with `SIGNAL_SETUP_GROUP_WINDOW_MINUTES`, `SIGNAL_ENTRY_TOLERANCE_ATR`, and `SIGNAL_STALE_BARS`.
 
@@ -323,30 +323,99 @@ CTI_Scripts/
 └── src/tradegumi/data/           # Runtime JSON data (loop_state, watchlist, signals)
 ```
 
-## Docker Deployment (Planned)
+## Docker Deployment
 
-TradeGumi is designed to run containerized on TrueNAS or any Docker host. The bot + dashboard + API server will be a single `docker-compose` stack. Webhook callbacks enable DockeGumi orchestration even when running on a separate machine.
+TradeGumi runs as a single `docker-compose` stack with Postgres (durable analytics) + Redis (hot runtime cache).
 
 ```yaml
-# Planned docker-compose.yml
 services:
-  tradegumi-bot:
-    build: .
+  tradegumi:
+    image: ghcr.io/gitchegumi/cti-scripts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8199:8199" # API server
-    env_file: .env
+      - "8199:8199"  # API server
+      - "3000:3000"  # Dashboard
+    env_file:
+      - .env
     volumes:
-      - tradegumi-data:/app/data
-
-  tradegumi-dashboard:
-    build: ./dashboard
-    ports:
-      - "3000:3000" # Dashboard
-    environment:
-      - NEXT_PUBLIC_API_URL=http://tradegumi-bot:8199
+      - tradegumi-data:/app/src/tradegumi/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8199/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
-      - tradegumi-bot
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradegumi
+      POSTGRES_PASSWORD: ${TRADEGUMI_POSTGRES_PASSWORD:-tradegumi}
+      POSTGRES_DB: tradegumi
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradegumi -d tradegumi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  tradegumi-data:
+  postgres-data:
+  redis-data:
 ```
+
+### Required `.env` variables
+
+```ini
+TRADEGUMI_DATABASE_URL=postgresql://tradegumi:your_password@postgres:5432/tradegumi
+TRADEGUMI_REDIS_URL=redis://redis:6379/0
+```
+
+Postgres is **required** — it is the durable source of truth for strategy metrics (evaluated opportunities and criterion results) **and the signal journal** (`journal_entries`). There is no SQLite fallback: if `TRADEGUMI_DATABASE_URL` is unset or Postgres is unreachable, the bot fails fast at startup rather than silently writing elsewhere. The application reads and writes the journal through Postgres; the append-only `signal_journal.jsonl` file is legacy — kept as a best-effort export/backup snapshot and importable into a fresh database via `journal.backfill_from_jsonl`, but never read for queries. Redis caches hot runtime state (latest loop state / dashboard view) and short-lived strategy-summary responses, and is safe to lose.
+
+### Dashboard auth behind Authentik
+
+By default the dashboard is gated by the `JOURNAL_TOKEN` cookie. When you deploy behind an [Authentik](https://goauthentik.io/) outpost, the proxy injects forwarded identity headers (`x-authentik-*`) after it authenticates the request. To trust those headers instead of the cookie, set:
+
+```ini
+AUTHENTIK_TRUST_PROXY_HEADERS=true
+```
+
+**Only enable this when both conditions hold:**
+
+1. The dashboard is unreachable except through the Authentik proxy (e.g. it is not exposed directly on `:3000`).
+2. The proxy is configured to **strip any client-supplied `x-authentik-*` headers** before forwarding.
+
+Without those guarantees a caller could forge `x-authentik-username` and bypass authentication entirely. When the flag is `false` or unset, the `x-authentik-*` headers are ignored and the `JOURNAL_TOKEN` cookie check is used.
 
 ## Oanda Setup
 
@@ -361,7 +430,7 @@ Oanda API reference: [https://developer.oanda.com/rest-live-v20/introduction/](h
 
 - [ ] MatchTrader REST client implementation
 - [ ] `TRADEGUMI_MODE=live` unlock
-- [ ] Docker Compose deployment for TrueNAS
+- [x] Docker Compose deployment with Postgres + Redis
 - [ ] Tiered risk table (from Risk_Management_Rules.docx) replacing flat 0.25%
 - [ ] Dynamic position sizing (Layer 3 — after positive expectancy validated)
 - [ ] Automated daily performance reporting to Discord

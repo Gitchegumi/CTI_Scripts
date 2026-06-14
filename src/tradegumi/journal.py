@@ -1,8 +1,19 @@
-"""Signal journal — append-only JSONL of graded signals.
+"""Signal journal — graded signals stored in Postgres.
 
-Each line is a self-contained JSON object. The file is never trimmed;
-it is the permanent record an AI agent uses to assess signal quality
-and inform trade discretion over time.
+Source of truth
+---------------
+Postgres ``journal_entries`` is the authoritative store for the signal journal.
+Every application read (``read_journal``, exports, the strategy-metrics journal
+aggregations, and the append/grade/management logic) goes through
+``_read_entries_oldest_first`` → Postgres, and every mutation (append, grade,
+purge) is persisted by ``_write_entries`` as a transactional full replace. The
+full entry dict lives in the ``data`` JSONB column; the relational columns
+(symbol, grade, lifecycle_role, …) are extracted indexes for ad-hoc SQL.
+
+The append-only ``signal_journal.jsonl`` file is **legacy**: it is refreshed as
+a best-effort export/backup snapshot on each write and can be imported into a
+fresh database with ``backfill_from_jsonl``, but the application never reads it
+for queries.
 
 Schema per entry
 ----------------
@@ -47,6 +58,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tradegumi import config
+from tradegumi.persistence import get_db
 
 log = logging.getLogger(__name__)
 
@@ -312,13 +324,111 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _read_entries_oldest_first() -> list[dict[str, Any]]:
-    """Read valid journal entries in storage order while skipping malformed lines."""
-    if not JOURNAL_FILE.exists():
-        return []
+# ── Journal storage (Postgres-authoritative; JSONL is legacy backup/export) ──
 
+_JOURNAL_COLUMNS = (
+    "signal_id", "signal_timestamp", "symbol", "direction", "strategy", "signal_type",
+    "lifecycle_role", "grade", "grade_timestamp", "entry_price", "stop_loss", "take_profit",
+    "lot_size", "atr", "rr", "confidence", "notes", "discord_msg_id", "data", "created_at",
+)
+_JOURNAL_INSERT_SQL = (
+    "INSERT INTO journal_entries (" + ", ".join(_JOURNAL_COLUMNS) + ") VALUES ("
+    + ", ".join("?" for _ in _JOURNAL_COLUMNS) + ")"
+)
+
+
+def _read_entries_oldest_first() -> list[dict[str, Any]]:
+    """Read journal entries (oldest first) from the authoritative Postgres store.
+
+    The full entry dict is stored in the ``data`` JSONB column; relational
+    columns are extracted indexes only. Rows are ordered by insertion id, which
+    preserves append order.
+    """
+    try:
+        rows = get_db().fetchall("SELECT data FROM journal_entries ORDER BY id")
+    except Exception as exc:
+        log.warning("Failed to read journal entries from Postgres: %s", exc)
+        return []
     entries: list[dict[str, Any]] = []
-    for line in JOURNAL_FILE.read_text(encoding="utf-8").splitlines():
+    for row in rows:
+        data = row.get("data")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (TypeError, ValueError):
+                continue
+        if isinstance(data, dict):
+            entries.append(data)
+    return entries
+
+
+def _nullable_ts(value: Any) -> Any:
+    """Coerce empty/blank timestamps to NULL so TIMESTAMPTZ casts don't fail."""
+    return value or None
+
+
+def _journal_row(entry: dict[str, Any], json_adapter) -> tuple:
+    """Build the column tuple for one journal entry (data carries the full dict)."""
+    return (
+        entry.get("signal_id"),
+        _nullable_ts(entry.get("signal_timestamp")),
+        entry.get("symbol"),
+        entry.get("direction"),
+        entry.get("strategy"),
+        entry.get("signal_type"),
+        entry.get("lifecycle_role"),
+        entry.get("grade"),
+        _nullable_ts(entry.get("grade_timestamp")),
+        entry.get("entry_price"),
+        entry.get("stop_loss"),
+        entry.get("take_profit"),
+        entry.get("lot_size"),
+        entry.get("atr"),
+        entry.get("rr"),
+        entry.get("confidence"),
+        entry.get("notes"),
+        entry.get("discord_msg_id"),
+        json_adapter(entry),
+        _nullable_ts(entry.get("created_at") or entry.get("signal_timestamp")),
+    )
+
+
+def _write_entries(entries: list[dict[str, Any]]) -> None:
+    """Replace journal contents in Postgres (authoritative) and refresh the JSONL backup.
+
+    The journal logic mutates the full entry list in memory (a new signal can
+    also update prior entries' prime/management state), so persistence is a
+    transactional full replace, mirroring the previous JSONL rewrite semantics.
+    """
+    from psycopg.types.json import Json  # Postgres-only; imported lazily
+
+    rows = [_journal_row(entry, Json) for entry in entries]
+    db = get_db()
+    with db.transaction():
+        db.execute("DELETE FROM journal_entries")
+        if rows:
+            db.executemany(_JOURNAL_INSERT_SQL, rows)
+    _write_jsonl_backup(entries)
+
+
+def _write_jsonl_backup(entries: list[dict[str, Any]]) -> None:
+    """Best-effort JSONL snapshot for export/audit (not read by the application)."""
+    try:
+        JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
+        body = "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries)
+        tmp.write_text(body, encoding="utf-8")
+        tmp.replace(JOURNAL_FILE)
+    except Exception as exc:
+        log.warning("Failed to write JSONL journal backup: %s", exc)
+
+
+def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
+    """Parse a legacy JSONL journal file into entry dicts (skips malformed lines)."""
+    if not path.exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -332,13 +442,12 @@ def _read_entries_oldest_first() -> list[dict[str, Any]]:
     return entries
 
 
-def _write_entries(entries: list[dict[str, Any]]) -> None:
-    """Atomically replace the journal with the supplied valid entries."""
-    JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
-    body = "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries)
-    tmp.write_text(body, encoding="utf-8")
-    tmp.replace(JOURNAL_FILE)
+def backfill_from_jsonl(path: Optional[Path] = None) -> int:
+    """One-time import of a legacy JSONL journal into Postgres. Returns the count."""
+    entries = _read_jsonl_file(path or JOURNAL_FILE)
+    if entries:
+        _write_entries(entries)
+    return len(entries)
 
 
 def _normalize_filter_grade(grade: Optional[str]) -> Optional[str]:
@@ -1313,98 +1422,68 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
 
 def _apply_grade(lookup_key: str, lookup_field: str, grade: str, notes: str) -> bool:
     """Shared rewrite helper — finds the first entry where entry[lookup_field] == lookup_key,
-    updates grade/grade_timestamp/notes, and atomically replaces the file.
+    updates grade/grade_timestamp/notes, and persists the change to Postgres.
     Must be called with _lock already held.
     """
-    if not JOURNAL_FILE.exists():
-        return False
-
-    lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    entries = _read_entries_oldest_first()
     updated = False
-    new_lines = []
 
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            entry = json.loads(stripped)
-            if not updated and entry.get(lookup_field) == lookup_key:
-                entry["grade"] = grade
-                entry["trade_grade"] = _grade_for_completion(grade)
-                close_reason = PRIME_CLOSE_MANUAL_INVALIDATED if entry["trade_grade"] == "INVALID" else PRIME_CLOSE_MANUAL_GRADE
-                _deactivate_prime(entry, close_reason)
-                if entry["trade_grade"] == "INVALID":
-                    entry["usable_for_strategy_stats"] = False
-                    entry["stats_exclusion_reason"] = "manual_invalidated"
-                    entry["status"] = STATUS_INVALIDATED
-                    entry["outcome"] = OUTCOME_INVALIDATED_BY_SYSTEM
-                elif grade == "EXPIRED":
-                    entry["status"] = STATUS_EXPIRED
-                    entry["outcome"] = OUTCOME_EXPIRED
-                else:
-                    entry["status"] = STATUS_CLOSED
-                    entry["outcome"] = OUTCOME_MANUALLY_CLOSED if grade == "MANUAL_CLOSE" else _default_outcome_for_entry(entry)
-                entry["grade_timestamp"] = _now_iso()
-                entry["outcome_source"] = OUTCOME_SOURCE_MANUAL
-                entry["exit_time"] = entry["grade_timestamp"]
-                if entry.get("exit_price") is not None or grade == "MANUAL_CLOSE":
-                    manual_exit_price = entry.get("exit_price") if entry.get("exit_price") is not None else entry.get("entry_price")
-                    managed_exit = classify_managed_exit(entry, manual_exit_price, entry["outcome"])
-                    entry.update({key: value for key, value in managed_exit.items() if value is not None})
-                    if entry.get("managed_result_category") == MANAGED_RESULT_WIN:
-                        entry["trade_grade"] = "TP_HIT"
-                    elif entry.get("managed_result_category") == MANAGED_RESULT_BREAKEVEN:
-                        entry["trade_grade"] = "BE"
-                    elif entry.get("managed_result_category") == MANAGED_RESULT_LOSS:
-                        entry["trade_grade"] = "SL_HIT"
-                entry["outcome_checked_at"] = entry["grade_timestamp"]
-                entry["manually_overridden"] = True
-                entry["manual_override_reason"] = notes or None
-                entry["notes"] = notes
-                stripped = json.dumps(entry)
-                updated = True
-        except json.JSONDecodeError:
-            pass
-        new_lines.append(stripped)
+    for entry in entries:
+        if not updated and entry.get(lookup_field) == lookup_key:
+            entry["grade"] = grade
+            entry["trade_grade"] = _grade_for_completion(grade)
+            close_reason = PRIME_CLOSE_MANUAL_INVALIDATED if entry["trade_grade"] == "INVALID" else PRIME_CLOSE_MANUAL_GRADE
+            _deactivate_prime(entry, close_reason)
+            if entry["trade_grade"] == "INVALID":
+                entry["usable_for_strategy_stats"] = False
+                entry["stats_exclusion_reason"] = "manual_invalidated"
+                entry["status"] = STATUS_INVALIDATED
+                entry["outcome"] = OUTCOME_INVALIDATED_BY_SYSTEM
+            elif grade == "EXPIRED":
+                entry["status"] = STATUS_EXPIRED
+                entry["outcome"] = OUTCOME_EXPIRED
+            else:
+                entry["status"] = STATUS_CLOSED
+                entry["outcome"] = OUTCOME_MANUALLY_CLOSED if grade == "MANUAL_CLOSE" else _default_outcome_for_entry(entry)
+            entry["grade_timestamp"] = _now_iso()
+            entry["outcome_source"] = OUTCOME_SOURCE_MANUAL
+            entry["exit_time"] = entry["grade_timestamp"]
+            if entry.get("exit_price") is not None or grade == "MANUAL_CLOSE":
+                manual_exit_price = entry.get("exit_price") if entry.get("exit_price") is not None else entry.get("entry_price")
+                managed_exit = classify_managed_exit(entry, manual_exit_price, entry["outcome"])
+                entry.update({key: value for key, value in managed_exit.items() if value is not None})
+                if entry.get("managed_result_category") == MANAGED_RESULT_WIN:
+                    entry["trade_grade"] = "TP_HIT"
+                elif entry.get("managed_result_category") == MANAGED_RESULT_BREAKEVEN:
+                    entry["trade_grade"] = "BE"
+                elif entry.get("managed_result_category") == MANAGED_RESULT_LOSS:
+                    entry["trade_grade"] = "SL_HIT"
+            entry["outcome_checked_at"] = entry["grade_timestamp"]
+            entry["manually_overridden"] = True
+            entry["manual_override_reason"] = notes or None
+            entry["notes"] = notes
+            updated = True
 
     if updated:
-        tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        tmp.replace(JOURNAL_FILE)
+        _write_entries(entries)
 
     return updated
 
 
 def _apply_notes(lookup_key: str, lookup_field: str, notes: str) -> bool:
-    """Update notes only — finds first entry where entry[lookup_field] == lookup_key,
-    updates notes, and atomically replaces the file. Must be called with _lock held.
+    """Update notes only — finds the first entry where entry[lookup_field] == lookup_key,
+    updates notes, and persists the change to Postgres. Must be called with _lock held.
     """
-    if not JOURNAL_FILE.exists():
-        return False
-
-    lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    entries = _read_entries_oldest_first()
     updated = False
-    new_lines = []
 
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            entry = json.loads(stripped)
-            if not updated and entry.get(lookup_field) == lookup_key:
-                entry["notes"] = notes
-                stripped = json.dumps(entry)
-                updated = True
-        except json.JSONDecodeError:
-            pass
-        new_lines.append(stripped)
+    for entry in entries:
+        if not updated and entry.get(lookup_field) == lookup_key:
+            entry["notes"] = notes
+            updated = True
 
     if updated:
-        tmp = JOURNAL_FILE.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        tmp.replace(JOURNAL_FILE)
+        _write_entries(entries)
 
     return updated
 
@@ -1476,6 +1555,8 @@ def purge_journal_entries(grade: Optional[str] = None) -> dict[str, int]:
         entries = _read_entries_oldest_first()
         remaining = [entry for entry in entries if not _entry_matches_grade(entry, grade)]
         removed = len(entries) - len(remaining)
+        # _write_entries does a transactional full replace of the Postgres
+        # journal, so the purged entries are removed from the source of truth.
         _write_entries(remaining)
     return {"removed_count": removed, "remaining_count": len(remaining)}
 

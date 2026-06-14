@@ -19,16 +19,21 @@ from tradegumi.signal_outcomes import (
     evaluate_price_observation,
     reset_pending_index,
 )
+from tradegumi.tests._pg import requires_postgres, get_test_backend
+
+# The signal journal is Postgres-authoritative; these tests need a test DB.
+pytestmark = requires_postgres
 
 
 def write_entries(path, entries):
-    """Write JSONL journal entries for evaluator tests."""
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    """Seed the authoritative Postgres journal for evaluator tests."""
+    journal._write_entries(list(entries))
 
 
 @pytest.fixture
 def journal_file(tmp_path, monkeypatch):
-    """Redirect the Signal Journal to a temporary file."""
+    """Point the journal at the test database and redirect the JSONL backup."""
+    get_test_backend()
     path = tmp_path / "signal_journal.jsonl"
     monkeypatch.setattr(journal, "JOURNAL_FILE", path)
     reset_pending_index()

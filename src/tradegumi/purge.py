@@ -15,11 +15,12 @@ import argparse
 import json
 import logging
 import shutil
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from tradegumi.persistence import get_db
 
 log = logging.getLogger(__name__)
 
@@ -62,33 +63,62 @@ def _backup_sqlite(src: Path, backup_dir: Path) -> Path:
     return _backup_file(src, backup_dir)
 
 
+def _truncate_postgres(tables: str) -> bool:
+    """TRUNCATE the given Postgres tables (CASCADE, reset identities).
+
+    Returns False if Postgres is unavailable so the caller can report the
+    durable store was not cleared.  ``get_db()`` ensures the schema exists, so
+    a missing-table error cannot occur on a configured database.
+    """
+    try:
+        get_db().execute(f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
+        log.info("Truncated Postgres tables: %s", tables)
+        return True
+    except Exception as exc:
+        log.error("Failed to truncate Postgres tables (%s): %s", tables, exc)
+        return False
+
+
 def purge_journal(*, backup_dir: Optional[Path] = None) -> bool:
-    """Remove all entries from the signal journal."""
+    """Clear the signal journal: the JSONL audit trail and its Postgres mirror.
+
+    Journal entries are appended to ``signal_journal.jsonl`` and synced to the
+    Postgres ``journal_entries`` table, so both must be cleared for a real
+    fresh start.  Success reflects whether the durable Postgres mirror was
+    truncated.
+    """
     if backup_dir:
         _backup_file(JOURNAL_FILE, backup_dir)
     if JOURNAL_FILE.exists():
         JOURNAL_FILE.write_text("", encoding="utf-8")
         log.info("Purged %s", JOURNAL_FILE)
-        return True
-    log.info("Journal file did not exist: %s", JOURNAL_FILE)
-    return False
+    else:
+        log.info("Journal file did not exist: %s", JOURNAL_FILE)
+    return _truncate_postgres("journal_entries")
 
 
 def purge_strategy_metrics(*, backup_dir: Optional[Path] = None) -> bool:
-    """Drop and recreate the strategy_metrics SQLite database."""
-    if backup_dir:
-        _backup_sqlite(STRATEGY_METRICS_DB, backup_dir)
-    if STRATEGY_METRICS_DB.exists():
-        STRATEGY_METRICS_DB.unlink()
-        log.info("Deleted %s", STRATEGY_METRICS_DB)
-    # Re-create empty schema on next write — no need to init here.
-    # Remove state snapshot too
+    """Clear strategy metrics from Postgres and reset the dashboard snapshot.
+
+    Strategy metrics live in Postgres (``evaluated_opportunities`` and
+    ``criterion_results``).  The state JSON snapshot is removed, and any leftover
+    legacy SQLite database from a pre-migration install is also cleaned up.
+    Success reflects whether the durable Postgres tables were truncated.
+    """
+    # Remove the dashboard state snapshot.
     if STRATEGY_METRICS_STATE.exists():
         if backup_dir:
             _backup_file(STRATEGY_METRICS_STATE, backup_dir)
         STRATEGY_METRICS_STATE.unlink()
         log.info("Deleted %s", STRATEGY_METRICS_STATE)
-    return True
+    # Clean up any leftover legacy SQLite file from before the Postgres migration.
+    if STRATEGY_METRICS_DB.exists():
+        if backup_dir:
+            _backup_sqlite(STRATEGY_METRICS_DB, backup_dir)
+        STRATEGY_METRICS_DB.unlink()
+        log.info("Deleted legacy SQLite file %s", STRATEGY_METRICS_DB)
+    # criterion_results is removed via ON DELETE CASCADE, but list it explicitly.
+    return _truncate_postgres("criterion_results, evaluated_opportunities")
 
 
 def purge_manual_trades(*, backup_dir: Optional[Path] = None) -> bool:

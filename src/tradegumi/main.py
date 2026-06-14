@@ -42,6 +42,7 @@ from tradegumi.strategy_metrics import (
     record_opportunity,
     write_state_snapshot,
 )
+from tradegumi.persistence import get_db
 from tradegumi.risk import calc_lot_size, can_open_position
 from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
@@ -298,10 +299,13 @@ def check_and_execute(
     """
     def persist(opportunity: EvaluatedOpportunity) -> None:
         try:
-            record_opportunity(opportunity)
+            # Write diagnostics to the configured backend (Postgres primary,
+            # SQLite fallback) so runtime writes match the dashboard read path.
+            db = get_db()
+            record_opportunity(opportunity, db=db)
             end = datetime.now(CT_TZ)
             start = end.replace(hour=0, minute=0, second=0, microsecond=0)
-            write_state_snapshot(get_summary(start.isoformat(), end.isoformat()))
+            write_state_snapshot(get_summary(start.isoformat(), end.isoformat(), db=db))
         except Exception as exc:
             log.warning("%s: failed to persist strategy diagnostic: %s", symbol, exc)
 
@@ -472,6 +476,15 @@ def run(mode: str):
     """Main trading loop."""
     log.info("TradeGumi starting in %s mode", mode)
     config.validate_config()
+
+    # Fail fast if the durable store is unreachable, rather than erroring lazily
+    # on the first write mid-loop. get_db() connects and initialises the schema.
+    try:
+        get_db()
+        log.info("Connected to Postgres persistence backend")
+    except Exception as exc:
+        log.error("Cannot reach Postgres via TRADEGUMI_DATABASE_URL: %s", exc)
+        raise
 
     client = make_client(mode)
 
