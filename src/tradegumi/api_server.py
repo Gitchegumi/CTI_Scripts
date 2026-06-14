@@ -899,35 +899,6 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
 
-def _update_env(key: str, value: str) -> None:
-    """Update .env file with a new value, creating the file if needed."""
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    lines = []
-    if env_path.exists():
-        with open(env_path) as f:
-            lines = f.readlines()
-
-    found = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(f"{key}="):
-            new_lines.append(f"{key}={value}\n")
-            found = True
-        else:
-            new_lines.append(line)
-
-    if not found:
-        new_lines.append(f"{key}={value}\n")
-
-    with open(env_path, "w") as f:
-        f.writelines(new_lines)
-
-    # Also update the runtime environment
-    import os
-    os.environ[key] = value
-
-
 def start_api_server(port: int = API_PORT) -> HTTPServer:
     """Start the API server in a background thread."""
     server = HTTPServer(("0.0.0.0", port), TradeGumiAPIHandler)

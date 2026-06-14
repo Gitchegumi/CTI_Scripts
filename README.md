@@ -68,58 +68,76 @@ TRADEGUMI_CALLBACK_URL=
 
 > **`.env` is gitignored.** Your keys will never be committed to the repo.
 
-### 3. Run the bot
+### 3. Run the services
+
+The runtime is split into three independent processes — **worker** (trading
+loop, no HTTP port), **api** (analytics + control on `:8199`), and **dashboard**
+(Next.js on `:3000`). See `specs/019-split-runtime-containers`.
+
+For local development, run each in its own terminal:
 
 ```bash
-cd src
-poetry run python -m tradegumi.main --mode alert_only
+# Worker — trading loop
+cd src && poetry run python -m tradegumi.main --mode alert_only
+
+# API — analytics + control server
+cd src && poetry run python -m tradegumi.api_main
+
+# Dashboard
+cd dashboard && npm install && npm run build && NEXT_PUBLIC_API_URL=http://localhost:8199 npm start
 ```
 
-### 4. Run the dashboard
+For production, Docker Compose runs all three as separate services (plus Postgres
+and Redis):
 
 ```bash
-cd dashboard
-npm install
-npm run build
-npm start
+docker compose up -d --build
 ```
 
-Dashboard runs on `http://localhost:3000`. The bot's API server runs on port `8199`.
+Dashboard: `http://localhost:3000` · API: `http://localhost:8199`.
 
 ## Architecture
 
+The runtime is split into three independently deployable services that share
+state through **Redis** (hot state, operator commands, worker heartbeat) and
+**Postgres** (durable analytics). A failure or restart of any one service does
+not affect the other two.
+
 ```text
-┌─────────────────────────────────────────────────────┐
-│  TradeGumi Bot (Python)                            │
-│                                                    │
-│  ┌──────────────┐  ┌──────────────┐               │
-│  │ Main Loop     │  │ API Server    │               │
-│  │ (1s prices,  │  │ (:8199)      │               │
-│  │  5s signals)  │  │  GET/POST    │               │
-│  └──────┬───────┘  └──────┬───────┘               │
-│         │                 │                         │
-│  ┌──────┴───────┐  ┌─────┴────────┐               │
-│  │ Signal Engine │  │ Callback      │               │
-│  │ (4-layer)     │  │ (webhook)    │               │
-│  └──────────────┘  └──────┬────────┘               │
-│                           │                        │
-└───────────────────────────┼────────────────────────┘
-                            │
-          ┌─────────────────┼──────────────────┐
-          │                 │                  │
-    ┌─────┴──────┐  ┌──────┴───────┐  ┌──────┴──────┐
-    │ Dashboard   │  │ Discord     │  │ DockeGumi   │
-    │ (Next.js    │  │ Webhook     │  │ (NUC :8198) │
-    │  :3000)     │  │ Alerts      │  │ Orchestration│
-    └─────────────┘  └─────────────┘  └─────────────┘
+   ┌──────────────────┐                         ┌──────────────────┐
+   │ tradegumi-worker │                         │  tradegumi-api   │
+   │ 4-layer loop     │── snapshot/heartbeat ──▶ │  HTTP :8199      │
+   │ (no public port) │◀──── commands ───────── │  analytics+ctrl  │
+   └────────┬─────────┘     (Redis)             └────────┬─────────┘
+            │ durable writes                             │ read-only broker
+            ▼                                            ▼ client (no orders)
+   ┌──────────────────────────────────────────────────────────┐
+   │  Redis (hot state · commands · heartbeat)                  │
+   │  Postgres (durable analytics · journal)                    │
+   └──────────────────────────────────────────────────────────┘
+                                                         ▲
+                                              ┌──────────┴───────────┐
+                                              │ tradegumi-dashboard  │
+                                              │ Next.js :3000        │
+                                              │ → calls the API only │
+                                              └──────────────────────┘
 ```
 
 **Data flow:**
 
-- Bot writes `loop_state.json` (1s), `watchlist.json` (30min), `signals.json` (on signal)
-- Dashboard reads JSON files + API endpoints for live data
-- API server (`:8199`) accepts config changes (mode, program, phase, re-scan)
-- Callback webhook sends structured events to DockeGumi for automated action
+- **Worker** runs the 4-layer signal engine, writes durable analytics to
+  Postgres, and publishes a hot-state snapshot + liveness heartbeat to Redis. No
+  public HTTP port.
+- **API** serves the dashboard: hot state from the worker's Redis snapshot,
+  durable analytics from Postgres, and account/positions/trade-history from its
+  own read-only broker client. It never places orders (Risk-First).
+- **Dashboard** (Next.js) reads and writes exclusively through the API.
+- **Config changes** (mode/program/phase/challenge_type, re-scan) flow
+  API → worker over the Redis command channel; the worker applies them without a
+  restart and reflects them in its snapshot. A command issued while the worker is
+  down is applied on its next startup (durable desired-config).
+- **Callback webhook** sends structured events (signals, worker start/stop,
+  command applied) to DockeGumi.
 
 ### Main Loop Cadence
 
@@ -135,7 +153,7 @@ API budget: ~4 calls/sec (well within Oanda's 120/sec limit).
 
 ## Dashboard
 
-The dashboard is a Next.js app that reads data from the bot's JSON files and API endpoints.
+The dashboard is a Next.js app that reads and writes exclusively through the API service (`tradegumi-api`); it holds no direct connection to the worker, Redis, or Postgres.
 
 ### Sections
 
@@ -159,7 +177,7 @@ When all symbols are closed (weekend/after-hours), the dashboard:
 
 ### Settings Panel
 
-Switch between `alert_only` → `demo` → `live`, change program (challenge/instant), phase (1/2/Funded), and trigger manual re-scans — all from the dashboard. Changes persist to `.env` and take effect immediately.
+Switch between `alert_only` → `demo` → `live`, change program (challenge/instant), phase (1/2/Funded), and trigger manual re-scans — all from the dashboard. Changes are delivered to the worker over the Redis command channel and applied within a loop iteration (no restart). They are also recorded as durable "desired config" in Redis, which the worker reconciles on startup — so a change made while the worker is down is applied when it returns. Note: while set, desired-config overrides the matching `.env` value across restarts (clear the Redis `desired_config` key to fall back to `.env`).
 
 When program is set to "Instant", the phase selector dynamically hides (instant accounts don't have phases).
 
@@ -184,6 +202,12 @@ When program is set to "Instant", the phase selector dynamically hides (instant 
 | `POST /api/config/program` | `{"program": "challenge"\|"instant"}`    | Switch CTI program                  |
 | `POST /api/config/phase`   | `{"phase": 1\|2\|3}`                     | Switch CTI phase                    |
 | `POST /api/action/rescan`  | `{}`                                     | Trigger immediate watchlist re-scan |
+
+Config/action POSTs are delivered to the worker over the Redis command channel.
+They return `{"status": "accepted", "command_id": ...}` (or `400` for an invalid
+value, `503` if the command channel is unavailable — never a silent success).
+The worker applies the command within a loop iteration; poll `GET /api/status` to
+observe the change.
 
 All endpoints include CORS headers for dashboard access.
 

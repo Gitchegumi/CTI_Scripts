@@ -148,7 +148,7 @@ issued while the worker is down is applied on restart (SC-005, FR-010).
 - [X] T029 [US4] Update API control handlers in `src/tradegumi/api_server.py` (`/api/config/*`, `/api/action/rescan`) to validate, then publish a command and update `desired_config`; return a non-2xx status when delivery fails instead of a silent success
 - [X] T030 [US4] Update `src/tradegumi/main.py` worker to subscribe to the `commands` channel, reconcile `desired_config` at startup and each loop, apply changes without a restart, and reflect the new mode in the heartbeat
 - [X] T031 [US4] Emit observability for command events (Constitution IV): post to Discord and write to state on command accepted (API), command applied (worker), command rejected (validation), and command-channel-unavailable, in `src/tradegumi/api_server.py` and `src/tradegumi/main.py`
-- [ ] T032 [US4] Verify SC-005/FR-010: stop the worker, `POST /api/config/mode mode=demo`, start the worker, confirm it comes up in `demo` via reconciliation (per `quickstart.md`) — ⏳ REQUIRES LIVE STACK (rebuild images: Python code changed)
+- [X] T032 [US4] Verify SC-005/FR-010: stop the worker, `POST /api/config/mode mode=demo`, start the worker, confirm it comes up in `demo` via reconciliation (per `quickstart.md`) — ✅ VERIFIED 2026-06-14 on live stack
 
 **Checkpoint**: Operator control fully preserved across the process boundary and observable.
 
@@ -158,11 +158,11 @@ issued while the worker is down is applied on restart (SC-005, FR-010).
 
 **Purpose**: Documentation, quality, and the required PR task.
 
-- [ ] T033 [P] Update `README.md` and `docs/` to describe the three-service architecture, new env vars, and local-dev commands from `quickstart.md`
-- [ ] T034 Review all changed code for intention-revealing names, simple control flow, and no unexplained magic values (Constitution Code Quality gate)
-- [ ] T035 Add/verify docstrings for new modules (`api_main.py`, `commands.py`, `healthcheck.py`, new `redis.py` helpers) and all modified functions
-- [ ] T036 Run full `quickstart.md` validation end-to-end (SC-001…SC-005) AND confirm FR-012/SC-006 parity: every endpoint in the pre-split surface captured in T012 still responds correctly post-split
-- [ ] T037 Security check: confirm `.env`-only secrets, no values in `docker-compose.yml`/Dockerfiles, and token/webhook redaction across all three services' logs
+- [X] T033 [P] Update `README.md` and `docs/` to describe the three-service architecture, new env vars, and local-dev commands from `quickstart.md`
+- [X] T034 Review all changed code for intention-revealing names, simple control flow, and no unexplained magic values (Constitution Code Quality gate) — reviewed; removed dead `_update_env` left by the US4 handler rewrite
+- [X] T035 Add/verify docstrings for new modules (`api_main.py`, `commands.py`, `healthcheck.py`, new `redis.py` helpers) and all modified functions
+- [ ] T036 Run full `quickstart.md` validation end-to-end (SC-001…SC-005) AND confirm FR-012/SC-006 parity: every endpoint in the pre-split surface captured in T012 still responds correctly post-split — SC-001…SC-005 ✅ verified live; ⏳ SC-006 endpoint-parity sweep pending (exercise the pre-split surface in quickstart against the running api)
+- [X] T037 Security check: confirm `.env`-only secrets, no values in `docker-compose.yml`/Dockerfiles, and token/webhook redaction across all three services' logs — verified; new code logs only command type/id and mode
 - [ ] T038 Submit the PR with **DockeGumi** as the reviewer (identified by the user 2026-06-14) (Constitution Pull Request Policy)
 
 ---
