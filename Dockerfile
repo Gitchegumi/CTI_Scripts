@@ -79,7 +79,7 @@ COPY dashboard/src ./src
 COPY dashboard/public ./public
 
 # Accept build-time API URL (must be declared before npm run build)
-ARG NEXT_PUBLIC_API_URL=http://10.0.0.116:8199
+ARG NEXT_PUBLIC_API_URL=http://localhost:8199
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build
