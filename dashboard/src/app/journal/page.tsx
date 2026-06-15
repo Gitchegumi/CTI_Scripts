@@ -129,11 +129,11 @@ function sourceLabel(source?: string | null): string | null {
 
 function isSameTrade(prev: JournalEntry, curr: JournalEntry): boolean {
   const e = curr.entry_price;
-  if (prev.direction === "BUY") {
+  if (prev.direction === "BUY" || prev.direction === "UPTREND") {
     // Still between the SL and TP of the previous signal → same trade
     return e > prev.stop_loss && e < prev.take_profit;
   } else {
-    // SELL: SL is above entry, TP is below entry
+    // SELL / DOWNTREND: SL is above entry, TP is below entry
     return e < prev.stop_loss && e > prev.take_profit;
   }
 }
