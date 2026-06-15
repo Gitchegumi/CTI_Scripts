@@ -22,7 +22,7 @@ matplotlib = "^3.10.0"
 pytz = ">=2024.1"
 discord-py = "^2.4"
 psycopg = {version = "^3.3", extras = ["binary"]}
-redis = {version = "^5.2", extras = ["hiredis"]}
+redis = {version = ">=5.2,<9.0", extras = ["hiredis"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
