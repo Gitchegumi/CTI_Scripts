@@ -16,9 +16,9 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # Node.js dependencies (Next.js app at root)
+  # Node.js dependencies (Next.js app in dashboard/)
   - package-ecosystem: "npm"
-    directory: "/"
+    directory: "/dashboard"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
