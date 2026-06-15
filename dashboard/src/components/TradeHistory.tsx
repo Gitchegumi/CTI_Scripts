@@ -263,7 +263,7 @@ export default function TradeHistory({ trades, correlations, error = null }: Tra
 
             {/* Table — scrollable on small screens */}
             <div className="overflow-x-auto max-h-96 overflow-y-auto">
-              <table className="w-full text-xs min-w-[560px]">
+              <table className="w-full text-xs min-w-140">
                 <thead className="sticky top-0 bg-slate-900 z-10">
                   <tr className="text-slate-500 border-b border-slate-800">
                     <th className="px-3 py-1.5 text-left font-medium">Symbol</th>
