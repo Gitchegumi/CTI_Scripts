@@ -117,7 +117,7 @@
 - [X] T033 Run quickstart validation commands from `specs/021-market-hours-rescan/quickstart.md`
 - [X] T034 Run targeted regression tests for affected signal/session flows with `pytest src\tradegumi\tests\test_session_rules.py src\tradegumi\tests\test_pre_session_scanner.py src\tradegumi\tests\test_main_market_data.py src\tradegumi\tests\test_commands.py`
 - [X] T035 Confirm no signal-layer, risk-check, watchlist-membership, or broker-specific session-rule regressions were introduced in `src/tradegumi/session_rules.py`, `src/tradegumi/main.py`, and `src/tradegumi/pre_session_scanner.py`
-- [ ] T036 Submit PR as author DockeGumi with email "dock@gitchegumi.com" and request review from Gitchegumi.
+- [X] T036 Submit PR as author DockeGumi with email "dock@gitchegumi.com" and request review from Gitchegumi.
 
 ---
 
