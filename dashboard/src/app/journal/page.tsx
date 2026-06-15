@@ -9,7 +9,7 @@ import { readApiError } from "@/lib/api";
 interface JournalEntry {
   signal_id: string;
   symbol: string;
-  direction: "BUY" | "SELL";
+  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND";
   strategy: string;
   confidence: number;
   entry_price: number;
@@ -68,7 +68,7 @@ interface JournalEntry {
 interface TradeGroup {
   groupId: string;           // signal_id of first entry — stable key
   symbol: string;
-  direction: "BUY" | "SELL";
+  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND";
   strategy: string;
   entries: JournalEntry[];   // oldest → newest
   avgConfidence: number;
@@ -350,8 +350,8 @@ function TradeGroupCard({
   const [masterSignalId, setMasterSignalId] = useState<string>(
     group.entries[group.entries.length - 1].signal_id
   );
-  const dirColor = group.direction === "BUY" ? "text-green-400" : "text-red-400";
-  const dirBg   = group.direction === "BUY" ? "border-green-800" : "border-red-800";
+  const dirColor = group.direction === "BUY" || group.direction === "UPTREND" ? "text-green-400" : "text-red-400";
+  const dirBg   = group.direction === "BUY" || group.direction === "UPTREND" ? "border-green-800" : "border-red-800";
   const first   = group.entries[0];
   const multi   = group.entries.length > 1;
 
