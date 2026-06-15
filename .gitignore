@@ -173,7 +173,9 @@ cython_debug/
 py_scripts/backtesting/back_test_strat.py
 
 # Generated files
-data/
+# Worker runtime state (the tradegumi-data volume). Anchored so it does NOT
+# match dashboard/src/app/api/data/ (the Next.js API proxy route handlers).
+/src/tradegumi/data/
 .claude/*.json
 node_modules/
 dashboard/node_modules/
