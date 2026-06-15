@@ -10,9 +10,9 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
 
-  # Node.js dependencies (Next.js app at root)
+  # Node.js dependencies (Next.js app in dashboard/)
   - package-ecosystem: "npm"
-    directory: "/"
+    directory: "/dashboard"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
