@@ -32,7 +32,7 @@ pytest = "^8.3.4"
 plotly = "^6.0.1"
 matplotlib = "^3.10.0"
 nbformat = "^5.10.4"
-ipympl = "^0.9.6"
+ipympl = ">=0.9.6,<0.11.0"
 backtrader = "^1.9.78.123"
 beautifulsoup4 = "^4.12.3"
 
