@@ -137,6 +137,12 @@ export interface SymbolState {
   bid?: number;
   ask?: number;
   spread?: number;
+  // Additive forex-session diagnostics (specs/021-market-hours-rescan US3).
+  // Optional so older loop_state files without these fields still parse.
+  market_open?: boolean;
+  availability_state?: "available" | "market_closed" | "symbol_unavailable";
+  availability_reason?: string;
+  session_boundary?: string | null;
 }
 
 export interface LoopState {

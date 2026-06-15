@@ -11,8 +11,17 @@ import { ApiStatus, OpenPosition, ClosedTrade } from "@/lib/api";
 
 function useMarketOpen(loopState: LoopState | null): boolean {
   return useMemo(() => {
-    if (!loopState?.symbols?.length) return true; // default to open until we know
-    return loopState.symbols.some((s) => s.state !== "closed");
+    const symbols = loopState?.symbols;
+    if (!symbols?.length) return true; // default to open until we know
+    // Prefer the explicit forex-session diagnostic when present: the market is
+    // open if any symbol reports market_open. A symbol that is unavailable for
+    // symbol-specific reasons keeps market_open true, so it never makes the
+    // whole market look closed (specs/021-market-hours-rescan US3).
+    if (symbols.some((s) => typeof s.market_open === "boolean")) {
+      return symbols.some((s) => s.market_open === true);
+    }
+    // Fallback for older loop_state files without the diagnostic fields.
+    return symbols.some((s) => s.state !== "closed");
   }, [loopState]);
 }
 

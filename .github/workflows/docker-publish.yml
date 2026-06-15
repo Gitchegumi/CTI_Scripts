@@ -43,44 +43,58 @@ jobs:
           cache-from: type=gha
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://tradegumi-api:8199' }}
-  # Calculate version, build, and push image — tag is NOT created yet
-  build:
+
+  # Decide whether a release is due and what the next version is, WITHOUT
+  # creating anything. semantic-release (conventionalcommits) only reports a
+  # version for fix (patch), feat (minor), or breaking (major) commits; any
+  # other commit type leaves new_release_published=false and short-circuits the
+  # build + release jobs below.
+  version:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
-      actions: write
+      contents: write # semantic-release verifyConditions checks push access, even in dry run
     outputs:
-      new_tag: ${{ steps.tag_version.outputs.new_tag }}
-      previous_tag: ${{ steps.tag_version.outputs.previous_tag }}
-      release_type: ${{ steps.tag_version.outputs.release_type }}
-
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+      major: ${{ steps.semantic.outputs.new_release_major_version }}
+      minor: ${{ steps.semantic.outputs.new_release_minor_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # full history required for semver tag calculation
+          fetch-depth: 0 # full history required for semver calculation
 
-      - name: Calculate next version (dry run — no tag created yet)
-        id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
+      - name: Compute next version (dry run — no tag or release created)
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           dry_run: true
-          default_bump: patch
-          tag_prefix: v
+          semantic_version: 24
+          extra_plugins: conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Parse v-prefixed version components
-        id: version
+  # Calculate version, build, and push images — runs only when a release is due.
+  # The git tag / GitHub release is NOT created here.
+  build:
+    needs: version
+    if: needs.version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compose v-prefixed image tags
+        id: tags
         run: |
-          TAG="${{ steps.tag_version.outputs.new_tag }}"
-          VER="${TAG#v}"
-          MAJOR="v$(echo $VER | cut -d. -f1)"
-          MINOR="v$(echo $VER | cut -d. -f1-2)"
-          echo "full=${TAG}" >> $GITHUB_OUTPUT
-          echo "minor=${MINOR}" >> $GITHUB_OUTPUT
-          echo "major=${MAJOR}" >> $GITHUB_OUTPUT
+          echo "full=v${{ needs.version.outputs.version }}" >> $GITHUB_OUTPUT
+          echo "minor=v${{ needs.version.outputs.major }}.${{ needs.version.outputs.minor }}" >> $GITHUB_OUTPUT
+          echo "major=v${{ needs.version.outputs.major }}" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -98,9 +112,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.full }}
-            type=raw,value=${{ steps.version.outputs.minor }}
-            type=raw,value=${{ steps.version.outputs.major }}
+            type=raw,value=${{ steps.tags.outputs.full }}
+            type=raw,value=${{ steps.tags.outputs.minor }}
+            type=raw,value=${{ steps.tags.outputs.major }}
             type=sha,format=short,prefix=sha-
             type=raw,value=latest
 
@@ -121,9 +135,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.DASHBOARD_IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.full }}
-            type=raw,value=${{ steps.version.outputs.minor }}
-            type=raw,value=${{ steps.version.outputs.major }}
+            type=raw,value=${{ steps.tags.outputs.full }}
+            type=raw,value=${{ steps.tags.outputs.minor }}
+            type=raw,value=${{ steps.tags.outputs.major }}
             type=sha,format=short,prefix=sha-
             type=raw,value=latest
 
@@ -140,28 +154,31 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'http://tradegumi-api:8199' }}
 
-  # Create the git tag only after the image is successfully published
-  tag:
-    needs: build
+  # Create the git tag and GitHub release only after the images are published.
+  release:
+    needs: [version, build]
+    if: needs.version.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # create the git tag + GitHub release
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history required for semver calculation
 
-      - name: Push git tag
-        run: |
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git tag ${{ needs.build.outputs.new_tag }}
-          git push origin ${{ needs.build.outputs.new_tag }}
+      - name: Semantic Release (create tag + GitHub release)
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 24
+          extra_plugins: conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
-          echo "### Docker image published :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.build.outputs.new_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Previous version:** ${{ needs.build.outputs.previous_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Change type:** ${{ needs.build.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.new_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker images published :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Python image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Dashboard image:** \`${{ env.REGISTRY }}/${{ env.DASHBOARD_IMAGE_NAME }}:v${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY

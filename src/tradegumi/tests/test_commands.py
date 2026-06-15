@@ -127,6 +127,23 @@ def test_apply_rescan_sets_force_rescan(monkeypatch):
     assert captured.get("force_rescan") is True
 
 
+def test_rescan_preserves_runtime_state_and_config(monkeypatch, restore_config):
+    """Regression (specs/021 US2): a forced rescan only raises the force_rescan
+    flag — it must merge existing runtime state and leave operator config alone."""
+    captured = {}
+    monkeypatch.setattr("tradegumi.api_server.get_runtime_state", lambda: {"loop_count": 7})
+    monkeypatch.setattr("tradegumi.api_server.set_runtime_state", lambda s: captured.update(s))
+    config.TRADEGUMI_MODE = "demo"
+    config.CTI_PHASE = 1
+
+    assert commands.apply_command(commands.build_command(commands.RESCAN, {})) is True
+
+    assert captured.get("force_rescan") is True
+    assert captured.get("loop_count") == 7  # existing runtime state preserved
+    assert config.TRADEGUMI_MODE == "demo"  # rescan is an action, not config
+    assert config.CTI_PHASE == 1
+
+
 # ── reconcile / round trip ─────────────────────────────────────────────────────
 
 def test_reconcile_applies_diffs(monkeypatch, restore_config):

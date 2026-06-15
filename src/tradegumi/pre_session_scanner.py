@@ -10,15 +10,17 @@ Outputs ranked watchlist (Tier 1/2/Below threshold) to console + saves to JSON.
 """
 import json
 import logging as log
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable, Optional
 
 from pytz import timezone
 
 from tradegumi import config
 from tradegumi.api.base_client import ExecutionClient, Candle
 from tradegumi.indicators import calculate_atr, candles_to_df
-from tradegumi.session_rules import day_of_week_bias
+from tradegumi.session_rules import day_of_week_bias, is_market_open, market_session_status
 
 log = log.getLogger(__name__)
 NY_TZ = timezone("America/New_York")
@@ -27,6 +29,91 @@ NY_TZ = timezone("America/New_York")
 
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 SESSION_FILE = Path(__file__).parent / "data" / "session_state.json"
+
+# ── Per-symbol availability ───────────────────────────────────────────────────
+# A symbol can be excluded from a scan for distinct reasons. Keeping them
+# separate stops a global forex-closed decision from masquerading as an
+# all-symbols-unavailable result during an open forex session (US2).
+AVAIL_AVAILABLE = "available"
+AVAIL_MARKET_CLOSED = "market_closed"
+AVAIL_ACCOUNT_INSTRUMENT_UNAVAILABLE = "account_instrument_unavailable"
+AVAIL_CONFIGURED_UNAVAILABLE = "configured_unavailable"
+
+
+@dataclass
+class SymbolAvailability:
+    """Whether a single symbol is eligible for scanning, and why.
+
+    ``market_open`` is the symbol's own forex-session decision so callers can
+    tell a closed market apart from a symbol-specific availability problem.
+    """
+
+    symbol: str
+    market_open: bool
+    available: bool
+    reason: str
+    detail: Optional[str] = None
+
+
+def evaluate_symbol_availability(
+    symbol: str,
+    available_symbols: Optional[set[str]] = None,
+    unavailable_instruments: Optional[set[str]] = None,
+    when: Optional[datetime] = None,
+) -> SymbolAvailability:
+    """Classify one symbol's scan eligibility at ``when``.
+
+    Reason precedence: a closed forex session (``market_closed``) is reported
+    first because it is a global condition; only when the market is open do we
+    fall through to symbol-specific reasons so available symbols are preserved.
+    """
+    status = market_session_status(symbol, when)
+    if not status.is_open:
+        return SymbolAvailability(
+            symbol, False, False, AVAIL_MARKET_CLOSED,
+            status.session_boundary or "Forex market is closed.",
+        )
+    if unavailable_instruments and symbol in unavailable_instruments:
+        return SymbolAvailability(
+            symbol, True, False, AVAIL_CONFIGURED_UNAVAILABLE,
+            "Symbol is configured as temporarily unavailable.",
+        )
+    if available_symbols is not None and symbol not in available_symbols:
+        return SymbolAvailability(
+            symbol, True, False, AVAIL_ACCOUNT_INSTRUMENT_UNAVAILABLE,
+            "Instrument is not available for the configured account.",
+        )
+    return SymbolAvailability(symbol, True, True, AVAIL_AVAILABLE, None)
+
+
+def summarize_availability(
+    symbols: Iterable[str],
+    available_symbols: Optional[set[str]] = None,
+    unavailable_instruments: Optional[set[str]] = None,
+    when: Optional[datetime] = None,
+) -> dict:
+    """Build the per-symbol availability summary for a forced rescan (US2).
+
+    Returns market-open status, per-symbol availability results, and counts so
+    the rescan can never report every symbol unavailable purely because of a
+    global closed-market decision during an open forex session.
+    """
+    results = [
+        evaluate_symbol_availability(s, available_symbols, unavailable_instruments, when)
+        for s in symbols
+    ]
+    available_count = sum(1 for r in results if r.available)
+    # The forex market-open state is a single weekly-session decision; use a
+    # representative forex symbol so crypto's always-open status cannot imply
+    # the forex market is open.
+    market_open = is_market_open("EURUSD", when)
+    return {
+        "market_open": market_open,
+        "symbols_checked": len(results),
+        "symbols_available": available_count,
+        "symbols_unavailable": len(results) - available_count,
+        "availability": [asdict(r) for r in results],
+    }
 
 
 def calc_adr(client: ExecutionClient, symbol: str, lookback: int = 20) -> float:
