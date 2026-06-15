@@ -1,7 +1,16 @@
 """Focused tests for main-loop market data helper behavior."""
 
-from tradegumi.main import _latest_prices, _should_poll_market_data
+from datetime import datetime
+
+from pytz import timezone
+
+from tradegumi.main import _latest_prices, _loop_state_diagnostics, _should_poll_market_data
 from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
+
+CT_TZ = timezone("America/Chicago")
+# Sunday 21:40 Central is inside the open forex week; Saturday is the weekend break.
+OPEN_SUNDAY = CT_TZ.localize(datetime(2026, 6, 14, 21, 40))
+CLOSED_SATURDAY = CT_TZ.localize(datetime(2026, 6, 13, 12, 0))
 
 
 class FakeStreamProvider:
@@ -44,3 +53,34 @@ def test_streaming_reconnect_requests_polling(monkeypatch):
     monkeypatch.setattr("tradegumi.config.TRADEGUMI_MARKET_DATA_MODE", "streaming")
 
     assert _should_poll_market_data(FakeStreamProvider(status="reconnecting")) is True
+
+
+# ── Loop-state availability diagnostics (specs/021-market-hours-rescan US3) ───
+
+
+def test_loop_diagnostics_available_during_open_forex():
+    diag = _loop_state_diagnostics("EURUSD", {"EURUSD"}, set(), OPEN_SUNDAY)
+
+    assert diag["market_open"] is True
+    assert diag["availability_state"] == "available"
+    assert diag["availability_reason"] == "available"
+    assert diag["session_boundary"] is None
+
+
+def test_loop_diagnostics_market_closed_on_weekend():
+    diag = _loop_state_diagnostics("EURUSD", {"EURUSD"}, set(), CLOSED_SATURDAY)
+
+    assert diag["market_open"] is False
+    assert diag["availability_state"] == "market_closed"
+    assert diag["availability_reason"] == "weekend_break"
+    assert diag["session_boundary"]  # next-open boundary context present
+
+
+def test_loop_diagnostics_symbol_unavailable_during_open_forex():
+    # Open forex session, but the symbol is not available on the account: the
+    # diagnostic must say symbol_unavailable, not market_closed.
+    diag = _loop_state_diagnostics("EURUSD", set(), set(), OPEN_SUNDAY)
+
+    assert diag["market_open"] is True
+    assert diag["availability_state"] == "symbol_unavailable"
+    assert diag["availability_reason"] == "account_instrument_unavailable"

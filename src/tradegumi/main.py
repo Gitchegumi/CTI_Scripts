@@ -46,10 +46,17 @@ from tradegumi.persistence import get_db
 from tradegumi.persistence.redis import set_heartbeat, subscribe_commands
 from tradegumi import commands
 from tradegumi.risk import calc_lot_size, can_open_position
-from tradegumi.session_rules import is_market_open, is_trading_open, is_swap_blackout
+from tradegumi.session_rules import (
+    is_market_open, is_trading_open, is_swap_blackout, market_session_status,
+    REASON_WEEKEND_BREAK,
+)
 from tradegumi.alerts import post_signal, post_watchlist, record_trade_correlation
 from tradegumi.trailing_sl import TrailingSLManager
-from tradegumi.pre_session_scanner import run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text, format_watchlist_diff
+from tradegumi.pre_session_scanner import (
+    run_scan, load_watchlist, load_watchlist_with_scores, format_watchlist_text,
+    format_watchlist_diff, summarize_availability, evaluate_symbol_availability,
+    AVAIL_MARKET_CLOSED,
+)
 from tradegumi.api_server import set_runtime_state, get_runtime_state
 from tradegumi.market_data import (
     MODE_STREAMING,
@@ -160,6 +167,41 @@ def _loop_state_payload(mode: str, loop_state: list[dict]) -> dict:
         "mode": mode,
         "provider": "Oanda" if mode != "live" else "MatchTrader",
         "symbols": loop_state,
+    }
+
+
+def _loop_state_diagnostics(
+    symbol: str,
+    available_symbols: Optional[set[str]] = None,
+    unavailable_instruments: Optional[set[str]] = None,
+    when: Optional[datetime] = None,
+) -> dict:
+    """Return additive loop-state availability diagnostics for one symbol (US3).
+
+    Maps the per-symbol availability decision to operator-visible loop-state
+    fields so the dashboard can distinguish a closed forex market
+    (``market_closed``) from an unavailable symbol (``symbol_unavailable``).
+    """
+    avail = evaluate_symbol_availability(
+        symbol, available_symbols, unavailable_instruments, when
+    )
+    status = market_session_status(symbol, when)
+    if avail.reason == AVAIL_MARKET_CLOSED:
+        # Surface the underlying weekly-session reason (weekend_break,
+        # before_weekly_open, after_weekly_close) rather than the generic code.
+        availability_state = "market_closed"
+        availability_reason = status.reason
+    elif avail.available:
+        availability_state = "available"
+        availability_reason = avail.reason
+    else:
+        availability_state = "symbol_unavailable"
+        availability_reason = avail.reason
+    return {
+        "market_open": avail.market_open,
+        "availability_state": availability_state,
+        "availability_reason": availability_reason,
+        "session_boundary": status.session_boundary,
     }
 
 
@@ -680,7 +722,33 @@ def run(mode: str):
                 polling_provider.resubscribe(watchlist_cache.scan_symbols, reason="rescan")
                 last_rescan_epoch = now_epoch
                 log.info("Re-scan complete — watchlist refreshed")
-                send_rescan_callback({"trigger": "full" if is_full_rescan or is_api_rescan else "periodic"})
+
+                # Evaluate availability per symbol so the rescan reports forex
+                # market state and per-symbol availability independently (US2).
+                availability_summary = summarize_availability(
+                    sorted(config.EXECUTION_SYMBOLS),
+                    available_symbols=available,
+                    unavailable_instruments=config.UNAVAILABLE_INSTRUMENTS,
+                    when=now_ny,
+                )
+                watchlist_counts = {
+                    "tier1": len(last_scan_result.get("tier1", [])) if last_scan_result else 0,
+                    "tier2": len(last_scan_result.get("tier2", [])) if last_scan_result else 0,
+                    "below": len(last_scan_result.get("below", [])) if last_scan_result else 0,
+                }
+                log.info(
+                    "Re-scan availability: market_open=%s available=%s/%s",
+                    availability_summary["market_open"],
+                    availability_summary["symbols_available"],
+                    availability_summary["symbols_checked"],
+                )
+                # Additive callback fields; existing consumers still read `trigger`.
+                send_rescan_callback({
+                    "trigger": "full" if is_full_rescan or is_api_rescan else "periodic",
+                    "requested_at": now_ny.isoformat(),
+                    "watchlist_counts": watchlist_counts,
+                    **availability_summary,
+                })
             except Exception as e:
                 log.error("Re-scan failed: %s", e)
 
@@ -747,6 +815,11 @@ def run(mode: str):
                     "score": round(score, 3),
                     "tier": tier,
                 }
+                # Additive forex-session diagnostics (US3): distinguish a closed
+                # forex market from a symbol-specific availability problem.
+                state_entry.update(_loop_state_diagnostics(
+                    symbol, available, config.UNAVAILABLE_INSTRUMENTS, now_ct
+                ))
                 # Merge live price into state
                 if symbol in prices:
                     state_entry["bid"] = prices[symbol]["bid"]
@@ -780,29 +853,28 @@ def run(mode: str):
         if loop_state and all(s.get("state") == "closed" for s in loop_state):
             close_key = now_ny.strftime("%Y-%m-%d")  # Once per calendar day
             if close_key != last_closed_msg_date:
-                from tradegumi.session_rules import is_trading_day
-                if not is_trading_day("EURUSD", when=now_ny):
-                    # Weekend
-                    day_name = now_ny.strftime("%A")
+                # Use the structured forex session decision so the message and
+                # its timing context match the corrected weekly boundaries (US3).
+                status = market_session_status("EURUSD", when=now_ny)
+                day_name = now_ny.strftime("%A")
+                if status.reason == REASON_WEEKEND_BREAK:
                     log.info("Market closed (weekend — %s) — sending closed message", day_name)
                     msg = (
                         f"🌅 **Morning Watchlist**\n"
                         f"It's {day_name} — markets are closed.\n"
                         f"All quiet here. Enjoy the time off! 🌴"
                     )
-                    post_watchlist(msg)
-                    send_closed_market_callback(day_name, msg)
                 else:
-                    # Weekday but after hours (Fri evening, etc.)
-                    day_name = now_ny.strftime("%A")
-                    log.info("Market closed (after hours — %s) — sending closed message", day_name)
+                    # Before the Sunday open or after the Friday close.
+                    log.info("Market closed (%s — %s) — sending closed message", status.reason, day_name)
+                    boundary = status.session_boundary or "the next session open"
                     msg = (
                         f"🌅 **Morning Watchlist**\n"
-                        f"It's {day_name} evening — markets are closed for the night.\n"
-                        f"See you at the next session open! 🌙"
+                        f"It's {day_name} — forex markets are closed for the weekly break.\n"
+                        f"{boundary}. 🌙"
                     )
-                    post_watchlist(msg)
-                    send_closed_market_callback(day_name, msg)
+                post_watchlist(msg)
+                send_closed_market_callback(day_name, msg)
                 last_closed_msg_date = close_key
 
         # ── Write loop state (every 1s) ──────────────────────────────────────

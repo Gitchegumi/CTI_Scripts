@@ -69,7 +69,13 @@ def send_signal_callback(signal_data: dict) -> None:
 
 
 def send_rescan_callback(scan_result: dict) -> None:
-    """Convenience: send a re-scan event."""
+    """Convenience: send a re-scan event.
+
+    The payload always carries ``trigger`` for existing consumers and may
+    additively include forex ``market_open`` status, per-symbol ``availability``
+    results, and ``symbols_checked``/``symbols_available``/``symbols_unavailable``
+    counts so a rescan distinguishes a closed market from unavailable symbols.
+    """
     send_callback("rescan", scan_result)
 
 

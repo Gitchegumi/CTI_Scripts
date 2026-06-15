@@ -1,5 +1,13 @@
-"""Session rules: trading hours, swap blackout, day-of-week filtering."""
+"""Session rules: forex trading week, swap blackout, day-of-week scoring.
 
+Forex instruments trade as one weekly session that opens Sunday 17:00 US
+Eastern / 16:00 US Central and closes Friday 17:00 US Eastern / 16:00 US
+Central. Every session decision is made in a canonical US Eastern reference so
+US Central and Eastern displays — and daylight saving transitions — agree on a
+single open/closed truth.
+"""
+
+from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Optional
 
@@ -7,20 +15,26 @@ from pytz import timezone
 
 NY_TZ = timezone("America/New_York")
 
-# ── Market Hours ─────────────────────────────────────────────────────────────
-# Oanda forex: Open Sun 17:05 ET, close Fri 16:59 ET
-# Mon–Thu: two windows (pre-break and post-break with swap gap)
-# Friday: closes at 16:59, no evening session
-# Indexed by weekday (0=Mon … 4=Fri), each entry is a list of (start, end) tuples
+# ── Forex weekly session boundaries (US Eastern reference) ────────────────────
+# Forex opens Sunday 17:00 ET (16:00 CT) and closes Friday 17:00 ET (16:00 CT).
+# Python weekday(): Monday=0 … Friday=4, Saturday=5, Sunday=6.
+FOREX_OPEN_WEEKDAY = 6          # Sunday
+FOREX_CLOSE_WEEKDAY = 4         # Friday
+FOREX_SATURDAY = 5
+FOREX_WEEKLY_BOUNDARY_ET = time(17, 0)   # 17:00 ET == 16:00 CT
 
-FOREX_HOURS = {
-    0: [(time(0, 0), time(23, 59, 59))],  # Monday
-    1: [(time(0, 0), time(23, 59, 59))],  # Tuesday
-    2: [(time(0, 0), time(23, 59, 59))],  # Wednesday
-    3: [(time(0, 0), time(23, 59, 59))],  # Thursday
-    4: [(time(0, 0), time(16, 59))],  # Friday (closes for week at 16:59)
-}
+# ── Stable session reason codes ──────────────────────────────────────────────
+REASON_OPEN = "open"
+REASON_BEFORE_WEEKLY_OPEN = "before_weekly_open"
+REASON_AFTER_WEEKLY_CLOSE = "after_weekly_close"
+REASON_WEEKEND_BREAK = "weekend_break"
 
+# ── Operator-facing boundary labels ──────────────────────────────────────────
+FOREX_NEXT_OPEN_BOUNDARY = "Next forex weekly open Sunday 16:00 CT / 17:00 ET"
+FOREX_WEEKLY_CLOSE_BOUNDARY = "Forex weekly close Friday 16:00 CT / 17:00 ET"
+
+# ── Index market hours (weekday windows, unchanged) ──────────────────────────
+# Indices keep their own weekday calendar; they do not follow the forex week.
 INDEX_HOURS = {
     0: [(time(0, 0), time(23, 59, 59))],
     1: [(time(0, 0), time(23, 59, 59))],
@@ -29,7 +43,7 @@ INDEX_HOURS = {
     4: [(time(0, 0), time(16, 30))],  # Friday
 }
 
-# ── Swap Blackout Windows ───────────────────────────────────────────────────
+# ── Swap Blackout Windows ────────────────────────────────────────────────────
 # Oanda swaps at ~17:00 ET; blackout 16:55–17:30 for safety
 FOREX_SWAP_BLACKOUT = (time(16, 55), time(17, 30))
 INDEX_SWAP_BLACKOUT = (time(16, 55), time(18, 29))
@@ -37,6 +51,32 @@ CRYPTO_SWAP_BLACKOUT = (time(16, 55), time(17, 30))
 
 # ── Symbol category lookup ────────────────────────────────────────────────────
 from tradegumi import config
+
+
+@dataclass
+class MarketSessionStatus:
+    """Structured market-session decision for a symbol at a moment in time.
+
+    Boolean callers use ``is_open``; diagnostics use ``reason`` and
+    ``session_boundary`` so machine-readable state never disagrees with the
+    boolean open/closed answer.
+    """
+
+    symbol: str
+    category: str
+    evaluated_at: datetime
+    is_open: bool
+    reason: str
+    session_boundary: Optional[str] = None
+
+
+def _to_ny(when: Optional[datetime]) -> datetime:
+    """Return ``when`` as a US Eastern reference time (defaults to now)."""
+    if when is None:
+        return datetime.now(NY_TZ)
+    if when.tzinfo is None:
+        return NY_TZ.localize(when)
+    return when.astimezone(NY_TZ)
 
 
 def _symbol_category(symbol: str) -> str:
@@ -47,53 +87,81 @@ def _symbol_category(symbol: str) -> str:
     if symbol in config.CRYPTO:
         return "crypto"
     if symbol in config.COMMODITIES:
-        # Commodities follow forex rules
+        # Commodities intentionally follow the forex weekly session.
         return "forex"
     return "forex"
 
 
+def _forex_decision(when_et: datetime) -> tuple[bool, str]:
+    """Return (is_open, reason) for the weekly forex session at a NY-local time.
+
+    Open Sunday 17:00 ET → Friday 17:00 ET. The Sunday open boundary is
+    inclusive and the Friday close boundary is exclusive of the open side, so
+    16:59:59 ET Friday is still open while 17:00:00 ET Friday is closed.
+    """
+    weekday = when_et.weekday()
+    now_t = when_et.time()
+    if weekday == FOREX_OPEN_WEEKDAY:  # Sunday — opens at 17:00 ET
+        if now_t >= FOREX_WEEKLY_BOUNDARY_ET:
+            return True, REASON_OPEN
+        return False, REASON_BEFORE_WEEKLY_OPEN
+    if weekday == FOREX_CLOSE_WEEKDAY:  # Friday — closes at 17:00 ET
+        if now_t < FOREX_WEEKLY_BOUNDARY_ET:
+            return True, REASON_OPEN
+        return False, REASON_AFTER_WEEKLY_CLOSE
+    if weekday == FOREX_SATURDAY:  # Saturday — weekend break
+        return False, REASON_WEEKEND_BREAK
+    return True, REASON_OPEN  # Monday–Thursday — continuous trading
+
+
+def _index_decision(when_et: datetime) -> tuple[bool, str]:
+    """Return (is_open, reason) for index symbols using weekday windows."""
+    weekday = when_et.weekday()
+    if weekday > FOREX_CLOSE_WEEKDAY:  # Saturday / Sunday — index markets shut
+        return False, REASON_WEEKEND_BREAK
+    now_t = when_et.time()
+    for start, end in INDEX_HOURS.get(weekday, []):
+        if start <= end:
+            if start <= now_t <= end:
+                return True, REASON_OPEN
+        elif now_t >= start or now_t <= end:
+            return True, REASON_OPEN
+    return False, REASON_AFTER_WEEKLY_CLOSE
+
+
+def market_session_status(symbol: str, when: Optional[datetime] = None) -> MarketSessionStatus:
+    """Return the structured market-session decision for ``symbol``.
+
+    Forex (and commodities that follow forex hours) use the weekly
+    Sunday-17:00-ET → Friday-17:00-ET window. Crypto is always open. Index
+    symbols keep their existing weekday session windows.
+    """
+    when_et = _to_ny(when)
+    category = _symbol_category(symbol)
+
+    if category == "crypto":
+        return MarketSessionStatus(symbol, category, when_et, True, REASON_OPEN, None)
+
+    if category == "index":
+        is_open, reason = _index_decision(when_et)
+        return MarketSessionStatus(symbol, category, when_et, is_open, reason, None)
+
+    is_open, reason = _forex_decision(when_et)
+    boundary = None if is_open else FOREX_NEXT_OPEN_BOUNDARY
+    return MarketSessionStatus(symbol, category, when_et, is_open, reason, boundary)
+
+
 def is_trading_open(symbol: str, when: Optional[datetime] = None) -> bool:
-    """Check if symbol is within its market session hours (NY time).
+    """Check if symbol is within its market session hours.
 
     Args:
         symbol: Trading symbol e.g. "EURUSD"
-        when: datetime in NY timezone. Defaults to now.
+        when: datetime (any timezone, or naive=ET). Defaults to now.
 
     Returns:
         True if market is open, False otherwise.
     """
-    if when is None:
-        when = datetime.now(NY_TZ)
-    else:
-        # Ensure we work in NY timezone
-        if when.tzinfo is None:
-            when = NY_TZ.localize(when)
-        else:
-            when = when.astimezone(NY_TZ)
-
-    weekday = when.weekday()
-    if weekday > 4:  # Saturday / Sunday
-        return False
-
-    cat = _symbol_category(symbol)
-    if cat == "forex":
-        hours = FOREX_HOURS
-    elif cat == "index":
-        hours = INDEX_HOURS
-    else:
-        return True  # Crypto — always open
-
-    now_t = when.time()
-    day_windows = hours.get(weekday, [])
-
-    for start, end in day_windows:
-        if start <= end:
-            if start <= now_t <= end:
-                return True
-        else:
-            if now_t >= start or now_t <= end:
-                return True
-    return False
+    return market_session_status(symbol, when).is_open
 
 
 def is_swap_blackout(symbol: str, when: Optional[datetime] = None) -> bool:
@@ -102,16 +170,10 @@ def is_swap_blackout(symbol: str, when: Optional[datetime] = None) -> bool:
     On Fridays, skip blackout — the market closes for the week, so
     there's no swap rollover to worry about.
     """
-    if when is None:
-        when = datetime.now(NY_TZ)
-    else:
-        if when.tzinfo is None:
-            when = NY_TZ.localize(when)
-        else:
-            when = when.astimezone(NY_TZ)
+    when = _to_ny(when)
 
     # Friday close: no swap blackout (market closes for the week)
-    if when.weekday() == 4:
+    if when.weekday() == FOREX_CLOSE_WEEKDAY:
         return False
 
     cat = _symbol_category(symbol)
@@ -136,18 +198,13 @@ def is_market_open(symbol: str, when: Optional[datetime] = None) -> bool:
 
 
 def is_trading_day(symbol: str, when: Optional[datetime] = None) -> bool:
-    """Check if today is a trading day for this symbol category."""
-    if when is None:
-        when = datetime.now(NY_TZ)
-    else:
-        if when.tzinfo is None:
-            when = NY_TZ.localize(when)
-        else:
-            when = when.astimezone(NY_TZ)
+    """Check if the market is in session for this symbol at ``when``.
 
-    weekday = when.weekday()
-    # No trading Sat/Sun regardless of asset class
-    return weekday <= 4
+    Backed by the same structured session decision as ``is_trading_open`` so a
+    forex symbol is "trading" across the full weekly window, including the
+    Sunday evening open, rather than a simplified Monday–Friday calendar.
+    """
+    return market_session_status(symbol, when).is_open
 
 
 # ── Day-of-week scoring ───────────────────────────────────────────────────────
@@ -161,13 +218,7 @@ def day_of_week_bias(symbol: str, when: Optional[datetime] = None) -> float:
     - Tuesday–Thursday: strongest trend days → 1.0
     - Friday: PM square-off pressure → 0.6
     """
-    if when is None:
-        when = datetime.now(NY_TZ)
-    else:
-        if when.tzinfo is None:
-            when = NY_TZ.localize(when)
-        else:
-            when = when.astimezone(NY_TZ)
+    when = _to_ny(when)
 
     bias_map = {0: 0.7, 1: 1.0, 2: 1.0, 3: 1.0, 4: 0.6, 5: 0.0, 6: 0.0}
     return bias_map.get(when.weekday(), 1.0)
