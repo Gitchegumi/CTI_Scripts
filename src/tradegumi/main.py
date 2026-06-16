@@ -148,8 +148,20 @@ class WatchlistCache:
         if perf:
             log.debug("Perf watchlist loading %.4fs", time.perf_counter() - started)
         started = time.perf_counter()
+        # Regression (#132): if the persisted watchlist is empty or missing,
+        # fall back to the configured execution symbols so an available set
+        # of instruments still flows into the streaming/polling subscription.
+        if self.data:
+            watchlist_symbols = set(self.data)
+        else:
+            # Regression (#134): downstream main-loop code reads score/tier
+            # from self.data for every scan symbol. Populate default metadata
+            # for each fallback symbol instead of leaving self.data empty so the
+            # loop-state sort and dashboard entries don't KeyError.
+            watchlist_symbols = set(config.EXECUTION_SYMBOLS)
+            self.data = {s: {"tier": "unranked", "score": 0.0} for s in watchlist_symbols}
         self.scan_symbols = [
-            s for s in self.data
+            s for s in watchlist_symbols
             if s in available and s not in config.UNAVAILABLE_INSTRUMENTS
         ]
         if perf:
