@@ -299,6 +299,12 @@ export interface StrategyMetricCriterion {
   threshold_value: unknown;
   threshold_operator: string;
   passed: boolean | null;
+  // Expected pass computed from measured/threshold/operator, and whether it
+  // disagrees with the recorded `passed` (spec 022 FR-014). Emitted by the
+  // backend CriterionResult.to_dict via asdict.
+  expected_pass?: boolean | null;
+  pass_mismatch?: boolean;
+  reason?: string | null;
   margin: number | null;
   normalized_margin: number | null;
   required: boolean;
@@ -335,6 +341,7 @@ export interface StrategyMetricOpportunity {
 
 export interface StrategyCriterionSummary {
   criterion_name: string;
+  layer: string;
   evaluated_count: number;
   pass_count: number;
   fail_count: number;
@@ -391,6 +398,11 @@ export interface StrategyMetricsSummary {
   near_miss_count: number;
   criterion_summaries: StrategyCriterionSummary[];
   top_blockers: StrategyBlockerSummary[];
+  // Computed server-side (DiagnosticSummary) and now surfaced for the diagnosis views.
+  pipeline_funnel: Record<string, number>;
+  near_miss_reason_counts: Record<string, number>;
+  signal_type_counts: Record<string, number>;
+  strategy_counts: Record<string, number>;
   data_quality_warnings: string[];
 }
 

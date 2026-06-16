@@ -355,6 +355,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 strategy = self._get_query_param("strategy")
                 signal_type = self._get_query_param("signal_type")
                 first_blocker = self._get_query_param("first_blocker")
+                criterion = self._get_query_param("criterion")
                 near_miss_param = self._get_query_param("near_miss")
                 limit = int(self._get_query_param("limit") or 100)
                 offset = int(self._get_query_param("offset") or 0)
@@ -373,6 +374,7 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                     signal_type=signal_type or None,
                     first_blocker=first_blocker or None,
                     near_miss=near_miss,
+                    criterion=criterion or None,
                     limit=limit,
                     offset=offset,
                     db=db,
