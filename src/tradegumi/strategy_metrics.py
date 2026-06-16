@@ -45,6 +45,21 @@ def _canonical_criterion_name(name: str) -> str:
     return _LEGACY_CRITERION_NAMES.get(str(name), str(name))
 
 
+def _stored_criterion_names(canonical: str) -> list[str]:
+    """Return every stored ``criterion_name`` spelling that maps to ``canonical``.
+
+    Criterion names are canonicalized on read (see ``_canonical_criterion_name``),
+    so a filter expressed in canonical terms must also match any legacy spelling
+    persisted before the canonical name existed. Used to build the criterion
+    drilldown filter (``get_opportunities(criterion=...)``).
+    """
+    names = {str(canonical)}
+    for raw, canon in _LEGACY_CRITERION_NAMES.items():
+        if canon == canonical:
+            names.add(raw)
+    return sorted(names)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
 
@@ -204,6 +219,9 @@ class CriterionSummary:
     near_miss_contribution: int
     average_failure_margin: Optional[float]
     incomplete_count: int
+    # Pipeline layer the criterion belongs to (e.g. "signal_stack"); surfaced in
+    # the criterion drilldown header (spec 022 FR-012).
+    layer: str = ""
 
 
 @dataclass
@@ -616,12 +634,23 @@ def get_opportunities(
     signal_type: Optional[str] = None,
     first_blocker: Optional[str] = None,
     near_miss: Optional[bool] = None,
+    criterion: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
     db: Optional[DBBackend] = None,
 ) -> list[dict[str, Any]]:
+    """Return evaluated opportunities matching the given filters.
+
+    When ``criterion`` is provided, results are restricted to opportunities that
+    have a failing evaluation (``passed`` is false) for that criterion, regardless
+    of whether it was the decisive ``first_blocker``. This backs the criterion
+    drilldown without loading the full evaluated set (spec 022 FR-023).
+    """
     db = db or get_db()
-    return _get_opportunities_db(start, end, symbol, decision, strategy, signal_type, first_blocker, near_miss, limit, offset, db)
+    return _get_opportunities_db(
+        start, end, symbol, decision, strategy, signal_type, first_blocker,
+        near_miss, criterion, limit, offset, db,
+    )
 
 
 def _journal_timestamp(entry: dict[str, Any]) -> Optional[datetime]:
@@ -1046,6 +1075,7 @@ def _get_opportunities_db(
     signal_type: Optional[str],
     first_blocker: Optional[str],
     near_miss: Optional[bool],
+    criterion: Optional[str],
     limit: int,
     offset: int,
     db: Any,
@@ -1054,6 +1084,19 @@ def _get_opportunities_db(
         start, end, symbol=symbol, decision=decision, strategy=strategy,
         signal_type=signal_type, first_blocker=first_blocker, near_miss=near_miss,
     )
+    if criterion:
+        # Keep only opportunities with a failing evaluation for this criterion.
+        # Matched on the composite (id, evaluated_at) key like the other joins,
+        # and across any legacy spellings of the canonical criterion name.
+        stored_names = _stored_criterion_names(criterion)
+        name_placeholders = ",".join("?" for _ in stored_names)
+        where_sql += (
+            " AND EXISTS (SELECT 1 FROM criterion_results cr "
+            "WHERE cr.opportunity_id = evaluated_opportunities.id "
+            "AND cr.evaluated_at = evaluated_opportunities.evaluated_at "
+            f"AND cr.criterion_name IN ({name_placeholders}) AND cr.passed = 0)"
+        )
+        params = [*params, *stored_names]
     limit = max(1, min(int(limit), config.STRATEGY_METRICS_MAX_OPPORTUNITIES))
     offset = max(0, int(offset))
     rows = db.fetchall(
@@ -1130,6 +1173,7 @@ def _criterion_summaries_db(db: Any, where_sql: str, params: list[Any]) -> list[
     rows = db.fetchall(
         f"""
         SELECT c.criterion_name AS criterion_name,
+               MAX(c.layer) AS layer,
                COUNT(*) AS evaluated_count,
                SUM(CASE WHEN c.passed = 1 THEN 1 ELSE 0 END) AS pass_count,
                SUM(CASE WHEN c.passed = 0 THEN 1 ELSE 0 END) AS fail_count,
@@ -1161,6 +1205,7 @@ def _criterion_summaries_db(db: Any, where_sql: str, params: list[Any]) -> list[
                 near_miss_contribution=int(row.get("near_miss_contribution") or 0),
                 average_failure_margin=None if avg_margin is None else round(float(avg_margin), 6),
                 incomplete_count=int(row.get("incomplete_count") or 0),
+                layer=str(row.get("layer") or ""),
             )
         )
     return summaries

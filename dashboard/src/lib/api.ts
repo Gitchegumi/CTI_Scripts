@@ -159,6 +159,9 @@ export async function getStrategyMetricOpportunities(params: {
   strategy?: string;
   signal_type?: string;
   first_blocker?: string;
+  // Restrict to opportunities where this criterion was evaluated and failed
+  // (passed === false), regardless of whether it was the decisive blocker.
+  criterion?: string;
   near_miss?: boolean;
   limit?: number;
   offset?: number;

@@ -15,6 +15,8 @@ from tradegumi.strategy_metrics import (
     CriterionResult,
     EvaluatedOpportunity,
     compare_periods,
+    export_summary,
+    get_opportunities,
     get_summary,
     prune_retention,
     record_opportunity,
@@ -118,3 +120,35 @@ def test_prune_retention_deletes_old_rows(pg_backend):
 
     summary = get_summary(iso(-200), iso(1), db=pg_backend)
     assert summary["total_evaluated"] == 1
+
+
+def test_criterion_filter_against_durable_backend(pg_backend):
+    """The criterion drilldown filter the opportunities endpoint forwards
+    (``get_opportunities(criterion=...)``) resolves correctly against Postgres
+    and returns only opportunities that failed the named criterion (spec 022 FR-023)."""
+    record_opportunity(make_opportunity(1, failed=1), db=pg_backend)  # macd passes
+    record_opportunity(make_opportunity(2, failed=2), db=pg_backend)  # macd fails
+
+    macd_failed = get_opportunities(iso(-1), iso(1), criterion="macd", db=pg_backend)
+    assert {o["id"] for o in macd_failed} == {"opp-2"}
+
+    # Unknown criterion yields an empty result, not an error.
+    assert get_opportunities(iso(-1), iso(1), criterion="missing", db=pg_backend) == []
+
+
+def test_export_summary_wraps_summary_unchanged(monkeypatch, tmp_path, pg_backend):
+    """export_summary wraps get_summary unchanged and carries the additive
+    `layer` field, guarding the JSON export contract (spec 022 FR-024/SC-007)."""
+    monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "signal_journal.jsonl")
+    opp = make_opportunity(1, failed=2)
+    opp.evaluated_at = "2026-06-10T12:00:00+00:00"
+    record_opportunity(opp, db=pg_backend)
+
+    summary = get_summary("2026-06-10", "2026-06-10", db=pg_backend)
+    exported = export_summary("2026-06-10", "2026-06-10", include_opportunities=True, db=pg_backend)
+
+    # Export wraps the summary unchanged (parity).
+    assert exported["summary"] == summary
+    assert {o["id"] for o in exported["opportunities"]} == {"opp-1"}
+    # Additive field flows through the export contract.
+    assert all("layer" in c for c in exported["summary"]["criterion_summaries"])

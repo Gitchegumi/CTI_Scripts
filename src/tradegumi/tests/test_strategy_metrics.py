@@ -496,6 +496,45 @@ def test_seeded_summary_performance():
     assert elapsed < 5
 
 
+def test_criterion_filter_returns_only_opportunities_that_failed_it():
+    """get_opportunities(criterion=...) backs the drilldown (spec 022 FR-023).
+
+    In the fixture, failed=1 fails only stoch_rsi; failed=2 also fails macd;
+    keltner never fails. The filter must return opportunities where that
+    criterion was evaluated and failed, regardless of decisive blocker.
+    """
+    db = temp_db()
+    record_opportunity(opportunity(1, failed=1), db)                      # stoch_rsi fail, macd pass
+    record_opportunity(opportunity(2, failed=2), db)                      # stoch_rsi fail, macd fail
+    record_opportunity(opportunity(3, decision="emitted", failed=0), db)  # all pass
+
+    macd_failed = get_opportunities(iso(-1), iso(1), criterion="macd", db=db)
+    assert {o["id"] for o in macd_failed} == {"opp-2"}
+
+    stoch_failed = get_opportunities(iso(-1), iso(1), criterion="stoch_rsi", db=db)
+    assert {o["id"] for o in stoch_failed} == {"opp-1", "opp-2"}
+
+    # keltner never fails in the fixture; unknown criterion is empty, not an error
+    assert get_opportunities(iso(-1), iso(1), criterion="keltner", db=db) == []
+    assert get_opportunities(iso(-1), iso(1), criterion="does_not_exist", db=db) == []
+
+    # Combinable with other filters and pagination
+    combined = get_opportunities(
+        iso(-1), iso(1), criterion="stoch_rsi", symbol="EURUSD", limit=1, offset=1, db=db
+    )
+    assert len(combined) == 1
+
+
+def test_criterion_summary_includes_layer():
+    """Criterion summaries expose the pipeline layer for the drilldown header (FR-012)."""
+    db = temp_db()
+    record_opportunity(opportunity(1, failed=2), db)
+    summary = get_summary(iso(-1), iso(1), db=db)
+    by_name = {c["criterion_name"]: c for c in summary["criterion_summaries"]}
+    assert by_name["stoch_rsi"]["layer"] == "signal_stack"
+    assert by_name["macd"]["layer"] == "signal_stack"
+
+
 # ── Threshold operator tests ──────────────────────────────────────────────────
 
 class TestEvaluateThreshold:

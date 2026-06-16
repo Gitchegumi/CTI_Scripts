@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { WatchlistData, SignalEntry, LoopState, TradeCorrelation } from "@/types";
 import type { StrategyMetricOpportunity, StrategyMetricsComparison, StrategyMetricsSummary } from "@/types";
 import { ApiStatus, OpenPosition, ClosedTrade } from "@/lib/api";
@@ -366,6 +366,96 @@ export function useStrategyMetricsComparison(params: {
   }, [refresh]);
 
   return { comparison, error, loading, refresh };
+}
+
+// ── Strategy Metrics report (controlled execution) ────────────────────────────
+// Spec 022 US1: filters are edited as draft state and a report is fetched only
+// when run() is called (no auto-refresh on param change). Guards against
+// duplicate concurrent fetches, drops stale responses, and — critically —
+// keeps the last successful report visible on error (FR-005/SC-009).
+
+export interface ReportFilters {
+  start: string;
+  end: string;
+  symbol?: string;
+  strategy?: string;
+  signal_type?: string;
+  decision?: string;
+  first_blocker?: string;
+}
+
+export type ReportStatus = "idle" | "loading" | "success" | "error";
+
+const REPORT_PAGE_SIZE = 200;
+
+export function useStrategyMetricsReport() {
+  const [summary, setSummary] = useState<StrategyMetricsSummary | null>(null);
+  const [opportunities, setOpportunities] = useState<StrategyMetricOpportunity[]>([]);
+  const [status, setStatus] = useState<ReportStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const inFlight = useRef(false);
+  const seq = useRef(0);
+  const lastFilters = useRef<ReportFilters | null>(null);
+
+  const run = useCallback(async (filters: ReportFilters) => {
+    if (!filters.start || !filters.end) return;
+    // Ignore duplicate activations while a fetch is already in progress (FR-004).
+    if (inFlight.current) return;
+    inFlight.current = true;
+    lastFilters.current = filters;
+    const mySeq = ++seq.current;
+    setStatus("loading");
+    try {
+      const { getStrategyMetricsSummary, getStrategyMetricOpportunities } = await import("@/lib/api");
+      const [summaryData, opportunityData] = await Promise.all([
+        getStrategyMetricsSummary(filters),
+        getStrategyMetricOpportunities({ ...filters, limit: REPORT_PAGE_SIZE }),
+      ]);
+      if (mySeq !== seq.current) return; // a newer run superseded this one
+      setSummary(summaryData);
+      setOpportunities(opportunityData);
+      setError(null);
+      setStatus("success");
+    } catch (e) {
+      if (mySeq !== seq.current) return;
+      // Keep the last successful report on screen; only surface the error.
+      setError(e instanceof Error ? e.message : "Failed to load strategy metrics");
+      setStatus("error");
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
+
+  const loadMore = useCallback(async () => {
+    const filters = lastFilters.current;
+    if (!filters || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const { getStrategyMetricOpportunities } = await import("@/lib/api");
+      const next = await getStrategyMetricOpportunities({
+        ...filters,
+        limit: REPORT_PAGE_SIZE,
+        offset: opportunities.length,
+      });
+      setOpportunities((current) => [...current, ...next]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more opportunities");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, opportunities.length]);
+
+  return {
+    summary,
+    opportunities,
+    status,
+    error,
+    loading: status === "loading",
+    loadingMore,
+    run,
+    loadMore,
+  };
 }
 
 // ── Export market hook ──────────────────────────────────────────────────────

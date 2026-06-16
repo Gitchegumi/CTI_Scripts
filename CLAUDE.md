@@ -4,6 +4,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-specs/019-split-runtime-containers/plan.md
+specs/022-metrics-dashboard-drilldown/plan.md
 
 <!-- SPECKIT END -->
