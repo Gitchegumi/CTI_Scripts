@@ -166,7 +166,7 @@ description: "Task list for Strategy Metrics Dashboard Usability & Criterion Dri
 - [X] T036 [P] Python docstrings added/verified for new/modified functions in `strategy_metrics.py` (`_stored_criterion_names`, `get_opportunities`, `CriterionSummary.layer`) and the `api_server.py` handler change. ✅
 - [X] T037 Ran suites: `vitest` 31/31 pass; `next build` clean (`/strategy-metrics` generated); `tsc` + `eslint` clean; pytest collects 67 (skip — no local Postgres). ✅
 - [ ] T038 Run the `specs/022-metrics-dashboard-drilldown/quickstart.md` manual verification checklist (US1–US5 + export compatibility). ⏳ **Pending** — needs the live backend + browser (and ideally a throwaway Postgres for the backend tests). Not runnable in this session.
-- [ ] T039 Submit the PR requesting the user/context-identified reviewer per the dual-account workflow (author DockeGumi / reviewer Gitchegumi). ⏳ **Pending** — confirm reviewer before opening the PR (changes not yet committed). (Constitution: Pull Request Policy)
+- [X] T039 Opened PR [#138](https://github.com/Gitchegumi/CTI_Scripts/pull/138) — author **DockeGumi**, reviewer **Gitchegumi** requested, base `master`. (Constitution: Pull Request Policy) ✅
 
 ---
 
