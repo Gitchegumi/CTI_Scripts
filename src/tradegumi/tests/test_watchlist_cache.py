@@ -61,6 +61,40 @@ def test_empty_watchlist_falls_back_to_execution_symbols(monkeypatch, watchlist_
     assert sorted(cache.scan_symbols) == sorted(available)
 
 
+def test_empty_watchlist_fallback_populates_default_metadata(monkeypatch, watchlist_file):
+    """Regression (#134): fallback scan_symbols need score/tier entries.
+
+    The main loop reads ``watchlist_data[symbol]["score"]`` and
+    ``watchlist_data[symbol]["tier"]`` for every scanned symbol. The empty-
+    watchlist fallback must therefore populate ``self.data`` with default
+    metadata for each fallback symbol, not just produce ``scan_symbols``.
+    """
+    write_watchlist(watchlist_file, tier1=[], tier2=[], ranked=[])
+    monkeypatch.setattr(
+        "tradegumi.main.load_watchlist_with_scores",
+        lambda: {},
+    )
+    cache = WatchlistCache()
+    available = {"EURUSD", "GBPUSD"}
+
+    cache.refresh(available)
+
+    # Every scan symbol must have score/tier accessible.
+    for symbol in cache.scan_symbols:
+        assert cache.data[symbol]["tier"] == "unranked"
+        assert cache.data[symbol]["score"] == 0.0
+    # Default metadata should be present for all configured execution symbols
+    # because load_watchlist_with_scores() returned an empty dict; availability
+    # filtering only controls scan_symbols, not the data cache.
+    assert set(cache.data) == set(config.EXECUTION_SYMBOLS)
+    # Only available symbols make it into scan_symbols.
+    assert set(cache.scan_symbols) == available
+    assert "USDJPY" not in cache.scan_symbols
+    if "USDJPY" in config.EXECUTION_SYMBOLS:
+        assert cache.data["USDJPY"]["tier"] == "unranked"
+        assert cache.data["USDJPY"]["score"] == 0.0
+
+
 def test_populated_watchlist_keeps_ranked_available_symbols(monkeypatch, watchlist_file):
     """When tiers exist, scan_symbols stays limited to ranked + available."""
     write_watchlist(
