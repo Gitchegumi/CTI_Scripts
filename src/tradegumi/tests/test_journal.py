@@ -265,16 +265,11 @@ def test_append_signal_creates_setup_group_and_trade_outcome_fields(journal_file
 def test_continuation_without_active_trade_creates_non_entry_evidence(journal_file, monkeypatch):
     monkeypatch.setattr(journal, "_now_iso", lambda: "2026-05-14T14:00:00+00:00")
 
-    signal_id = journal.append_signal(FakeSignal(signal_type="continuation"), rr=2.0)
-    entry = journal.read_journal()[0]
-
-    assert entry["signal_id"] == signal_id
-    assert entry["lifecycle_role"] == "management"
-    assert entry["management_accepted"] is False
-    assert entry["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_NO_ACTIVE_TRADE
-    assert entry["trade_id"] is None
-    assert entry["usable_for_strategy_stats"] is False
-    assert entry["trade_grade"] == "INVALID"
+    signal = FakeSignal(signal_type="continuation")
+    assert journal.is_orphan_continuation(signal)
+    signal_id = journal.append_signal(signal, rr=2.0)
+    assert signal_id is None
+    assert journal.read_journal() == []
 
 
 def test_append_signal_marks_duplicate_inside_group_window(journal_file, monkeypatch):

@@ -3,13 +3,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { readApiError } from "@/lib/api";
+import { directionColorClasses } from "@/lib/direction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface JournalEntry {
   signal_id: string;
   symbol: string;
-  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND";
+  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND" | "LONG" | "SHORT" | string;
   strategy: string;
   confidence: number;
   entry_price: number;
@@ -68,7 +69,7 @@ interface JournalEntry {
 interface TradeGroup {
   groupId: string;           // signal_id of first entry — stable key
   symbol: string;
-  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND";
+  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND" | "LONG" | "SHORT" | string;
   strategy: string;
   entries: JournalEntry[];   // oldest → newest
   avgConfidence: number;
@@ -129,7 +130,7 @@ function sourceLabel(source?: string | null): string | null {
 
 function isSameTrade(prev: JournalEntry, curr: JournalEntry): boolean {
   const e = curr.entry_price;
-  if (prev.direction === "BUY" || prev.direction === "UPTREND") {
+  if (isBullishDirection(prev.direction)) {
     // Still between the SL and TP of the previous signal → same trade
     return e > prev.stop_loss && e < prev.take_profit;
   } else {
@@ -350,8 +351,7 @@ function TradeGroupCard({
   const [masterSignalId, setMasterSignalId] = useState<string>(
     group.entries[group.entries.length - 1].signal_id
   );
-  const dirColor = group.direction === "BUY" || group.direction === "UPTREND" ? "text-green-400" : "text-red-400";
-  const dirBg   = group.direction === "BUY" || group.direction === "UPTREND" ? "border-green-800" : "border-red-800";
+  const { text: dirColor, border: dirBg } = directionColorClasses(group.direction);
   const first   = group.entries[0];
   const multi   = group.entries.length > 1;
 

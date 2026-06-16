@@ -59,6 +59,11 @@ def _post(payload: dict) -> bool:
         return False
 
 
+def _is_bullish_direction(direction: str) -> bool:
+    """Return True for any direction label that should render bullish/green."""
+    return str(direction or "").strip().upper() in {"BUY", "UPTREND", "LONG", "CALL"}
+
+
 def format_signal_message(signal: Signal) -> dict:
     """Build a Discord embed for a trade signal.
 
@@ -75,8 +80,8 @@ def format_signal_message(signal: Signal) -> dict:
         desc  = f"**Reason:** {signal.blocked_reason}"
         fields = []
     else:
-        color = 0x00FF00 if dirn == "BUY" else 0xFF0000
-        title = f"{'🟢' if dirn == 'BUY' else '🔴'} {sym} {dirn}"
+        color = 0x00FF00 if _is_bullish_direction(dirn) else 0xFF0000
+        title = f"{'🟢' if _is_bullish_direction(dirn) else '🔴'} {sym} {dirn}"
         desc  = f"Confidence: **{conf_pct}%** | Risk: {signal.risk_pct:.2f}%"
         signal_type = getattr(signal, "signal_type", "pullback")
         lifecycle_hint = "Continuation management event" if signal_type == "continuation" else "Trade entry candidate"
@@ -249,9 +254,13 @@ def post_signal(signal: Signal) -> bool:
 
     Always writes to signals.json (dashboard display) and appends to the
     permanent journal regardless of which delivery path is used.
+
+    Continuation signals without an active trade to manage are suppressed from
+    user-facing outputs (Discord, webhook, signals.json, journal) while still
+    counting as handled.
     """
     from tradegumi.discord_bot import post_signal_dm
-    from tradegumi.journal import append_signal
+    from tradegumi.journal import append_signal, is_orphan_continuation
 
     try:
         rr: Optional[float] = round(
@@ -261,6 +270,11 @@ def post_signal(signal: Signal) -> bool:
         )
     except ZeroDivisionError:
         rr = None
+
+    # Suppress orphan continuation signals before any user-facing emission.
+    if is_orphan_continuation(signal):
+        log.debug("post_signal suppressed for orphan continuation: %s %s", signal.symbol, signal.direction)
+        return True
 
     # Attempt DM first; fall back to webhook if bot not configured / fails
     msg_id = post_signal_dm(signal, rr=rr)

@@ -603,8 +603,18 @@ def _pullback_trigger(
     candles: Optional[pd.DataFrame] = None,
     value_area_midline: Optional[float] = None,
     value_area_tolerance: Optional[float] = None,
+    macd_current: Optional[float] = None,
 ) -> dict:
-    """Return approved direction-specific pullback trigger candle diagnostics."""
+    """Return approved direction-specific pullback trigger candle diagnostics.
+
+    The primary gate requires a recognised candlestick pattern (hammer/
+    engulfing for uptrend, shooting star/engulfing for downtrend) whose shape
+    matches a tight body/long-rejection-wick profile. When that pattern is
+    absent or its shape is marginal, a MACD-histogram momentum fallback is
+    allowed: if the histogram is on the correct side of zero for the trend
+    direction, the trigger is approved as ``macd_momentum`` so valid pullback
+    setups are not blocked solely by a missing exact candlestick label.
+    """
     base = {
         "passed": False,
         "trigger": None,
@@ -617,9 +627,26 @@ def _pullback_trigger(
         "rejection_wick_body_ratio": None,
         "close_position": None,
         "value_area_relation": None,
+        "momentum_fallback": False,
     }
+
+    def _macd_supports() -> bool:
+        if macd_current is None:
+            return False
+        return (trend == "Uptrend" and macd_current > 0) or (trend == "Downtrend" and macd_current < 0)
+
     if patterns.empty:
+        if _macd_supports():
+            return {
+                **base,
+                "passed": True,
+                "trigger": "macd_momentum",
+                "pattern": "MACD_HISTOGRAM",
+                "reason": "pullback_trigger_macd_momentum",
+                "momentum_fallback": True,
+            }
         return base
+
     last = patterns.iloc[-1]
     value = lambda name: last.get(name, 0) if hasattr(last, "get") else 0
     trigger: Optional[str] = None
@@ -638,7 +665,17 @@ def _pullback_trigger(
         elif value("CDL_ENGULFING") > 0:
             trigger = "bearish_engulfing"
             pattern = "CDL_ENGULFING"
+
     if trigger is None:
+        if _macd_supports():
+            return {
+                **base,
+                "passed": True,
+                "trigger": "macd_momentum",
+                "pattern": "MACD_HISTOGRAM",
+                "reason": "pullback_trigger_macd_momentum",
+                "momentum_fallback": True,
+            }
         return base
 
     context = {**base, "trigger": trigger, "pattern": pattern}
@@ -679,6 +716,23 @@ def _pullback_trigger(
         and rejection_wick_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO
         and rejection_wick_body_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO
     )
+    if not shape_ok and _macd_supports():
+        # Momentum continuation rescue: the candle isn't a textbook rejection
+        # shape, but MACD histogram is on the correct side of zero for the
+        # pullback direction, so allow the trigger to pass.
+        context.update({
+            "passed": True,
+            "reason": f"pullback_trigger_{trigger}_momentum_fallback",
+            "momentum_fallback": True,
+            "body_to_range": body_to_range,
+            "upper_wick": upper_wick,
+            "lower_wick": lower_wick,
+            "rejection_wick_ratio": rejection_wick_ratio,
+            "rejection_wick_body_ratio": rejection_wick_body_ratio,
+            "close_position": close_position,
+            "value_area_relation": value_area_relation,
+        })
+        return context
     context.update({
         "passed": bool(shape_ok),
         "reason": f"pullback_trigger_{trigger}" if shape_ok else "pullback_trigger_candle_failed",
@@ -1982,6 +2036,7 @@ class SignalEngine:
             df,
             value_area_midline=keltner_result.get("midline"),
             value_area_tolerance=keltner_result.get("tolerance"),
+            macd_current=float(macd_current),
         )
         stoch_result = _pullback_stoch_rsi(float(k), float(d), stoch[k_col], trend)
         macd_soft_context = {

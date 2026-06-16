@@ -149,6 +149,22 @@ class TestSaveSignal:
         assert fields["Signal Type"] == "continuation"
         assert fields["Lifecycle"] == "Continuation management event"
 
+    def test_format_signal_message_uses_bullish_color_for_uptrend(self):
+        signal = make_signal(direction="UPTREND")
+
+        payload = format_signal_message(signal)
+
+        assert payload["embeds"][0]["color"] == 0x00FF00
+        assert "🟢" in payload["embeds"][0]["title"]
+
+    def test_format_signal_message_uses_bearish_color_for_downtrend(self):
+        signal = make_signal(direction="DOWNTREND")
+
+        payload = format_signal_message(signal)
+
+        assert payload["embeds"][0]["color"] == 0xFF0000
+        assert "🔴" in payload["embeds"][0]["title"]
+
 
 # ── record_trade_correlation ─────────────────────────────────────────────────
 
