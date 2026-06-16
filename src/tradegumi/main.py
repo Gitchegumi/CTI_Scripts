@@ -484,6 +484,9 @@ def check_and_execute(
     # Post signal to Discord (alert_only and demo both alert)
     persist(diagnostic.to_opportunity(mode))
     post_result = post_signal(signal_obj)
+    if post_result["suppressed"]:
+        log.debug("%s: suppressed orphan continuation, skipping execution", symbol)
+        return f"{signal_obj.direction[0]}(suppressed)", trend, lr_1h, lr_15, lr_5
     if not post_result["suppressed"]:
         send_signal_callback({
             "symbol": signal_obj.symbol,
