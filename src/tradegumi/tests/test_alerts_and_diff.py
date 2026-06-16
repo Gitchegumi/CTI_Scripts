@@ -154,7 +154,7 @@ class TestSaveSignal:
 
         payload = format_signal_message(signal)
 
-        assert payload["embeds"][0]["color"] == 0x00FF00
+        assert payload["embeds"][0]["color"] == 0x2ECC71
         assert "🟢" in payload["embeds"][0]["title"]
 
     def test_format_signal_message_uses_bearish_color_for_downtrend(self):
@@ -162,7 +162,15 @@ class TestSaveSignal:
 
         payload = format_signal_message(signal)
 
-        assert payload["embeds"][0]["color"] == 0xFF0000
+        assert payload["embeds"][0]["color"] == 0xE74C3C
+        assert "🔴" in payload["embeds"][0]["title"]
+
+    def test_format_signal_message_uses_neutral_color_for_unknown_direction(self):
+        signal = make_signal(direction="UNKNOWN")
+
+        payload = format_signal_message(signal)
+
+        assert payload["embeds"][0]["color"] == 0x95A5A6
         assert "🔴" in payload["embeds"][0]["title"]
 
 

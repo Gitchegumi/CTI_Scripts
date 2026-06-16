@@ -468,34 +468,36 @@ def check_and_execute(
         ))
         persist(opportunity)
         log.warning("%s: risk-blocked actionable candidate: %s", symbol, reason)
-        post_signal(signal_obj)
+        post_result = post_signal(signal_obj)
+        if not post_result["suppressed"]:
+            send_signal_callback({
+                "symbol": signal_obj.symbol,
+                "direction": signal_obj.direction,
+                "confidence": signal_obj.confidence,
+                "strategy": signal_obj.strategy,
+                "signal_type": signal_obj.signal_type,
+                "mode": config.TRADEGUMI_MODE,
+                "blocked": reason,
+            })
+        return f"{signal_obj.direction[0]}(blocked)", trend, lr_1h, lr_15, lr_5
+
+    # Post signal to Discord (alert_only and demo both alert)
+    persist(diagnostic.to_opportunity(mode))
+    post_result = post_signal(signal_obj)
+    if not post_result["suppressed"]:
         send_signal_callback({
             "symbol": signal_obj.symbol,
             "direction": signal_obj.direction,
             "confidence": signal_obj.confidence,
             "strategy": signal_obj.strategy,
             "signal_type": signal_obj.signal_type,
+            "lr_1h": lr_1h,
+            "lr_15": lr_15,
+            "lr_5": lr_5,
+            "trend": trend,
             "mode": config.TRADEGUMI_MODE,
-            "blocked": reason,
+            "blocked": getattr(signal_obj, 'blocked_reason', None),
         })
-        return f"{signal_obj.direction[0]}(blocked)", trend, lr_1h, lr_15, lr_5
-
-    # Post signal to Discord (alert_only and demo both alert)
-    persist(diagnostic.to_opportunity(mode))
-    post_signal(signal_obj)
-    send_signal_callback({
-        "symbol": signal_obj.symbol,
-        "direction": signal_obj.direction,
-        "confidence": signal_obj.confidence,
-        "strategy": signal_obj.strategy,
-        "signal_type": signal_obj.signal_type,
-        "lr_1h": lr_1h,
-        "lr_15": lr_15,
-        "lr_5": lr_5,
-        "trend": trend,
-        "mode": config.TRADEGUMI_MODE,
-        "blocked": getattr(signal_obj, 'blocked_reason', None),
-    })
     tag = f"{signal_obj.direction[0]}(conf={signal_obj.confidence:.2f})"
 
     # Execute only in demo/live, and only through a client that matches the mode

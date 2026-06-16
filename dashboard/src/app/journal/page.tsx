@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { readApiError } from "@/lib/api";
-import { directionColorClasses } from "@/lib/direction";
+import { isBullishDirection, directionColorClasses } from "@/lib/direction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

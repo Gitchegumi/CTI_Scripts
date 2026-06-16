@@ -9,15 +9,10 @@ describe("direction helpers", () => {
     expect(isBullishDirection("call")).toBe(true);
   });
 
-  it("treats SELL/DOWNTREND/SHORT as bearish", () => {
+  it("treats SELL/DOWNTREND/SHORT and unknown as not bullish", () => {
     expect(isBullishDirection("SELL")).toBe(false);
     expect(isBullishDirection("DOWNTREND")).toBe(false);
     expect(isBullishDirection("SHORT")).toBe(false);
-  });
-
-  it("defaults bearish for empty/unknown directions", () => {
-    expect(isBullishDirection("")).toBe(false);
-    expect(isBullishDirection(undefined)).toBe(false);
     expect(isBullishDirection("UNKNOWN")).toBe(false);
   });
 
@@ -35,5 +30,15 @@ describe("direction helpers", () => {
       bg: "bg-red-900/30",
       border: "border-red-700",
     });
+  });
+
+  it("returns neutral/gray classes for unknown or empty directions", () => {
+    for (const dir of ["", "NONE", "UNKNOWN", "NEUTRAL", "FLAT", undefined]) {
+      expect(directionColorClasses(dir)).toEqual({
+        text: "text-slate-400",
+        bg: "bg-slate-800/30",
+        border: "border-slate-700",
+      });
+    }
   });
 });

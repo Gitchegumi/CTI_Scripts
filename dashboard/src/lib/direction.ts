@@ -7,6 +7,14 @@ export function directionColorClasses(direction: string | undefined): {
   bg: string;
   border: string;
 } {
+  const d = (direction ?? "").trim().toUpperCase();
+  if (d === "" || d === "NONE" || d === "UNKNOWN" || d === "NEUTRAL" || d === "FLAT") {
+    return {
+      text: "text-slate-400",
+      bg: "bg-slate-800/30",
+      border: "border-slate-700",
+    };
+  }
   const bullish = isBullishDirection(direction);
   return {
     text: bullish ? "text-green-400" : "text-red-400",
