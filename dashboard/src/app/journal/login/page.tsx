@@ -3,6 +3,19 @@
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+export function getRedirectTarget(
+  params: URLSearchParams | null,
+  fallback = "/journal"
+): string {
+  const raw = params?.get("from") ?? params?.get("redirect") ?? params?.get("returnTo") ?? "";
+  const target = raw.trim();
+  // Reject absolute URLs and paths outside the app root to avoid open redirects.
+  if (target && target.startsWith("/") && !target.startsWith("//")) {
+    return target;
+  }
+  return fallback;
+}
+
 function LoginForm() {
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
@@ -10,7 +23,7 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -21,7 +34,7 @@ function LoginForm() {
         body: JSON.stringify({ token }),
       });
       if (res.ok) {
-        router.push(params.get("from") ?? "/journal");
+        router.push(getRedirectTarget(params));
       } else {
         setError("Invalid token");
       }
