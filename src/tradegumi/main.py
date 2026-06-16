@@ -148,8 +148,12 @@ class WatchlistCache:
         if perf:
             log.debug("Perf watchlist loading %.4fs", time.perf_counter() - started)
         started = time.perf_counter()
+        # Regression (#132): if the persisted watchlist is empty or missing,
+        # fall back to the configured execution symbols so an available set
+        # of instruments still flows into the streaming/polling subscription.
+        watchlist_symbols = set(self.data) if self.data else set(config.EXECUTION_SYMBOLS)
         self.scan_symbols = [
-            s for s in self.data
+            s for s in watchlist_symbols
             if s in available and s not in config.UNAVAILABLE_INSTRUMENTS
         ]
         if perf:
