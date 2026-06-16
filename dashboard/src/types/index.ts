@@ -36,7 +36,7 @@ export interface AccountData {
 
 export interface SignalEntry {
   symbol: string;
-  direction: "BUY" | "SELL";
+  direction: "BUY" | "SELL" | "UPTREND" | "DOWNTREND" | "LONG" | "SHORT" | string;
   confidence: number;
   strategy?: string;
   entry_price: number;

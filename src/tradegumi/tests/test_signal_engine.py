@@ -104,13 +104,10 @@ def test_continuation_detection_state_is_preserved_without_entry_creation(tmp_pa
     )
 
     assert lifecycle_state_for_signal(signal)["lifecycle_role"] == "management"
-    journal.append_signal(signal)
-    entry = journal.read_journal()[0]
-
-    assert entry["signal_type"] == "continuation"
-    assert entry["lifecycle_role"] == journal.LIFECYCLE_MANAGEMENT
-    assert entry["management_rejection_reason"] == journal.MANAGEMENT_REJECTED_NO_ACTIVE_TRADE
-    assert entry["usable_for_strategy_stats"] is False
+    assert journal.is_orphan_continuation(signal)
+    signal_id = journal.append_signal(signal)
+    assert signal_id is None
+    assert journal.read_journal() == []
 
 
 def test_signal_engine_data_with_insufficient_candles_reports_missing_window():
@@ -1066,6 +1063,32 @@ class TestPullbackBridgeAndVersioning:
         assert signal is not None, reason
         assert signal.strategy == "CTI-v1.2-pullback"
         assert signal.pullback_trigger == "bearish_engulfing"
+
+    def test_pullback_trigger_allows_macd_momentum_fallback_without_pattern(self):
+        # No recognised candlestick pattern, but MACD histogram supports direction.
+        no_pattern = pd.DataFrame({"CDL_HAMMER": [0], "CDL_ENGULFING": [0]})
+        result = _pullback_trigger(no_pattern, "Uptrend", macd_current=0.001)
+        assert result["passed"] is True
+        assert result["trigger"] == "macd_momentum"
+        assert result["reason"] == "pullback_trigger_macd_momentum"
+        assert result["momentum_fallback"] is True
+
+    def test_pullback_trigger_allows_macd_momentum_fallback_for_marginal_shape(self):
+        # Pattern is present but the candle body is too large for the strict shape filter.
+        patterns = pd.DataFrame({"CDL_HAMMER": [-1]})
+        large_body = pd.DataFrame([{"o": 1.1000, "h": 1.1030, "l": 1.0998, "c": 1.1028}])
+        result = _pullback_trigger(patterns, "Uptrend", large_body, macd_current=0.001)
+        assert result["passed"] is True
+        assert result["trigger"] == "hammer"
+        assert result["momentum_fallback"] is True
+        assert "momentum_fallback" in result["reason"]
+
+    def test_pullback_trigger_still_fails_when_macd_does_not_support_direction(self):
+        # No pattern and MACD histogram on the wrong side of zero.
+        no_pattern = pd.DataFrame({"CDL_HAMMER": [0], "CDL_ENGULFING": [0]})
+        result = _pullback_trigger(no_pattern, "Uptrend", macd_current=-0.001)
+        assert result["passed"] is False
+        assert result["reason"] == "pullback_trigger_candle_failed"
 
     def test_pullback_trigger_rejects_wrong_direction_hammer_and_shooting_star(self):
         bullish_shooting_star = pd.DataFrame({"CDL_SHOOTINGSTAR": [-1], "CDL_HAMMER": [0]})

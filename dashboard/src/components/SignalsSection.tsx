@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { SignalEntry, ActiveSignal } from "@/types";
+import { directionColorClasses } from "@/lib/direction";
 
 const DISPLAY_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -92,8 +93,7 @@ export default function SignalsSection({ signals }: SignalsSectionProps) {
         <div className="p-3 grid gap-2 grid-cols-1 xs:grid-cols-2">
           {active.map(({ latest: sig, count }) => {
             const key = `${sig.symbol}:${sig.direction}`;
-            const dirColor = sig.direction === "BUY" ? "text-green-400" : "text-red-400";
-            const dirBg = sig.direction === "BUY" ? "bg-green-900/30 border-green-700" : "bg-red-900/30 border-red-700";
+            const { text: dirColor, bg: dirBg } = directionColorClasses(sig.direction);
             return (
               <div
                 key={key}

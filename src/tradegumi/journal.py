@@ -848,6 +848,24 @@ def _is_continuation_identity(signal_type: Any) -> bool:
     return str(signal_type or "").strip().lower() == "continuation"
 
 
+def active_trade_for_signal(signal, entries: Optional[list[dict[str, Any]]] = None) -> Optional[dict[str, Any]]:
+    """Return the newest active managed trade matching a signal's symbol/direction."""
+    if entries is None:
+        entries = _read_entries_oldest_first()
+    return _active_managed_trade_for_direction(entries, signal.symbol, signal.direction)
+
+
+def is_orphan_continuation(signal, entries: Optional[list[dict[str, Any]]] = None) -> bool:
+    """Return True when a signal is a continuation with no active trade to manage.
+
+    These signals are internal diagnostics only and must not be surfaced as
+    user-facing alerts, dashboard cards, or journal entries.
+    """
+    if not _is_continuation_identity(getattr(signal, "signal_type", None)):
+        return False
+    return active_trade_for_signal(signal, entries) is None
+
+
 def _entry_trade_id(entry: dict[str, Any]) -> str:
     """Return a stable lifecycle identifier for a journal entry."""
     existing = str(entry.get("trade_id") or "").strip()
@@ -1289,8 +1307,13 @@ def _record_prime_suppression(prime: dict[str, Any], new_entry: dict[str, Any], 
     prime["prime_suppressed_signal_outcomes"] = suppressed_outcomes[-25:]
 
 
-def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> str:
-    """Append a new PENDING entry to the journal. Returns the signal_id."""
+def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[str] = None, notes: str = "") -> Optional[str]:
+    """Append a new PENDING entry to the journal. Returns the signal_id.
+
+    Continuation signals without a matching active trade are not user-facing
+    signals; they are suppressed and ``None`` is returned so callers can skip
+    alerts, dashboard cards, and the rolling signals log.
+    """
     JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     ts = _now_iso()
@@ -1379,17 +1402,12 @@ def append_signal(signal, rr: Optional[float] = None, discord_msg_id: Optional[s
                 )
                 _append_management_evidence(existing_entries, active_same_symbol, signal, signal_id, ts, warning, LIFECYCLE_WARNING)
             else:
-                rejected = TradeManagementDecision(
-                    False,
-                    MANAGEMENT_REJECTED_NO_ACTIVE_TRADE,
-                    MANAGEMENT_REJECTED_NO_ACTIVE_TRADE,
-                    None,
-                    None,
-                    None,
-                    None,
-                    _coerce_float(getattr(signal, "entry_price", None)),
-                )
-                _append_management_evidence(existing_entries, None, signal, signal_id, ts, rejected)
+                # No active trade to manage — suppress user-facing output. Still
+                # write nothing; the caller (alerts.post_signal) skips Discord,
+                # signals.json, and callback delivery. Diagnostic intent is
+                # preserved via the persisted EvaluatedOpportunity upstream.
+                log.debug("Suppressing orphan continuation signal %s: no active %s trade", signal_id, signal.direction)
+                return None
             _write_entries(existing_entries)
             return signal_id
 
