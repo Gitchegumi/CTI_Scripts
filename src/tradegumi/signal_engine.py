@@ -50,7 +50,7 @@ def _chop_diagnostic_criterion(
     reason_map = {
         "opposite_signal_chop": "market_invalid:opposite_signal_chop",
         "chop_suppression": "market_invalid:chop_suppression",
-        "weak_15m_bridge": "trend:weak_15m_bridge",
+        "strong_opposing_15m_bridge": "market_invalid:strong_opposing_15m",
         "trend_not_persistent": "trend:not_persistent",
         "direction_flip_chop": "market_invalid:direction_flip_chop",
     }
@@ -1372,9 +1372,12 @@ class SignalEngine:
                 conflict_ctx,
             )
 
-        # 3. Stronger 15M bridge requirement
+        # 3. Strong opposing 15M LR is the abnormal/news-driven signature that the
+        # chop filter should catch. A soft opposing or flattening M15 during a normal
+        # 1H-anchored pullback is not chop and must not block the signal.
         required_15m = self.LR_15M_THRESHOLD * config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER
-        if abs(lr_15m) < required_15m:
+        lr_15m_opposes_1h = (trend == "Uptrend" and lr_15m < 0) or (trend == "Downtrend" and lr_15m > 0)
+        if lr_15m_opposes_1h and abs(lr_15m) >= required_15m:
             strength_ctx = {
                 "lr_15m": lr_15m,
                 "threshold_15m": self.LR_15M_THRESHOLD,
@@ -1382,11 +1385,11 @@ class SignalEngine:
                 "required_15m_strength": required_15m,
                 "margin": abs(lr_15m) - required_15m,
             }
-            criteria.append(_chop_diagnostic_criterion("weak_15m_bridge", strength_ctx))
+            criteria.append(_chop_diagnostic_criterion("strong_opposing_15m_bridge", strength_ctx))
             return (
                 True,
                 criteria,
-                "trend:weak_15m_bridge",
+                "market_invalid:strong_opposing_15m",
                 strength_ctx,
             )
 
