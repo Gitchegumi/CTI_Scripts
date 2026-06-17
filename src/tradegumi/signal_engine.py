@@ -365,6 +365,7 @@ def get_threshold_version() -> str:
         "chop_max_direction_flips": config.CHOP_MAX_DIRECTION_FLIPS,
         "chop_require_15m_strength_multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
         "chop_require_trend_persistence_candles": config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES,
+        "chop_require_15m_direction_alignment": config.CHOP_REQUIRE_15M_DIRECTION_ALIGNMENT,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:12]
@@ -1372,23 +1373,49 @@ class SignalEngine:
                 conflict_ctx,
             )
 
-        # 3. Stronger 15M bridge requirement
+        # 3. Stronger 15M bridge requirement — only applied when 15M opposes the 1H trend.
+        # A normal pullback has the 1H anchor stable and the 15M briefly softening or
+        # flattening; in that case the trend classification already validated the 15M
+        # direction/strength enough to give us a trend. We tighten the bridge only when
+        # the 15M is pointing the other way, which is the abnormal/news-driven signature.
         required_15m = self.LR_15M_THRESHOLD * config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER
-        if abs(lr_15m) < required_15m:
-            strength_ctx = {
-                "lr_15m": lr_15m,
-                "threshold_15m": self.LR_15M_THRESHOLD,
-                "multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
-                "required_15m_strength": required_15m,
-                "margin": abs(lr_15m) - required_15m,
-            }
-            criteria.append(_chop_diagnostic_criterion("weak_15m_bridge", strength_ctx))
-            return (
-                True,
-                criteria,
-                "trend:weak_15m_bridge",
-                strength_ctx,
+        lr_15m_opposes_1h = (trend == "Uptrend" and lr_15m < 0) or (trend == "Downtrend" and lr_15m > 0)
+        if lr_15m_opposes_1h or config.CHOP_REQUIRE_15M_DIRECTION_ALIGNMENT:
+            alignment_ok = (
+                (trend == "Uptrend" and lr_15m >= 0)
+                or (trend == "Downtrend" and lr_15m <= 0)
             )
+            if not alignment_ok:
+                strength_ctx = {
+                    "lr_15m": lr_15m,
+                    "threshold_15m": self.LR_15M_THRESHOLD,
+                    "multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
+                    "required_15m_strength": required_15m,
+                    "margin": abs(lr_15m) - required_15m,
+                }
+                criteria.append(_chop_diagnostic_criterion("weak_15m_bridge", strength_ctx))
+                return (
+                    True,
+                    criteria,
+                    "trend:weak_15m_bridge",
+                    strength_ctx,
+                )
+            # Aligned but below the stronger multiplier is allowed for normal pullbacks.
+            if lr_15m_opposes_1h and abs(lr_15m) < required_15m:
+                strength_ctx = {
+                    "lr_15m": lr_15m,
+                    "threshold_15m": self.LR_15M_THRESHOLD,
+                    "multiplier": config.CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER,
+                    "required_15m_strength": required_15m,
+                    "margin": abs(lr_15m) - required_15m,
+                }
+                criteria.append(_chop_diagnostic_criterion("weak_15m_bridge", strength_ctx))
+                return (
+                    True,
+                    criteria,
+                    "trend:weak_15m_bridge",
+                    strength_ctx,
+                )
 
         # 4. Trend persistence requirement
         persistence_needed = config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES

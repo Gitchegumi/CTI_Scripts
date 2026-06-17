@@ -1659,52 +1659,79 @@ class TestChopFilter:
         assert chop_criterion.context["suppression_candles_remaining"] <= config.CHOP_OPPOSITE_SIGNAL_SUPPRESSION_CANDLES
 
     def test_weak_15m_bridge_blocks_signal(self, monkeypatch):
-        """Requirement 3: abs(lr_15m) must be >= LR_15M_THRESHOLD * multiplier."""
+        """Requirement 3: an opposing 15M LR must be strong enough to bridge the 1H trend.
+
+        We need all three timeframes to agree enough to reach the chop filter, so
+        the 5M is also pointed up. The 15M opposes the 1H uptrend but is too weak
+        to be a credible bridge, so it should be rejected by the chop filter.
+        """
         from tradegumi import config
         now = datetime.now(timezone.utc)
         count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
         candles = closed_candles(count, now)
         engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
 
-        # 15M is just below chop threshold (0.008 * 1.25 = 0.010) but above trend threshold (0.008)
-        def weak_15m_lr(df, length):
+        def weak_opposing_15m_lr(df, length):
             if length == 20:
-                return pd.Series([0.012] * len(df))
+                return pd.Series([0.012] * len(df))  # 1H strong up
             if length == 25:
-                return pd.Series([0.009] * len(df))  # passes trend (>=0.008) but fails chop (<0.010)
-            return pd.Series([0.005] * len(df))
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", weak_15m_lr)
+                # Opposes 1H but below the stronger chop multiplier threshold
+                return pd.Series([-0.009] * len(df))
+            return pd.Series([0.005] * len(df))  # 5M up
+
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", weak_opposing_15m_lr)
         self._setup_continuation_signal(engine, monkeypatch, count)
         self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+        SignalEngine._cooldown.clear()
 
+        # Because 1H up / 15M down / 5M up, the trend filter itself returns no trend.
+        # The chop filter is only reached after a trend exists; verify the diagnostic
+        # reports no trend rather than emitting a signal.
         signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
         assert signal is None
-        assert diag.decision_reason == "trend:weak_15m_bridge"
-        assert diag.market_validity_state == "invalid"
-        chop_criterion = next(c for c in diag.criteria if c.criterion_name == "chop_filter")
-        assert chop_criterion.reason == "trend:weak_15m_bridge"
-        assert chop_criterion.context["lr_15m"] == 0.009
+        assert trend is None
+        assert diag.decision_reason == "no_trend"
+
+        # Directly verify the chop sub-filter: when 15M opposes 1H and is weak,
+        # _check_chop_filters blocks with weak_15m_bridge.
+        blocked, criteria, reason, _ = engine._check_chop_filters("EURUSD", "Uptrend", -0.009)
+        assert blocked is True
+        assert reason == "trend:weak_15m_bridge"
+        chop_criterion = next(c for c in criteria if c.criterion_name == "chop_filter")
+        assert chop_criterion.context["lr_15m"] == -0.009
         assert chop_criterion.context["required_15m_strength"] == 0.010
 
     def test_trend_persistence_blocks_without_prior_evaluations(self, monkeypatch):
-        """Requirement 4: without enough prior same-direction evaluations, signal is blocked."""
+        """Requirement 4: without enough prior same-direction evaluations, signal is blocked.
+
+        Default persistence is now one candle so a single warmup is enough to pass.
+        This test forces persistence to 2 and verifies the block when history is short.
+        """
         from tradegumi import config
+        import tradegumi.config as config_module
         now = datetime.now(timezone.utc)
         count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
         candles = closed_candles(count, now)
         engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
 
-        self._make_strong_lr(monkeypatch)
-        self._setup_continuation_signal(engine, monkeypatch, count)
-        # No warmup — persistence check should fail
-
-        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
-        assert signal is None
-        assert diag.decision_reason == "trend:not_persistent"
-        assert diag.market_validity_state == "invalid"
-        chop_criterion = next(c for c in diag.criteria if c.criterion_name == "chop_filter")
-        assert chop_criterion.reason == "trend:not_persistent"
-        assert chop_criterion.context["required_persistence_candles"] == config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES
+        orig_persistence = config_module.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES
+        try:
+            config_module.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES = 2
+            SignalEngine._cooldown.clear()
+            self._make_strong_lr(monkeypatch)
+            self._setup_continuation_signal(engine, monkeypatch, count)
+            # Directly test the chop filter helper with one prior evaluation.
+            engine._record_trend_evaluation("EURUSD", "Uptrend")
+            blocked, criteria, reason, _ = engine._check_chop_filters(
+                "EURUSD", "Uptrend", 0.012, current_time=now
+            )
+            assert blocked is True
+            assert reason == "trend:not_persistent"
+            chop_criterion = next(c for c in criteria if c.criterion_name == "chop_filter")
+            assert chop_criterion.context["required_persistence_candles"] == 2
+            assert chop_criterion.context["recent_directions"] == ["BUY"]
+        finally:
+            config_module.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES = orig_persistence
 
     def test_trend_persistence_passes_after_warmup(self, monkeypatch):
         """Requirement 4: with enough prior evaluations, signal proceeds."""
@@ -1814,3 +1841,44 @@ class TestChopFilter:
         signal2, trend2, _, _, _, diag2 = engine.check_symbol("EURUSD")
         assert signal2 is not None
         assert "chop_suppression_until" not in state or state.get("chop_suppression_until") is None
+
+    def test_normal_pullback_is_not_chop(self, monkeypatch):
+        """Issue 137: a normal pullback (1H stable, M15 briefly softens then resumes) must not be blocked as chop.
+
+        Simulates an uptrend that pulls back: H1 remains strongly bullish, current
+        M15 LR weakens to just above the trend threshold but below the chop bridge
+        multiplier, and the trend evaluation history shows a stable Uptrend (not rapid
+        direction flipping). With the current config defaults, this was incorrectly
+        classified as weak_15m_bridge chop. After the fix it should emit a signal.
+        """
+        from tradegumi import config
+        now = datetime.now(timezone.utc)
+        count = SignalEngine.SIGNAL_WINDOW_MIN_CANDLES
+        candles = closed_candles(count, now)
+        engine = SignalEngine(FakeClient({"M5": candles, "M15": candles, "H1": candles}), {"EURUSD"})
+
+        # Stable trend evaluations: all Uptrend, only one soft M15 value, then resumes.
+        self._warm_persistence(engine, "EURUSD", "Uptrend", config.CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES)
+
+        def normal_pullback_lr(df, length):
+            if length == 20:
+                return pd.Series([0.012] * len(df))  # 1H strong and stable
+            if length == 25:
+                # Current M15 LR is above trend threshold (0.008) but below chop multiplier (0.010).
+                # This is the softening that happens during a normal pullback.
+                return pd.Series([0.009] * len(df))
+            return pd.Series([0.005] * len(df))      # 5M aligned
+
+        monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", normal_pullback_lr)
+        self._setup_continuation_signal(engine, monkeypatch, count)
+        SignalEngine._cooldown.clear()
+
+        signal, trend, _, _, _, diag = engine.check_symbol("EURUSD")
+        assert signal is not None, f"Normal pullback was blocked: {diag.decision_reason}"
+        assert diag.decision_reason not in (
+            "trend:weak_15m_bridge",
+            "market_invalid:direction_flip_chop",
+            "market_invalid:opposite_signal_chop",
+            "market_invalid:chop_suppression",
+            "trend:not_persistent",
+        )
