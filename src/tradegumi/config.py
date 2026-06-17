@@ -224,10 +224,6 @@ CHOP_DIRECTION_FLIP_LOOKBACK_CANDLES = int(os.getenv("CHOP_DIRECTION_FLIP_LOOKBA
 CHOP_MAX_DIRECTION_FLIPS = int(os.getenv("CHOP_MAX_DIRECTION_FLIPS", "1"))
 CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER = float(os.getenv("CHOP_REQUIRE_15M_STRENGTH_MULTIPLIER", "1.25"))
 CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES = int(os.getenv("CHOP_REQUIRE_TREND_PERSISTENCE_CANDLES", "1"))
-# When true, the 15M LR must point in the same direction as the 1H trend for the
-# chop filter to treat it as a healthy bridge. A soft/opposing 15M during a
-# normal pullback still gets checked, but an aligned (or flat) 15M is not blocked.
-CHOP_REQUIRE_15M_DIRECTION_ALIGNMENT = os.getenv("CHOP_REQUIRE_15M_DIRECTION_ALIGNMENT", "true").lower() in ("true", "1", "yes")
 
 # ── CTI Challenge Rules ────────────────────────────────────────────────────
 # CTI_CHALLENGE_TYPE env var:
