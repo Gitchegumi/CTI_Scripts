@@ -16,6 +16,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -176,28 +177,49 @@ function DrilldownBody({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-        <Input placeholder="Symbol" value={filters.symbol}
-          onChange={(e) => setFilters((f) => ({ ...f, symbol: e.target.value }))} className="h-8" />
+      {/* Filter row 1: Symbol + Decision on their own rows for readability */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="w-full sm:w-40">
+          <Input
+            placeholder="Symbol"
+            value={filters.symbol}
+            onChange={(e) => setFilters((f) => ({ ...f, symbol: e.target.value }))}
+            className="h-8 w-full"
+          />
+        </div>
         <Select value={filters.decision} onValueChange={(v) => setFilters((f) => ({ ...f, decision: v }))}>
-          <SelectTrigger className="h-8"><SelectValue placeholder="Decision" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-full sm:w-44"><SelectValue placeholder="Decision" /></SelectTrigger>
           <SelectContent>
             <SelectItem value={ANY}>Any decision</SelectItem>
             {["emitted", "rejected", "skipped", "indeterminate"].map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Input placeholder="Signal type" value={filters.signal_type}
-          onChange={(e) => setFilters((f) => ({ ...f, signal_type: e.target.value }))} className="h-8" />
+      </div>
+
+      {/* Filter row 2: Signal type + Near miss + Blocker */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-full sm:w-44">
+          <Input
+            placeholder="Signal type"
+            value={filters.signal_type}
+            onChange={(e) => setFilters((f) => ({ ...f, signal_type: e.target.value }))}
+            className="h-8 w-full"
+          />
+        </div>
         <Select value={filters.nearMiss} onValueChange={(v) => setFilters((f) => ({ ...f, nearMiss: v }))}>
-          <SelectTrigger className="h-8"><SelectValue placeholder="Near miss" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-full sm:w-36"><SelectValue placeholder="Near miss" /></SelectTrigger>
           <SelectContent>
             <SelectItem value={ANY}>Any</SelectItem>
             <SelectItem value="near">Near miss</SelectItem>
             <SelectItem value="clean">Clean reject</SelectItem>
           </SelectContent>
         </Select>
-        <Input placeholder="Blocker" value={filters.blocker}
-          onChange={(e) => setFilters((f) => ({ ...f, blocker: e.target.value }))} className="h-8" />
+        <Input
+          placeholder="Blocker"
+          value={filters.blocker}
+          onChange={(e) => setFilters((f) => ({ ...f, blocker: e.target.value }))}
+          className="h-8 flex-1 min-w-32"
+        />
       </div>
 
       {loading ? (
@@ -235,14 +257,14 @@ function DrilldownBody({
                   </button>
                 </div>
                 {crit && (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-xs md:grid-cols-4">
+                  <dl className="grid grid-cols-1 gap-x-4 gap-y-2 border-t border-border px-3 py-2 text-xs sm:grid-cols-2">
                     <Detail label="Measured" value={fmtVal(crit.measured_value)} />
                     <Detail label="Threshold" value={`${crit.threshold_operator} ${fmtVal(crit.threshold_value)}`} />
                     <Detail label="Actual pass" value={String(crit.passed)} />
                     <Detail label="Expected pass" value={crit.expected_pass == null ? "—" : String(crit.expected_pass)} />
                     <Detail label="Margin" value={crit.margin ?? "—"} />
-                    <Detail label="Blocker" value={crit.reason || o.decision_reason || "—"} className="col-span-2 md:col-span-3" />
-                  </div>
+                    <Detail label="Blocker" value={crit.reason || o.decision_reason || "—"} className="sm:col-span-2" />
+                  </dl>
                 )}
                 {expanded && (
                   <div className="border-t border-border px-3 py-2">
@@ -280,9 +302,9 @@ function Stat({ label, value, className }: { label: string; value: React.ReactNo
 
 function Detail({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
   return (
-    <div className={className}>
-      <span className="text-muted-foreground">{label}: </span>
-      <span className="tabular-nums text-foreground">{value}</span>
+    <div className={cn("flex flex-col gap-0.5", className)}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words text-xs tabular-nums text-foreground">{value}</dd>
     </div>
   );
 }

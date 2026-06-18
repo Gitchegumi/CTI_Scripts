@@ -4,6 +4,9 @@
  * Pipeline funnel (evaluated → candidate → rules evaluated → emitted/rejected)
  * rendered as ordered, proportional stepped bars (spec 022 FR-019). SSR-safe,
  * labelled, and degrades to an empty-state when no stages are present.
+ *
+ * Labels render above bars in a stacked layout so they never overlap bar content,
+ * regardless of how narrow the bar becomes at the tail of the funnel.
  */
 import { cn } from "@/lib/utils";
 
@@ -44,25 +47,27 @@ export function PipelineFunnel({ funnel }: { funnel: Record<string, number> | un
   });
   const max = Math.max(...entries.map(([, v]) => v), 1);
   return (
-    <ol className="space-y-1.5">
+    <ol className="space-y-3">
       {entries.map(([key, value]) => {
         const pct = Math.round((value / max) * 100);
         const isReject = key.startsWith("rejected");
         return (
-          <li key={key} className="flex items-center gap-2">
-            <span className="w-28 shrink-0 text-xs text-muted-foreground">
-              {STAGE_LABELS[key] ?? key}
-            </span>
-            <div className="relative h-6 flex-1 overflow-hidden rounded bg-muted/40">
+          <li key={key} className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {STAGE_LABELS[key] ?? key}
+              </span>
+              <span className="text-xs tabular-nums text-foreground">
+                {value.toLocaleString()}
+              </span>
+            </div>
+            <div className="relative h-6 w-full overflow-hidden rounded bg-muted/40">
               <div
                 className={cn("absolute inset-y-0 left-0 rounded", isReject ? "bg-chart-2/60" : "bg-chart-4/60")}
                 style={{ width: `${Math.max(pct, 2)}%` }}
                 aria-hidden="true"
               />
             </div>
-            <span className="w-12 shrink-0 text-right text-sm tabular-nums text-foreground">
-              {value.toLocaleString()}
-            </span>
           </li>
         );
       })}
