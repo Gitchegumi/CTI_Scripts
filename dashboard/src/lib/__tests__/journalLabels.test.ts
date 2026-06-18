@@ -128,7 +128,7 @@ describe("reachedTargetType", () => {
       reachedTargetType({
         trade_grade: "TP_HIT",
       })
-    ).toBe("original"); // Falls back to "original" when both TPs are null
+    ).toBeNull(); // Not enough data to determine original vs extended
   });
 
   it("returns 'original' when outcome is 'tp' (not just grade)", () => {

@@ -112,7 +112,7 @@ export function reachedTargetType(entry: {
   const originalTP = entry.initial_take_profit ?? entry.take_profit;
   const currentTP = entry.current_take_profit;
 
-  if (originalTP == null || currentTP == null) return "original";
+  if (originalTP == null || currentTP == null) return null;
 
   // If current TP differs from original, the target was extended
   if (Math.abs(currentTP - originalTP) > 1e-9) return "extended";
