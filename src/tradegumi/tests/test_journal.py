@@ -315,6 +315,30 @@ def test_continuation_accepts_break_even_and_tp_extension(journal_file, monkeypa
     assert trade["tp_extension_count"] == 1
 
 
+def test_continuation_evidence_has_continuation_management_event_exclusion_reason(journal_file, monkeypatch):
+    """Continuation management evidence must carry a readable stats_exclusion_reason.
+
+    Issue #143: the dashboard converts `continuation_management_event` to
+    "Continuation management event" via the label mapping.  This test verifies
+    the backend persists the raw identifier so the frontend can map it.
+    """
+    times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
+    monkeypatch.setattr(journal, "_now_iso", lambda: next(times))
+
+    journal.append_signal(FakeSignal())
+    journal.append_signal(FakeSignal(signal_type="continuation", signal_price=1.1022, entry_price=1.1022))
+    management, trade = journal.read_journal()
+
+    # Management evidence is excluded from strategy stats with a readable reason
+    assert management["usable_for_strategy_stats"] is False
+    assert management["stats_exclusion_reason"] == "continuation_management_event"
+    # The trade (entry) itself remains usable
+    assert trade["usable_for_strategy_stats"] is True
+    # The trade's current TP was extended from the initial TP
+    assert trade["current_take_profit"] != trade["initial_take_profit"]
+    assert trade["tp_extension_count"] == 1
+
+
 def test_continuation_accepts_profit_protection(journal_file, monkeypatch):
     times = iter(["2026-05-14T14:00:00+00:00", "2026-05-14T14:05:00+00:00"])
     monkeypatch.setattr(journal, "_now_iso", lambda: next(times))

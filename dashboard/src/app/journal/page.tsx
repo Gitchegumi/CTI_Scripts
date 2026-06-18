@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { readApiError } from "@/lib/api";
 import { isBullishDirection, directionColorClasses } from "@/lib/direction";
+import { statsUseLabel, reachedTargetLabel } from "@/lib/journalLabels";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -104,13 +105,14 @@ function titleCaseToken(value?: string | null): string {
   if (!value) return "None";
   return value
     .split("_")
+    .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
 function outcomeLabel(entry: JournalEntry): string | null {
-  const status = entry.status ? titleCaseToken(entry.status) : null;
-  const outcome = entry.outcome && entry.outcome !== "none" ? titleCaseToken(entry.outcome) : null;
+  const status = entry.status ? statsUseLabel(entry.status) : null;
+  const outcome = entry.outcome && entry.outcome !== "none" ? statsUseLabel(entry.outcome) : null;
   if (!status && !outcome) return null;
   return outcome ? `${status ?? "Open"} / ${outcome}` : status;
 }
@@ -123,7 +125,7 @@ function sourceLabel(source?: string | null): string | null {
   if (source === "historical_candle") return "Candle";
   if (source === "manual") return "Manual";
   if (source === "system_prime_filter") return "Prime filter";
-  return titleCaseToken(source);
+  return statsUseLabel(source);
 }
 
 // ── Grouping logic ────────────────────────────────────────────────────────────
@@ -402,7 +404,7 @@ function TradeGroupCard({
       {(() => {
         const master = group.entries.find(e => e.signal_id === masterSignalId) ?? first;
         return (
-          <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+          <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs [overflow-wrap:anywhere]">
             <div className="text-slate-400">Avg Confidence</div>
             <div className="text-white text-right">{Math.round(group.avgConfidence * 100)}%</div>
             <div className="text-slate-400">Entry</div>
@@ -418,7 +420,7 @@ function TradeGroupCard({
             {master.lifecycle_role && master.lifecycle_role !== "legacy_signal" && (
               <>
                 <div className="text-slate-400">Lifecycle</div>
-                <div className="text-cyan-200 text-right">{titleCaseToken(master.lifecycle_role)}</div>
+                <div className="text-cyan-200 text-right">{statsUseLabel(master.lifecycle_role)}</div>
               </>
             )}
             {(master.current_stop_loss != null || master.current_take_profit != null) && (
@@ -434,8 +436,8 @@ function TradeGroupCard({
             {master.lifecycle_role === "management" && (
               <>
                 <div className="text-slate-400">Management</div>
-                <div className={master.management_accepted ? "text-green-300 text-right" : "text-orange-300 text-right"}>
-                  {master.management_accepted ? "Accepted" : titleCaseToken(master.management_rejection_reason || master.management_reason || "Rejected")}
+                <div className={master.management_accepted ? "text-green-300 text-right" : "text-orange-300 text-right break-words whitespace-normal"}>
+                  {master.management_accepted ? "Accepted" : statsUseLabel(master.management_rejection_reason || master.management_reason || "Rejected")}
                 </div>
               </>
             )}
@@ -453,15 +455,9 @@ function TradeGroupCard({
             <div className="text-white text-right">
               {master.entry_valid_at_signal == null ? "Unknown" : master.entry_valid_at_signal ? "Yes" : "No"}
             </div>
-            <div className="text-slate-400">Miss / ATR</div>
-            <div className="text-white text-right">
-              {master.entry_miss_distance?.absolute != null ? master.entry_miss_distance.absolute.toFixed(5) : "Unknown"}
-              {" / "}
-              {master.entry_miss_distance?.atr_normalized != null ? master.entry_miss_distance.atr_normalized.toFixed(2) : "Unknown"}
-            </div>
             <div className="text-slate-400">Stats Use</div>
-            <div className={master.usable_for_strategy_stats ? "text-green-300 text-right" : "text-orange-300 text-right"}>
-              {master.usable_for_strategy_stats ? "Included" : (master.stats_exclusion_reason ?? "Excluded")}
+            <div className={`${master.usable_for_strategy_stats ? "text-green-300" : "text-orange-300"} text-right break-words whitespace-normal`}>
+              {master.usable_for_strategy_stats ? "Included" : statsUseLabel(master.stats_exclusion_reason ?? "Excluded")}
             </div>
             {suppressedPrimeLabel(master) && (
               <>
@@ -477,11 +473,19 @@ function TradeGroupCard({
                 </div>
               </>
             )}
+            {reachedTargetLabel(master) && (
+              <>
+                <div className="text-slate-400">Reached Target</div>
+                <div className="text-white text-right">
+                  {reachedTargetLabel(master)}
+                </div>
+              </>
+            )}
             {master.managed_result_category && (
               <>
                 <div className="text-slate-400">Managed Result</div>
-                <div className="text-white text-right">
-                  {titleCaseToken(master.managed_result_category)}
+                <div className="text-white text-right break-words whitespace-normal">
+                  {statsUseLabel(master.managed_result_category)}
                   {master.captured_r != null ? ` (${master.captured_r.toFixed(2)}R)` : ""}
                 </div>
               </>
@@ -509,7 +513,7 @@ function TradeGroupCard({
             {master.ambiguous_reason && (
               <>
                 <div className="text-slate-400">Ambiguous</div>
-                <div className="text-amber-300 text-right">{titleCaseToken(master.ambiguous_reason)}</div>
+                <div className="text-amber-300 text-right">{statsUseLabel(master.ambiguous_reason)}</div>
               </>
             )}
           </div>
