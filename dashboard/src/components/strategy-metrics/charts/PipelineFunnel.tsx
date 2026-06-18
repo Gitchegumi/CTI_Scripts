@@ -7,6 +7,9 @@
  *
  * Labels render above bars in a stacked layout so they never overlap bar content,
  * regardless of how narrow the bar becomes at the tail of the funnel.
+ *
+ * Issue #144: stages with a clear API filter mapping are clickable — clicking
+ * calls `onSelectStage` with the stage key.
  */
 import { cn } from "@/lib/utils";
 
@@ -34,7 +37,22 @@ const STAGE_ORDER = [
   "rejected_count",
 ];
 
-export function PipelineFunnel({ funnel }: { funnel: Record<string, number> | undefined }) {
+/** Stages that have a clear API filter mapping for drill-down. */
+const CLICKABLE_STAGES: Record<string, string> = {
+  total_evaluated: "evaluated",
+  emitted: "emitted",
+  emitted_count: "emitted",
+  rejected: "rejected",
+  rejected_count: "rejected",
+};
+
+export function PipelineFunnel({
+  funnel,
+  onSelectStage,
+}: {
+  funnel: Record<string, number> | undefined;
+  onSelectStage?: (stageKey: string) => void;
+}) {
   const entries = Object.entries(funnel ?? {}).filter(([, v]) => typeof v === "number");
   if (!entries.length) {
     return <div className="py-6 text-sm text-muted-foreground">No pipeline data for this range.</div>;
@@ -51,6 +69,7 @@ export function PipelineFunnel({ funnel }: { funnel: Record<string, number> | un
       {entries.map(([key, value]) => {
         const pct = Math.round((value / max) * 100);
         const isReject = key.startsWith("rejected");
+        const clickable = onSelectStage != null && key in CLICKABLE_STAGES && value > 0;
         return (
           <li key={key} className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
@@ -61,7 +80,27 @@ export function PipelineFunnel({ funnel }: { funnel: Record<string, number> | un
                 {value.toLocaleString()}
               </span>
             </div>
-            <div className="relative h-6 w-full overflow-hidden rounded bg-muted/40">
+            <div
+              {...(clickable
+                ? {
+                    type: "button" as const,
+                    onClick: () => onSelectStage!(key),
+                    role: "button",
+                    tabIndex: 0,
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectStage!(key);
+                      }
+                    },
+                  }
+                : {})}
+              className={cn(
+                "relative h-6 w-full overflow-hidden rounded bg-muted/40",
+                clickable &&
+                  "cursor-pointer hover:bg-muted/50 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
               <div
                 className={cn("absolute inset-y-0 left-0 rounded", isReject ? "bg-chart-2/60" : "bg-chart-4/60")}
                 style={{ width: `${Math.max(pct, 2)}%` }}
