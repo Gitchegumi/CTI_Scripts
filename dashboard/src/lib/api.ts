@@ -163,6 +163,7 @@ export async function getStrategyMetricOpportunities(params: {
   // (passed === false), regardless of whether it was the decisive blocker.
   criterion?: string;
   near_miss?: boolean;
+  near_miss_reason?: string;
   limit?: number;
   offset?: number;
 }): Promise<StrategyMetricOpportunity[]> {

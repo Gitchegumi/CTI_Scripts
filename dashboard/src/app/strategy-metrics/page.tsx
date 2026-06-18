@@ -1,23 +1,32 @@
 "use client";
 
 /**
- * Strategy Metrics dashboard (spec 022).
+ * Strategy Metrics dashboard (spec 022, issue #144).
  *
  * Composes the redesigned page in the required hierarchy (FR-018): report
  * controls → executive summary → failure diagnosis → criterion drilldown →
  * opportunity explorer. Reports run only on Apply (US1), the last successful
  * report stays visible during loads/errors (FR-005), and any criterion can be
  * drilled into (US2).
+ *
+ * Issue #144: summary cards, near-miss reasons, and pipeline funnel stages
+ * are now clickable — each opens a MetricDrilldown Sheet showing the
+ * underlying records.
  */
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useStrategyMetricsReport, type ReportFilters } from "@/hooks/useData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReportControls } from "@/components/strategy-metrics/ReportControls";
-import { ExecutiveSummary } from "@/components/strategy-metrics/ExecutiveSummary";
+import { ExecutiveSummary, type CardClickSpec } from "@/components/strategy-metrics/ExecutiveSummary";
 import { FailureDiagnosis } from "@/components/strategy-metrics/FailureDiagnosis";
 import { CriterionDrilldown } from "@/components/strategy-metrics/CriterionDrilldown";
+import {
+  MetricDrilldown,
+  METRIC_DRILLDOWN_CLOSED,
+  type MetricDrilldownState,
+} from "@/components/strategy-metrics/MetricDrilldown";
 import { OpportunityExplorer } from "@/components/strategy-metrics/OpportunityExplorer";
 import type { StrategyMetricsSummary } from "@/types";
 
@@ -34,15 +43,61 @@ function defaultFilters(): ReportFilters {
 function Warnings({ summary }: { summary: StrategyMetricsSummary | null }) {
   if (!summary?.data_quality_warnings.length) return null;
   return (
-    <div className="rounded-lg border border-chart-3/40 bg-chart-3/10 p-3 text-sm text-chart-3" role="status">
-      {summary.data_quality_warnings.map((w) => <div key={w}>{w}</div>)}
+    <div
+      className="rounded-lg border border-chart-3/40 bg-chart-3/10 p-3 text-sm text-chart-3"
+      role="status"
+    >
+      {summary.data_quality_warnings.map((w) => (
+        <div key={w}>{w}</div>
+      ))}
     </div>
   );
 }
 
+/** Pipeline funnel stage key → MetricDrilldown spec. */
+const STAGE_SPECS: Record<string, CardClickSpec> = {
+  total_evaluated: {
+    title: "Pipeline: Evaluated",
+    description: "All evaluated opportunities in the pipeline, most recent first.",
+    extraParams: {},
+  },
+  emitted: {
+    title: "Pipeline: Emitted",
+    description: "Opportunities that were emitted, most recent first.",
+    extraParams: { decision: "emitted" },
+  },
+  emitted_count: {
+    title: "Pipeline: Emitted",
+    description: "Opportunities that were emitted, most recent first.",
+    extraParams: { decision: "emitted" },
+  },
+  signal_emitted: {
+    title: "Pipeline: Emitted",
+    description: "Opportunities that were emitted, most recent first.",
+    extraParams: { decision: "emitted" },
+  },
+  rejected: {
+    title: "Pipeline: Rejected",
+    description: "Opportunities that were rejected, most recent first.",
+    extraParams: { decision: "rejected" },
+  },
+  rejected_count: {
+    title: "Pipeline: Rejected",
+    description: "Opportunities that were rejected, most recent first.",
+    extraParams: { decision: "rejected" },
+  },
+  signal_rejected: {
+    title: "Pipeline: Rejected",
+    description: "Opportunities that were rejected, most recent first.",
+    extraParams: { decision: "rejected" },
+  },
+};
+
 export default function StrategyMetricsPage() {
   const [appliedFilters, setAppliedFilters] = useState<ReportFilters>(defaultFilters);
   const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
+  const [metricDrilldown, setMetricDrilldown] =
+    useState<MetricDrilldownState>(METRIC_DRILLDOWN_CLOSED);
   const { summary, opportunities, status, error, loading, loadingMore, run, loadMore } =
     useStrategyMetricsReport();
 
@@ -58,6 +113,24 @@ export default function StrategyMetricsPage() {
     setAppliedFilters(filters);
     void run(filters);
   }
+
+  const handleMetricClick = useCallback((spec: CardClickSpec) => {
+    setMetricDrilldown({ ...spec, open: true });
+  }, []);
+
+  const handleSelectNearMiss = useCallback((reason: string) => {
+    setMetricDrilldown({
+      open: true,
+      title: `Near-miss: ${reason}`,
+      description: `Opportunities near-missing on "${reason}", most recent first.`,
+      extraParams: { near_miss: true, near_miss_reason: reason },
+    });
+  }, []);
+
+  const handleSelectStage = useCallback((stageKey: string) => {
+    const spec = STAGE_SPECS[stageKey];
+    if (spec) setMetricDrilldown({ ...spec, open: true });
+  }, []);
 
   async function handleExport() {
     const { exportStrategyMetrics } = await import("@/lib/api");
@@ -77,7 +150,9 @@ export default function StrategyMetricsPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">Dashboard</Link>
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+            Dashboard
+          </Link>
           <span className="text-sm font-semibold text-foreground">Strategy Metrics</span>
         </div>
       </header>
@@ -91,7 +166,10 @@ export default function StrategyMetricsPage() {
         />
 
         {status === "error" && error && (
-          <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          >
             <AlertTriangle className="size-4" />
             {error} — showing the last successful report.
           </div>
@@ -103,8 +181,13 @@ export default function StrategyMetricsPage() {
           <LoadingSkeleton />
         ) : (
           <>
-            <ExecutiveSummary summary={summary} />
-            <FailureDiagnosis summary={summary} onSelectCriterion={setSelectedCriterion} />
+            <ExecutiveSummary summary={summary} onMetricClick={handleMetricClick} />
+            <FailureDiagnosis
+              summary={summary}
+              onSelectCriterion={setSelectedCriterion}
+              onSelectNearMiss={handleSelectNearMiss}
+              onSelectStage={handleSelectStage}
+            />
             <OpportunityExplorer
               opportunities={opportunities}
               totalEvaluated={summary?.total_evaluated ?? opportunities.length}
@@ -120,6 +203,12 @@ export default function StrategyMetricsPage() {
           summary={summary}
           onClose={() => setSelectedCriterion(null)}
         />
+
+        <MetricDrilldown
+          state={metricDrilldown}
+          appliedFilters={appliedFilters}
+          onClose={() => setMetricDrilldown(METRIC_DRILLDOWN_CLOSED)}
+        />
       </main>
     </div>
   );
@@ -129,10 +218,14 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-5" aria-busy="true" aria-label="Loading report">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 rounded-lg" />
+        ))}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-48 rounded-lg" />)}
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-48 rounded-lg" />
+        ))}
       </div>
       <Skeleton className="h-64 rounded-lg" />
     </div>

@@ -336,6 +336,7 @@ export interface StrategyMetricOpportunity {
   managed_exit_reason?: string | null;
   managed_result_category?: string | null;
   captured_r?: number | null;
+  near_miss_reason?: string | null;
   criteria: StrategyMetricCriterion[];
 }
 

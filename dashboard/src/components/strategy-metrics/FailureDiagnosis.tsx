@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Failure diagnosis section (spec 022 US4, FR-019/FR-020).
+ * Failure diagnosis section (spec 022 US4, FR-019/FR-020, issue #144).
  *
  * Surfaces data already computed server-side: ranked top blockers, a clickable
- * criterion pass/fail table (opens the drilldown), near-miss reason counts, and
- * the pipeline funnel. Everything degrades gracefully when a range has no data.
+ * criterion pass/fail table (opens the drilldown), near-miss reason counts
+ * (now clickable — opens MetricDrilldown), and the pipeline funnel (stages
+ * with clear API filters are now clickable). Everything degrades gracefully
+ * when a range has no data.
  */
 import { ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,18 +43,30 @@ function countMapToItems(
 export function FailureDiagnosis({
   summary,
   onSelectCriterion,
+  onSelectNearMiss,
+  onSelectStage,
 }: {
   summary: StrategyMetricsSummary | null;
   onSelectCriterion: (criterionName: string) => void;
+  /** Called when a near-miss reason bar is clicked. */
+  onSelectNearMiss?: (reason: string) => void;
+  /** Called when a clickable pipeline funnel stage is clicked. */
+  onSelectStage?: (stageKey: string) => void;
 }) {
-  const blockers: BarListItem[] = (summary?.top_blockers ?? []).slice(0, 8).map((b) => ({
-    label: b.criterion_name,
-    value: b.blocked_count,
-    hint: `impact ${b.combined_score.toFixed(2)}`,
-    barClassName: "bg-chart-2/60",
-    onClick: () => onSelectCriterion(b.criterion_name),
-  }));
-  const nearMiss = countMapToItems(summary?.near_miss_reason_counts, "bg-chart-3/60");
+  const blockers: BarListItem[] = (summary?.top_blockers ?? [])
+    .slice(0, 8)
+    .map((b) => ({
+      label: b.criterion_name,
+      value: b.blocked_count,
+      hint: `impact ${b.combined_score.toFixed(2)}`,
+      barClassName: "bg-chart-2/60",
+      onClick: () => onSelectCriterion(b.criterion_name),
+    }));
+  const nearMiss = countMapToItems(
+    summary?.near_miss_reason_counts,
+    "bg-chart-3/60",
+    onSelectNearMiss,
+  );
   const criteria = summary?.criterion_summaries ?? [];
 
   return (
@@ -61,27 +75,35 @@ export function FailureDiagnosis({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Top blockers by impact</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Top blockers by impact</CardTitle>
+          </CardHeader>
           <CardContent>
             <BarList items={blockers} emptyMessage="No blockers ranked for this range." />
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-sm">Near-miss reasons</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Near-miss reasons</CardTitle>
+          </CardHeader>
           <CardContent>
             <BarList items={nearMiss} emptyMessage="No near misses for this range." />
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-sm">Pipeline funnel</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Pipeline funnel</CardTitle>
+          </CardHeader>
           <CardContent>
-            <PipelineFunnel funnel={summary?.pipeline_funnel} />
+            <PipelineFunnel funnel={summary?.pipeline_funnel} onSelectStage={onSelectStage} />
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-sm">Criterion pass / fail (click a row to drill in)</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">Criterion pass / fail (click a row to drill in)</CardTitle>
+        </CardHeader>
         <CardContent className="px-0">
           {criteria.length ? (
             <div className="max-h-96 overflow-auto">
@@ -114,7 +136,9 @@ export function FailureDiagnosis({
                         }
                       }}
                     >
-                      <TableCell className="font-medium text-foreground">{c.criterion_name}</TableCell>
+                      <TableCell className="font-medium text-foreground">
+                        {c.criterion_name}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{c.layer || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums text-chart-1">
                         {c.pass_count} ({formatPercent(c.pass_rate)})
@@ -122,19 +146,27 @@ export function FailureDiagnosis({
                       <TableCell className="text-right tabular-nums text-chart-2">
                         {c.fail_count} ({formatPercent(c.fail_rate)})
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-chart-3">{c.near_miss_contribution}</TableCell>
+                      <TableCell className="text-right tabular-nums text-chart-3">
+                        {c.near_miss_contribution}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {c.average_failure_margin ?? "—"}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-chart-3">{c.incomplete_count}</TableCell>
-                      <TableCell className="text-right"><ChevronRight className="size-4 text-muted-foreground" /></TableCell>
+                      <TableCell className="text-right tabular-nums text-chart-3">
+                        {c.incomplete_count}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
           ) : (
-            <div className="px-6 py-6 text-sm text-muted-foreground">No criterion diagnostics in this range.</div>
+            <div className="px-6 py-6 text-sm text-muted-foreground">
+              No criterion diagnostics in this range.
+            </div>
           )}
         </CardContent>
       </Card>
