@@ -71,12 +71,22 @@ const STAGE_SPECS: Record<string, CardClickSpec> = {
     description: "Opportunities that were emitted, most recent first.",
     extraParams: { decision: "emitted" },
   },
+  signal_emitted: {
+    title: "Pipeline: Emitted",
+    description: "Opportunities that were emitted, most recent first.",
+    extraParams: { decision: "emitted" },
+  },
   rejected: {
     title: "Pipeline: Rejected",
     description: "Opportunities that were rejected, most recent first.",
     extraParams: { decision: "rejected" },
   },
   rejected_count: {
+    title: "Pipeline: Rejected",
+    description: "Opportunities that were rejected, most recent first.",
+    extraParams: { decision: "rejected" },
+  },
+  signal_rejected: {
     title: "Pipeline: Rejected",
     description: "Opportunities that were rejected, most recent first.",
     extraParams: { decision: "rejected" },
@@ -113,7 +123,7 @@ export default function StrategyMetricsPage() {
       open: true,
       title: `Near-miss: ${reason}`,
       description: `Opportunities near-missing on "${reason}", most recent first.`,
-      extraParams: { near_miss: true },
+      extraParams: { near_miss: true, near_miss_reason: reason },
     });
   }, []);
 

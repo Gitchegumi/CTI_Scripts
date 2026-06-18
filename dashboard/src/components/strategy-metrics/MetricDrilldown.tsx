@@ -48,6 +48,7 @@ function fmtVal(v: unknown): string {
 export interface MetricExtraParams {
   decision?: string;
   near_miss?: boolean;
+  near_miss_reason?: string;
   first_blocker?: string;
   criterion?: string;
 }

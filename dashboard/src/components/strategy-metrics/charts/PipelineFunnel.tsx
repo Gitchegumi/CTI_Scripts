@@ -21,8 +21,10 @@ const STAGE_LABELS: Record<string, string> = {
   rules_evaluated: "Rules evaluated",
   emitted: "Emitted",
   emitted_count: "Emitted",
+  signal_emitted: "Emitted",
   rejected: "Rejected",
   rejected_count: "Rejected",
+  signal_rejected: "Rejected",
 };
 
 const STAGE_ORDER = [
@@ -33,8 +35,10 @@ const STAGE_ORDER = [
   "rules_evaluated",
   "emitted",
   "emitted_count",
+  "signal_emitted",
   "rejected",
   "rejected_count",
+  "signal_rejected",
 ];
 
 /** Stages that have a clear API filter mapping for drill-down. */
@@ -42,8 +46,10 @@ const CLICKABLE_STAGES: Record<string, string> = {
   total_evaluated: "evaluated",
   emitted: "emitted",
   emitted_count: "emitted",
+  signal_emitted: "emitted",
   rejected: "rejected",
   rejected_count: "rejected",
+  signal_rejected: "rejected",
 };
 
 export function PipelineFunnel({

@@ -597,6 +597,7 @@ def _opportunity_filter_clauses(
     signal_type: Optional[str] = None,
     first_blocker: Optional[str] = None,
     near_miss: Optional[bool] = None,
+    near_miss_reason: Optional[str] = None,
     table_alias: str = "",
 ) -> tuple[str, list[Any], str, str]:
     """Return SQL WHERE text and params for indexed metrics filters."""
@@ -622,6 +623,9 @@ def _opportunity_filter_clauses(
     if near_miss is not None:
         clauses.append(f"{prefix}near_miss = ?")
         params.append(int(near_miss))
+    if near_miss_reason is not None:
+        clauses.append(f"{prefix}near_miss_reason = ?")
+        params.append(near_miss_reason)
     return " AND ".join(clauses), params, start_iso, end_iso
 
 
@@ -634,6 +638,7 @@ def get_opportunities(
     signal_type: Optional[str] = None,
     first_blocker: Optional[str] = None,
     near_miss: Optional[bool] = None,
+    near_miss_reason: Optional[str] = None,
     criterion: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
@@ -649,7 +654,7 @@ def get_opportunities(
     db = db or get_db()
     return _get_opportunities_db(
         start, end, symbol, decision, strategy, signal_type, first_blocker,
-        near_miss, criterion, limit, offset, db,
+        near_miss, near_miss_reason, criterion, limit, offset, db,
     )
 
 
@@ -1075,6 +1080,7 @@ def _get_opportunities_db(
     signal_type: Optional[str],
     first_blocker: Optional[str],
     near_miss: Optional[bool],
+    near_miss_reason: Optional[str],
     criterion: Optional[str],
     limit: int,
     offset: int,
@@ -1083,6 +1089,7 @@ def _get_opportunities_db(
     where_sql, params, _, _ = _opportunity_filter_clauses(
         start, end, symbol=symbol, decision=decision, strategy=strategy,
         signal_type=signal_type, first_blocker=first_blocker, near_miss=near_miss,
+        near_miss_reason=near_miss_reason,
     )
     if criterion:
         # Keep only opportunities with a failing evaluation for this criterion.
