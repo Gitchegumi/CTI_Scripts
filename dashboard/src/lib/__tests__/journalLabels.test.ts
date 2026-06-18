@@ -93,14 +93,14 @@ describe("reachedTargetType", () => {
     ).toBe("extended");
   });
 
-  it("returns 'original' when initial_take_profit is absent but TP equals take_profit", () => {
+  it("returns null when initial_take_profit is absent (cannot determine original vs extended)", () => {
     expect(
       reachedTargetType({
         take_profit: 1.104,
         current_take_profit: 1.104,
         trade_grade: "TP_HIT",
       })
-    ).toBe("original");
+    ).toBeNull();
   });
 
   it("returns null when TP was not hit", () => {

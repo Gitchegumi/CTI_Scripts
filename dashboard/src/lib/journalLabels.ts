@@ -109,10 +109,14 @@ export function reachedTargetType(entry: {
 
   if (!reachedTP) return null;
 
-  const originalTP = entry.initial_take_profit ?? entry.take_profit;
+  // Without initial_take_profit we cannot determine original vs extended,
+  // so return null even if take_profit fallback is available
+  if (entry.initial_take_profit == null) return null;
+
+  const originalTP = entry.initial_take_profit;
   const currentTP = entry.current_take_profit;
 
-  if (originalTP == null || currentTP == null) return null;
+  if (currentTP == null) return null;
 
   // If current TP differs from original, the target was extended
   if (Math.abs(currentTP - originalTP) > 1e-9) return "extended";
