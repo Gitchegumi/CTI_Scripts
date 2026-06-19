@@ -65,3 +65,49 @@ export function passStatus(passed: boolean | null | undefined, nearMiss = false)
   if (passed === false) return nearMiss ? "near-miss" : "fail";
   return "incomplete";
 }
+
+/** Format a measured/threshold value; objects are pretty-printed JSON (issue #152). */
+export function fmtVal(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") return JSON.stringify(v, null, 2);
+  return String(v);
+}
+
+/** Returns true when the value is an object that needs preformatted rendering. */
+export function isObjectValue(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object";
+}
+
+/**
+ * Renders a criterion's "measured vs operator threshold" detail (issue #152).
+ *
+ * Scalar values stay on one inline line. When either side is an object, the pair
+ * is rendered in a readable preformatted block instead of squashed onto a single
+ * line of JSON — shared across every drill-down so the layout never drifts.
+ */
+export function CriterionMeasure({
+  measured,
+  operator,
+  threshold,
+}: {
+  measured: unknown;
+  operator: string;
+  threshold: unknown;
+}) {
+  if (isObjectValue(measured) || isObjectValue(threshold)) {
+    return (
+      <div className="mt-1 w-full overflow-x-auto rounded bg-muted/50 p-2 font-mono text-xs whitespace-pre-wrap break-all">
+        <span className="text-muted-foreground">measured: </span>
+        {fmtVal(measured)}
+        {"\n"}
+        <span className="text-muted-foreground">{operator} threshold: </span>
+        {fmtVal(threshold)}
+      </div>
+    );
+  }
+  return (
+    <span className="text-muted-foreground">
+      {fmtVal(measured)} vs {operator} {fmtVal(threshold)}
+    </span>
+  );
+}

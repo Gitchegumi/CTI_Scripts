@@ -856,6 +856,172 @@ def _journaled_pullback_summary(start_iso: str, end_iso: str, symbol: Optional[s
     return {"journaled_count": journaled_count, "prime_suppressed_count": prime_suppressed_count}
 
 
+# Second-row executive-summary cards are aggregated from the Signal Journal, not
+# the evaluated_opportunities table, so they cannot be drilled through the
+# opportunities endpoint. Each metric below backs one of those card drill-downs.
+LIFECYCLE_METRICS = (
+    "prime_suppressed",
+    "pullback_entries",
+    "continuation_events",
+    "continuation_rejected",
+    "sl_moves",
+    "tp_extension",
+    "avg_r_captured",
+)
+
+
+def _lifecycle_event_matches(metric: str, entry: dict[str, Any]) -> bool:
+    """Whether a journal entry contributes to the given lifecycle metric."""
+    role = entry.get("lifecycle_role")
+    if metric == "prime_suppressed":
+        return int(entry.get("prime_suppressed_signal_count") or 0) > 0
+    if metric == "pullback_entries":
+        return role == "entry"
+    if metric == "continuation_events":
+        return role in {"management", "warning"}
+    if metric == "continuation_rejected":
+        return role in {"management", "warning"} and entry.get("management_accepted") is not True
+    if metric == "sl_moves":
+        return role == "entry" and (
+            int(entry.get("sl_tighten_count") or 0) > 0 or int(entry.get("break_even_move_count") or 0) > 0
+        )
+    if metric == "tp_extension":
+        return role == "entry" and int(entry.get("tp_extension_count") or 0) > 0
+    if metric == "avg_r_captured":
+        return _safe_float(entry.get("captured_r")) is not None
+    return False
+
+
+def _fmt_event_value(value: Any) -> Any:
+    """Keep JSON-serializable values; stringify anything else for transport."""
+    if value is None or isinstance(value, (str, int, float, bool, list, dict)):
+        return value
+    return str(value)
+
+
+def _move_text(old: Any, new: Any) -> Optional[str]:
+    """Render an 'old → new' price move, or None when neither side is set."""
+    if old is None and new is None:
+        return None
+    return f"{old} → {new}"
+
+
+def _lifecycle_event_fields(metric: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Metric-specific label/value detail pairs the dashboard renders generically."""
+    def field(label: str, value: Any) -> dict[str, Any]:
+        return {"label": label, "value": _fmt_event_value(value)}
+
+    if metric == "prime_suppressed":
+        return [
+            field("Suppressed signals", entry.get("prime_suppressed_signal_count")),
+            field("Same direction", entry.get("prime_suppressed_same_direction_count")),
+            field("Opposite direction", entry.get("prime_suppressed_opposite_direction_count")),
+            field("Last suppressed", entry.get("prime_suppressed_last_at")),
+            field("Outcomes", entry.get("prime_suppressed_signal_outcomes")),
+        ]
+    if metric == "pullback_entries":
+        return [
+            field("Decision", entry.get("final_decision")),
+            field("TP extensions", entry.get("tp_extension_count")),
+            field("SL tightenings", entry.get("sl_tighten_count")),
+            field("Break-even moves", entry.get("break_even_move_count")),
+            field("Captured R", entry.get("captured_r")),
+        ]
+    if metric in ("continuation_events", "continuation_rejected"):
+        return [
+            field("Accepted", entry.get("management_accepted") is True),
+            field("Reason", entry.get("management_reason")),
+            field("Rejection reason", entry.get("management_rejection_reason")),
+            field("Price at event", entry.get("price_at_event")),
+            field("SL", _move_text(entry.get("old_stop_loss"), entry.get("new_stop_loss"))),
+            field("TP", _move_text(entry.get("old_take_profit"), entry.get("new_take_profit"))),
+            field("Source", entry.get("source_signal_type")),
+        ]
+    if metric == "sl_moves":
+        return [
+            field("SL tightenings", entry.get("sl_tighten_count")),
+            field("Break-even moves", entry.get("break_even_move_count")),
+            field("Initial SL", entry.get("initial_stop_loss")),
+            field("Current SL", entry.get("current_stop_loss")),
+            field("Risk at entry", entry.get("risk_at_entry")),
+        ]
+    if metric == "tp_extension":
+        return [
+            field("TP extensions", entry.get("tp_extension_count")),
+            field("Initial TP", entry.get("initial_take_profit")),
+            field("Current TP", entry.get("current_take_profit")),
+            field("Captured R", entry.get("captured_r")),
+        ]
+    if metric == "avg_r_captured":
+        return [
+            field("Captured R", entry.get("captured_r")),
+            field("Result delta", entry.get("managed_result_delta")),
+            field("Exit reason", entry.get("managed_exit_reason")),
+            field("Result", entry.get("managed_result_category")),
+            field("Original TP result", entry.get("managed_original_tp_result")),
+        ]
+    return []
+
+
+def get_lifecycle_events(
+    start: str,
+    end: str,
+    metric: str,
+    symbol: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return Signal Journal records behind a second-row lifecycle metric.
+
+    The second-row executive-summary cards (prime suppressions, pullback entries,
+    continuation-management events, SL/TP adjustments, captured-R) are aggregated
+    from the Signal Journal rather than evaluated_opportunities, so they cannot be
+    drilled through the opportunities endpoint. This returns the underlying journal
+    records, newest first, each carrying metric-specific ``fields`` the dashboard
+    renders generically (spec 022 second-row drill-down).
+    """
+    if metric not in LIFECYCLE_METRICS:
+        raise ValueError(f"unknown lifecycle metric: {metric!r}")
+    start_iso, end_iso = _normalize_range_bounds(start, end)
+    start_dt = _parse_dt(start_iso)
+    end_dt = _parse_dt(end_iso)
+    symbol_key = symbol.upper() if symbol else None
+
+    try:
+        from tradegumi import journal as signal_journal
+
+        with signal_journal._lock:
+            entries = signal_journal._read_entries_oldest_first()
+    except Exception:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        entry_symbol = str(entry.get("symbol") or "").upper()
+        if symbol_key and entry_symbol != symbol_key:
+            continue
+        timestamp = _journal_timestamp(entry)
+        if timestamp is not None and not (start_dt <= timestamp < end_dt):
+            continue
+        if not _lifecycle_event_matches(metric, entry):
+            continue
+        raw_id = entry.get("signal_id") or entry.get("opportunity_id") or entry.get("management_event_id")
+        records.append({
+            "id": str(raw_id) if raw_id else f"event-{index}",
+            "symbol": entry_symbol,
+            "timestamp": timestamp.isoformat() if timestamp is not None else None,
+            "direction": entry.get("direction"),
+            "strategy": entry.get("strategy"),
+            "signal_type": entry.get("signal_type"),
+            "lifecycle_role": entry.get("lifecycle_role"),
+            "fields": _lifecycle_event_fields(metric, entry),
+        })
+
+    # Newest first; ISO timestamps sort chronologically, missing ones sort last.
+    records.sort(key=lambda r: r["timestamp"] or "", reverse=True)
+    return records[offset : offset + limit]
+
+
 def get_summary(
     start: str,
     end: str,

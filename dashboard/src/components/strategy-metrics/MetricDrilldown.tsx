@@ -31,24 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StatusBadge, DecisionBadge, passStatus } from "./status";
+import { StatusBadge, DecisionBadge, passStatus, CriterionMeasure } from "./status";
 import type { ReportFilters } from "@/hooks/useData";
 import type { StrategyMetricOpportunity } from "@/types";
 
 const DRILLDOWN_LIMIT = 100;
 const ANY = "any";
-
-/** Wrap object values in a readable preformatted block so JSON is not squashed onto one line. */
-function fmtVal(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "object") return JSON.stringify(v, null, 2);
-  return String(v);
-}
-
-/** Returns true when the measured/threshold value is an object that needs preformatted rendering. */
-function isObjectValue(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object";
-}
 
 /** Extra params forwarded to getStrategyMetricOpportunities beyond the page filters. */
 export interface MetricExtraParams {
@@ -325,20 +313,11 @@ function DrilldownBody({
                           >
                             <StatusBadge status={passStatus(c.passed, o.near_miss)} />
                             <span className="text-foreground">{c.criterion_name}</span>
-                        {isObjectValue(c.measured_value) || isObjectValue(c.threshold_value) ? (
-                          <div className="mt-1 w-full overflow-x-auto rounded bg-muted/50 p-2 font-mono text-xs whitespace-pre-wrap break-all">
-                            <span className="text-muted-foreground">measured: </span>
-                            {fmtVal(c.measured_value)}
-                            {`\n`}
-                            <span className="text-muted-foreground">{c.threshold_operator} threshold: </span>
-                            {fmtVal(c.threshold_value)}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">
-                            {fmtVal(c.measured_value)} vs {c.threshold_operator}{" "}
-                            {fmtVal(c.threshold_value)}
-                          </span>
-                        )}
+                            <CriterionMeasure
+                              measured={c.measured_value}
+                              operator={c.threshold_operator}
+                              threshold={c.threshold_value}
+                            />
                             {c.margin != null && (
                               <span className="text-muted-foreground">
                                 margin {c.margin}

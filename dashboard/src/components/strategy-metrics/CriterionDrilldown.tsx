@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StatusBadge, DecisionBadge, passStatus } from "./status";
+import { StatusBadge, DecisionBadge, passStatus, CriterionMeasure, fmtVal } from "./status";
 import { formatPercent } from "@/lib/metrics-availability";
 import type { ReportFilters } from "@/hooks/useData";
 import type {
@@ -43,12 +43,6 @@ import type {
 
 const DRILLDOWN_LIMIT = 100;
 const ANY = "any";
-
-function fmtVal(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}
 
 interface InnerFilters {
   symbol: string;
@@ -271,12 +265,14 @@ function DrilldownBody({
                     <div className="mb-1 text-xs font-medium text-muted-foreground">All criteria</div>
                     <ul className="space-y-1">
                       {o.criteria.map((c) => (
-                        <li key={`${o.id}-${c.criterion_name}`} className="flex items-center gap-2 text-xs">
+                        <li key={`${o.id}-${c.criterion_name}`} className="flex flex-wrap items-center gap-2 text-xs">
                           <StatusBadge status={passStatus(c.passed, o.near_miss)} />
                           <span className="text-foreground">{c.criterion_name}</span>
-                          <span className="text-muted-foreground">
-                            {fmtVal(c.measured_value)} vs {c.threshold_operator} {fmtVal(c.threshold_value)}
-                          </span>
+                          <CriterionMeasure
+                            measured={c.measured_value}
+                            operator={c.threshold_operator}
+                            threshold={c.threshold_value}
+                          />
                         </li>
                       ))}
                     </ul>
@@ -301,10 +297,20 @@ function Stat({ label, value, className }: { label: string; value: React.ReactNo
 }
 
 function Detail({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
+  // Pretty-printed JSON (issue #152) arrives as a multi-line string — render it
+  // in a preformatted block instead of letting the newlines collapse.
+  const multiline = typeof value === "string" && value.includes("\n");
   return (
     <div className={cn("flex flex-col gap-0.5", className)}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-words text-xs tabular-nums text-foreground">{value}</dd>
+      <dd
+        className={cn(
+          "break-words text-xs tabular-nums text-foreground",
+          multiline && "overflow-x-auto rounded bg-muted/50 p-2 font-mono whitespace-pre-wrap break-all",
+        )}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

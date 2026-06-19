@@ -1,5 +1,6 @@
 import type {
   AgentExport,
+  StrategyMetricLifecycleEvent,
   StrategyMetricOpportunity,
   StrategyMetricsComparison,
   StrategyMetricsSummary,
@@ -168,6 +169,19 @@ export async function getStrategyMetricOpportunities(params: {
   offset?: number;
 }): Promise<StrategyMetricOpportunity[]> {
   return apiFetch<StrategyMetricOpportunity[]>(`/api/strategy-metrics/opportunities?${query(params)}`);
+}
+
+export async function getStrategyMetricLifecycleEvents(params: {
+  start: string;
+  end: string;
+  // One of the second-row lifecycle metrics: prime_suppressed, pullback_entries,
+  // continuation_events, continuation_rejected, sl_moves, tp_extension, avg_r_captured.
+  metric: string;
+  symbol?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<StrategyMetricLifecycleEvent[]> {
+  return apiFetch<StrategyMetricLifecycleEvent[]>(`/api/strategy-metrics/lifecycle-events?${query(params)}`);
 }
 
 export async function getStrategyMetricsComparison(params: {

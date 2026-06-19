@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom";
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { metricDisplay } from "@/lib/metrics-availability";
 import { ExecutiveSummary } from "@/components/strategy-metrics/ExecutiveSummary";
 import type { StrategyMetricsSummary } from "@/types";
@@ -57,5 +57,46 @@ describe("ExecutiveSummary rendering (US3)", () => {
   it("shows a populated value when available", () => {
     render(<ExecutiveSummary summary={summaryWith({ total_evaluated: 1234 })} />);
     expect(screen.getByText("1,234")).toBeInTheDocument();
+  });
+});
+
+describe("ExecutiveSummary second-row lifecycle drill-down", () => {
+  it("opens the lifecycle drilldown with the right metric for a non-zero card", () => {
+    const onLifecycleClick = vi.fn();
+    render(
+      <ExecutiveSummary
+        summary={summaryWith({ pullback_entries_opened: 5 })}
+        onLifecycleClick={onLifecycleClick}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Pullback entries/i }));
+    expect(onLifecycleClick).toHaveBeenCalledWith(
+      expect.objectContaining({ metric: "pullback_entries" }),
+    );
+  });
+
+  it("maps Rejected mgmt and SL moves to their lifecycle metrics", () => {
+    const onLifecycleClick = vi.fn();
+    render(
+      <ExecutiveSummary
+        summary={summaryWith({ continuation_management_events_rejected: 3, sl_tighten_count: 2 })}
+        onLifecycleClick={onLifecycleClick}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Rejected mgmt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /SL moves/i }));
+    expect(onLifecycleClick).toHaveBeenNthCalledWith(1, expect.objectContaining({ metric: "continuation_rejected" }));
+    expect(onLifecycleClick).toHaveBeenNthCalledWith(2, expect.objectContaining({ metric: "sl_moves" }));
+  });
+
+  it("leaves a zero-valued second-row card non-clickable", () => {
+    const onLifecycleClick = vi.fn();
+    render(
+      <ExecutiveSummary
+        summary={summaryWith({ total_prime_suppressed_signals: 0 })}
+        onLifecycleClick={onLifecycleClick}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Prime suppressed/i })).toBeNull();
   });
 });
