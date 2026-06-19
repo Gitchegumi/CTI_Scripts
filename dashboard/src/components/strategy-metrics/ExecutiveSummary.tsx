@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/card";
 import { metricDisplay, type MetricValue } from "@/lib/metrics-availability";
 import type { StrategyMetricsSummary } from "@/types";
 import type { MetricExtraParams } from "./MetricDrilldown";
+import type { LifecycleCardSpec } from "./LifecycleDrilldown";
 
 interface StatCardProps {
   label: string;
@@ -114,12 +115,68 @@ function cardClickSpec(label: string): CardClickSpec | null {
   }
 }
 
+/**
+ * Maps a second-row card to its lifecycle drill-down spec, or null if not
+ * drillable. These cards are journal-derived (not evaluated opportunities), so
+ * they open a LifecycleDrilldown via the lifecycle-events endpoint.
+ */
+function cardLifecycleSpec(label: string): LifecycleCardSpec | null {
+  switch (label) {
+    case "Prime suppressed":
+      return {
+        metric: "prime_suppressed",
+        title: "Prime-Suppressed Signals",
+        description: "Prime entries that suppressed lower-priority signals, most recent first.",
+      };
+    case "Pullback entries":
+      return {
+        metric: "pullback_entries",
+        title: "Pullback Entries",
+        description: "Pullback entry signals opened in this range, most recent first.",
+      };
+    case "Continuation events":
+      return {
+        metric: "continuation_events",
+        title: "Continuation Management Events",
+        description: "Continuation management/warning events observed, most recent first.",
+      };
+    case "Rejected mgmt":
+      return {
+        metric: "continuation_rejected",
+        title: "Rejected Management Events",
+        description: "Continuation management events that were not accepted, most recent first.",
+      };
+    case "SL moves":
+      return {
+        metric: "sl_moves",
+        title: "Stop-Loss Adjustments",
+        description: "Entries with stop-loss tightenings or break-even moves, most recent first.",
+      };
+    case "TP extension":
+      return {
+        metric: "tp_extension",
+        title: "Take-Profit Extensions",
+        description: "Entries with take-profit extensions, most recent first.",
+      };
+    case "Avg R captured":
+      return {
+        metric: "avg_r_captured",
+        title: "Captured R",
+        description: "Managed records with a captured-R value, most recent first.",
+      };
+    default:
+      return null;
+  }
+}
+
 export function ExecutiveSummary({
   summary,
   onMetricClick,
+  onLifecycleClick,
 }: {
   summary: StrategyMetricsSummary | null;
   onMetricClick?: (spec: CardClickSpec) => void;
+  onLifecycleClick?: (spec: LifecycleCardSpec) => void;
 }) {
   const delta = summary?.managed_vs_original_result_delta;
 
@@ -127,6 +184,12 @@ export function ExecutiveSummary({
     const spec = cardClickSpec(label);
     if (!spec || !onMetricClick) return undefined;
     return () => onMetricClick(spec);
+  }
+
+  function makeLifecycleOnClick(label: string) {
+    const spec = cardLifecycleSpec(label);
+    if (!spec || !onLifecycleClick) return undefined;
+    return () => onLifecycleClick(spec);
   }
 
   return (
@@ -138,8 +201,9 @@ export function ExecutiveSummary({
         <StatCard label="Skipped" value={summary?.skipped_count} onClick={makeOnClick("Skipped")} />
         <StatCard label="Indeterminate" value={summary?.indeterminate_count} onClick={makeOnClick("Indeterminate")} />
         <StatCard label="Near miss" value={summary?.near_miss_count} onClick={makeOnClick("Near miss")} />
-        {/* Stat-eligible, Prime suppressed, Pullback entries, Continuation events
-            have no direct API filter — leave non-clickable per issue #144. */}
+        {/* Stat-eligible has no underlying record set to drill into — leave it
+            non-clickable. The second-row lifecycle cards below are journal-backed
+            and open a LifecycleDrilldown. */}
         <StatCard
           label="Stat-eligible"
           value={summary?.trade_opportunity_count}
@@ -147,24 +211,43 @@ export function ExecutiveSummary({
         />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-        <StatCard label="Prime suppressed" value={summary?.total_prime_suppressed_signals} />
-        <StatCard label="Pullback entries" value={summary?.pullback_entries_opened} />
+        <StatCard
+          label="Prime suppressed"
+          value={summary?.total_prime_suppressed_signals}
+          onClick={makeLifecycleOnClick("Prime suppressed")}
+        />
+        <StatCard
+          label="Pullback entries"
+          value={summary?.pullback_entries_opened}
+          onClick={makeLifecycleOnClick("Pullback entries")}
+        />
         <StatCard
           label="Continuation events"
           value={summary?.continuation_management_events_observed}
           sub={summary ? `${summary.continuation_management_events_accepted} accepted` : undefined}
+          onClick={makeLifecycleOnClick("Continuation events")}
         />
-        <StatCard label="Rejected mgmt" value={summary?.continuation_management_events_rejected} />
+        <StatCard
+          label="Rejected mgmt"
+          value={summary?.continuation_management_events_rejected}
+          onClick={makeLifecycleOnClick("Rejected mgmt")}
+        />
         <StatCard
           label="SL moves"
           value={summary?.sl_tighten_count}
           sub={summary ? `${summary.break_even_move_count} break-even` : undefined}
+          onClick={makeLifecycleOnClick("SL moves")}
         />
-        <StatCard label="TP extension" value={summary?.tp_extension_count} />
+        <StatCard
+          label="TP extension"
+          value={summary?.tp_extension_count}
+          onClick={makeLifecycleOnClick("TP extension")}
+        />
         <StatCard
           label="Avg R captured"
           value={summary?.average_r_captured ?? null}
           sub={delta ? `+${delta.improved ?? 0} / -${delta.worsened ?? 0} managed` : undefined}
+          onClick={makeLifecycleOnClick("Avg R captured")}
         />
       </div>
     </section>

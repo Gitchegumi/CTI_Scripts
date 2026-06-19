@@ -312,6 +312,29 @@ export interface StrategyMetricCriterion {
   data_quality: "complete" | "missing" | "malformed" | "not_applicable";
 }
 
+/** One metric-specific label/value detail pair on a lifecycle event. */
+export interface StrategyMetricLifecycleField {
+  label: string;
+  value: unknown;
+}
+
+/**
+ * A Signal Journal record behind a second-row executive-summary card
+ * (prime suppressions, pullback entries, continuation-management events, SL/TP
+ * adjustments, captured-R). These are journal-derived, not evaluated
+ * opportunities, so they carry generic `fields` rather than a fixed schema.
+ */
+export interface StrategyMetricLifecycleEvent {
+  id: string;
+  symbol: string;
+  timestamp: string | null;
+  direction?: string | null;
+  strategy?: string | null;
+  signal_type?: string | null;
+  lifecycle_role?: string | null;
+  fields: StrategyMetricLifecycleField[];
+}
+
 export interface StrategyMetricOpportunity {
   id: string;
   evaluated_at: string;

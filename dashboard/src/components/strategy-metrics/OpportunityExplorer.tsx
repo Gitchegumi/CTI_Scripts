@@ -13,14 +13,8 @@ import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, DecisionBadge, passStatus } from "./status";
+import { StatusBadge, DecisionBadge, passStatus, CriterionMeasure } from "./status";
 import type { StrategyMetricOpportunity } from "@/types";
-
-function fmtVal(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}
 
 export function OpportunityExplorer({
   opportunities,
@@ -97,9 +91,11 @@ export function OpportunityExplorer({
                           <li key={`${o.id}-${c.criterion_name}`} className="flex flex-wrap items-center gap-2 text-xs">
                             <StatusBadge status={passStatus(c.passed, o.near_miss)} />
                             <span className="text-foreground">{c.criterion_name}</span>
-                            <span className="text-muted-foreground">
-                              {fmtVal(c.measured_value)} vs {c.threshold_operator} {fmtVal(c.threshold_value)}
-                            </span>
+                            <CriterionMeasure
+                              measured={c.measured_value}
+                              operator={c.threshold_operator}
+                              threshold={c.threshold_value}
+                            />
                             {c.margin != null && <span className="text-muted-foreground">margin {c.margin}</span>}
                           </li>
                         ))}

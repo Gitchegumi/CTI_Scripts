@@ -387,6 +387,35 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, 500)
             return
 
+        if path.startswith("/api/strategy-metrics/lifecycle-events"):
+            try:
+                from tradegumi.strategy_metrics import get_lifecycle_events
+                start = self._get_query_param("start")
+                end = self._get_query_param("end")
+                symbol = self._get_query_param("symbol")
+                metric = self._get_query_param("metric")
+                limit = int(self._get_query_param("limit") or 100)
+                offset = int(self._get_query_param("offset") or 0)
+                if not start or not end:
+                    self._send_json({"error": "start and end are required"}, 400)
+                    return
+                if not metric:
+                    self._send_json({"error": "metric is required"}, 400)
+                    return
+                self._send_json(get_lifecycle_events(
+                    start,
+                    end,
+                    metric,
+                    symbol=symbol or None,
+                    limit=limit,
+                    offset=offset,
+                ))
+            except ValueError as e:
+                self._send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         if path.startswith("/api/strategy-metrics/compare"):
             try:
                 from tradegumi.strategy_metrics import compare_periods

@@ -27,6 +27,12 @@ import {
   METRIC_DRILLDOWN_CLOSED,
   type MetricDrilldownState,
 } from "@/components/strategy-metrics/MetricDrilldown";
+import {
+  LifecycleDrilldown,
+  LIFECYCLE_DRILLDOWN_CLOSED,
+  type LifecycleCardSpec,
+  type LifecycleDrilldownState,
+} from "@/components/strategy-metrics/LifecycleDrilldown";
 import { OpportunityExplorer } from "@/components/strategy-metrics/OpportunityExplorer";
 import type { StrategyMetricsSummary } from "@/types";
 
@@ -98,6 +104,8 @@ export default function StrategyMetricsPage() {
   const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
   const [metricDrilldown, setMetricDrilldown] =
     useState<MetricDrilldownState>(METRIC_DRILLDOWN_CLOSED);
+  const [lifecycleDrilldown, setLifecycleDrilldown] =
+    useState<LifecycleDrilldownState>(LIFECYCLE_DRILLDOWN_CLOSED);
   const { summary, opportunities, status, error, loading, loadingMore, run, loadMore } =
     useStrategyMetricsReport();
 
@@ -116,6 +124,10 @@ export default function StrategyMetricsPage() {
 
   const handleMetricClick = useCallback((spec: CardClickSpec) => {
     setMetricDrilldown({ ...spec, open: true });
+  }, []);
+
+  const handleLifecycleClick = useCallback((spec: LifecycleCardSpec) => {
+    setLifecycleDrilldown({ ...spec, open: true });
   }, []);
 
   const handleSelectNearMiss = useCallback((reason: string) => {
@@ -181,7 +193,11 @@ export default function StrategyMetricsPage() {
           <LoadingSkeleton />
         ) : (
           <>
-            <ExecutiveSummary summary={summary} onMetricClick={handleMetricClick} />
+            <ExecutiveSummary
+              summary={summary}
+              onMetricClick={handleMetricClick}
+              onLifecycleClick={handleLifecycleClick}
+            />
             <FailureDiagnosis
               summary={summary}
               onSelectCriterion={setSelectedCriterion}
@@ -208,6 +224,12 @@ export default function StrategyMetricsPage() {
           state={metricDrilldown}
           appliedFilters={appliedFilters}
           onClose={() => setMetricDrilldown(METRIC_DRILLDOWN_CLOSED)}
+        />
+
+        <LifecycleDrilldown
+          state={lifecycleDrilldown}
+          appliedFilters={appliedFilters}
+          onClose={() => setLifecycleDrilldown(LIFECYCLE_DRILLDOWN_CLOSED)}
         />
       </main>
     </div>
