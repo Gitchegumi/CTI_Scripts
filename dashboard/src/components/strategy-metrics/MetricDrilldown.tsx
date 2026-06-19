@@ -38,10 +38,16 @@ import type { StrategyMetricOpportunity } from "@/types";
 const DRILLDOWN_LIMIT = 100;
 const ANY = "any";
 
+/** Wrap object values in a readable preformatted block so JSON is not squashed onto one line. */
 function fmtVal(v: unknown): string {
   if (v === null || v === undefined) return "—";
-  if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "object") return JSON.stringify(v, null, 2);
   return String(v);
+}
+
+/** Returns true when the measured/threshold value is an object that needs preformatted rendering. */
+function isObjectValue(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object";
 }
 
 /** Extra params forwarded to getStrategyMetricOpportunities beyond the page filters. */
@@ -215,8 +221,8 @@ function DrilldownBody({
     <div className="space-y-4 px-4 pb-8">
       <p className="text-sm text-muted-foreground">{description}</p>
 
-      {/* In-drilldown filters */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+      {/* In-drilldown filters — responsive: 1 col on narrow sheet, 2 on wider, 5 on extra-wide */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <Input
           placeholder="Symbol"
           value={filters.symbol}
@@ -227,7 +233,7 @@ function DrilldownBody({
           value={filters.decision}
           onValueChange={(v) => setFilters((f) => ({ ...f, decision: v }))}
         >
-          <SelectTrigger className="h-8">
+          <SelectTrigger className="h-8 min-w-[120px]">
             <SelectValue placeholder="Decision" />
           </SelectTrigger>
           <SelectContent>
@@ -319,10 +325,20 @@ function DrilldownBody({
                           >
                             <StatusBadge status={passStatus(c.passed, o.near_miss)} />
                             <span className="text-foreground">{c.criterion_name}</span>
-                            <span className="text-muted-foreground">
-                              {fmtVal(c.measured_value)} vs {c.threshold_operator}{" "}
-                              {fmtVal(c.threshold_value)}
-                            </span>
+                        {isObjectValue(c.measured_value) || isObjectValue(c.threshold_value) ? (
+                          <div className="mt-1 w-full overflow-x-auto rounded bg-muted/50 p-2 font-mono text-xs whitespace-pre-wrap break-all">
+                            <span className="text-muted-foreground">measured: </span>
+                            {fmtVal(c.measured_value)}
+                            {`\n`}
+                            <span className="text-muted-foreground">{c.threshold_operator} threshold: </span>
+                            {fmtVal(c.threshold_value)}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {fmtVal(c.measured_value)} vs {c.threshold_operator}{" "}
+                            {fmtVal(c.threshold_value)}
+                          </span>
+                        )}
                             {c.margin != null && (
                               <span className="text-muted-foreground">
                                 margin {c.margin}
