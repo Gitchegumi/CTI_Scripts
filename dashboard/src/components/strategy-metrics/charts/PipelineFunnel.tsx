@@ -80,25 +80,14 @@ export function PipelineFunnel({
         return (
           <li key={key}>
             <RowTag
-              {...(clickable
-                ? {
-                    type: "button" as const,
-                    onClick: () => onSelectStage!(key),
-                    onKeyDown: (e: React.KeyboardEvent) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onSelectStage!(key);
-                      }
-                    },
-                  }
-                : {})}
+              {...(clickable ? { onClick: () => onSelectStage!(key), type: "button" as const } : {})}
               className={cn(
                 "group flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left",
                 clickable &&
                   "cursor-pointer hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
-              <div className="relative h-6 flex-1 overflow-hidden rounded bg-muted/40">
+              <div className="relative h-6 min-w-0 flex-1 overflow-hidden rounded bg-muted/40">
                 <div
                   className={cn(
                     "absolute inset-y-0 left-0 rounded",
@@ -108,12 +97,10 @@ export function PipelineFunnel({
                   aria-hidden="true"
                 />
                 <div className="absolute inset-0 flex items-center px-2 text-xs">
-                  <span className="truncate text-foreground">
-                    {STAGE_LABELS[key] ?? key}
-                  </span>
+                  <span className="truncate text-foreground">{STAGE_LABELS[key] ?? key}</span>
                 </div>
               </div>
-              <span className="w-10 shrink-0 text-right text-sm tabular-nums text-foreground">
+              <span className="w-16 shrink-0 text-right text-sm tabular-nums text-foreground">
                 {value.toLocaleString()}
               </span>
             </RowTag>
