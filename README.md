@@ -20,6 +20,56 @@ Diagnostic history is stored in Postgres (the durable source of truth), with a c
 
 Signal journal exports separate emitted signal outcomes from tradable setup outcomes. A signal only counts as a strategy-stat trade opportunity when `usable_for_strategy_stats` is true; duplicates, missed entries, late signals, stale signals, and manual invalidations are excluded. Tune setup grouping and entry validity with `SIGNAL_SETUP_GROUP_WINDOW_MINUTES`, `SIGNAL_ENTRY_TOLERANCE_ATR`, and `SIGNAL_STALE_BARS`.
 
+## Strategy Folders
+
+Strategy metadata lives in subfolders under `strategies/`. The strategy registry
+scans this directory at runtime and populates the dashboard dropdown with every
+folder that contains a valid `strategy.json` file.
+
+### Folder layout
+
+```text
+strategies/
+├── example-strategy/       # Tracked — reference for docs and tests
+│   └── strategy.json
+├── my-pullback/            # Gitignored — your own strategy (local only)
+│   └── strategy.json
+└── my-continuation/        # Gitignored — another local strategy
+    └── strategy.json
+```
+
+### `strategy.json` fields
+
+| Field         | Required | Description                                          |
+| ------------- | -------- | ---------------------------------------------------- |
+| `id`          | Yes      | Unique strategy identifier (used in dropdown values) |
+| `label`       | No       | Display name in the dashboard dropdown                |
+| `description` | No       | Short description shown in tooltips/metadata         |
+| `signal_type` | No       | Strategy variant tag (e.g. `pullback`, `continuation`) |
+
+### Adding a new strategy
+
+1. Copy the example folder: `cp -r strategies/example-strategy strategies/my-strategy`
+2. Edit `strategies/my-strategy/strategy.json` with your strategy's metadata
+3. Restart the API server (or refresh the dashboard) — the new strategy appears in the dropdown automatically
+
+Your new folder is **not tracked by git** — only `strategies/example-strategy/` is
+committed. All other sibling folders are gitignored so your private strategies stay
+local. The built-in `CTI-v1` entry is always available in the dropdown regardless of
+folder contents.
+
+If a folder is missing `strategy.json` or contains malformed JSON, it still appears
+in the dropdown with a warning badge (⚠️) so you know something needs fixing.
+
+### `.gitignore` policy
+
+```gitignore
+# Strategy folders — only the example is tracked.
+# Sibling folders (your own strategies) are ignored so they stay local.
+strategies/*
+!strategies/example-strategy/
+```
+
 ## Quick Start
 
 ### 1. Install dependencies

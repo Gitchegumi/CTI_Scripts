@@ -1,6 +1,0 @@
-{
-  "id": "CTI-v1.2-pullback",
-  "label": "Pullback (CTI v1.2)",
-  "description": "Pullback continuation strategy with KC band breach and candle-close gate",
-  "signal_type": "pullback"
-}

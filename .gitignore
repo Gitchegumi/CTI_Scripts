@@ -185,9 +185,12 @@ coverage/
 *.tmp
 .tmp/
 
-# Private Strategies (not committed to public repo)
-# Add your profitable strategy files here
-strategies/private/
+# Strategy folders — only the example is tracked.
+# Sibling folders (your own strategies) are ignored so they stay local.
+strategies/*
+!strategies/example-strategy/
+
+# Private strategy files (legacy patterns)
 *.private.py
 *.private.json
 
