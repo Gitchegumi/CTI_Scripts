@@ -45,6 +45,12 @@ export default function Home() {
             📝 Manual Trades
           </Link>
         )}
+        <Link
+          href="/strategy-metrics"
+          className="text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          📊 Strategy Metrics
+        </Link>
       </div>
 
       <main className="flex-1 px-4 py-4 max-w-7xl mx-auto w-full">

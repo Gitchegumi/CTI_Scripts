@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import Link from "next/link";
 import { readApiError } from "@/lib/api";
+import { PageSubNav } from "@/components/PageSubNav";
 import { isBullishDirection, directionColorClasses } from "@/lib/direction";
 import { statsUseLabel, reachedTargetLabel } from "@/lib/journalLabels";
 
@@ -689,8 +689,8 @@ function FilterBar({
             onClick={() => onChange(value)}
             className={`text-xs px-3 py-1 rounded-full border transition-colors ${
               isActive
-                ? "bg-slate-600 border-slate-500 text-white"
-                : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                ? "bg-secondary border-input text-foreground"
+                : "bg-card border-border text-muted-foreground hover:border-input hover:text-foreground"
             }`}
           >
             {label} <span className="opacity-60">({count})</span>
@@ -888,53 +888,49 @@ export default function JournalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
-            ← Dashboard
-          </Link>
-          <span className="text-slate-700">|</span>
-          <span className="text-white font-semibold text-sm">Signal Journal</span>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <span className="text-xs text-slate-600">
-            {totalTrades} trades · {totalSignals} triggers
-          </span>
-          <label className="flex items-center gap-1 text-xs text-slate-500">
-            <span>Start</span>
-            <input
-              type="datetime-local"
-              value={exportStart}
-              onChange={(event) => setExportStart(event.target.value)}
-              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-            />
-          </label>
-          <label className="flex items-center gap-1 text-xs text-slate-500">
-            <span>End</span>
-            <input
-              type="datetime-local"
-              value={exportEnd}
-              onChange={(event) => setExportEnd(event.target.value)}
-              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-            />
-          </label>
-          <button
-            onClick={exportJournal}
-            disabled={exporting}
-            className="text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 transition-colors"
-          >
-            {exporting ? "Exporting..." : "Export CSV"}
-          </button>
-          <button
-            onClick={purgeJournal}
-            disabled={purging || entries.length === 0}
-            className="text-xs px-3 py-1 rounded bg-red-900/60 hover:bg-red-800 disabled:opacity-50 text-red-100 transition-colors"
-          >
-            {purging ? "Purging..." : "Purge"}
-          </button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-background text-foreground">
+      <PageSubNav
+        currentPage="/journal"
+        actions={
+          <>
+            <span className="text-xs text-muted-foreground/70">
+              {totalTrades} trades · {totalSignals} triggers
+            </span>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span>Start</span>
+              <input
+                type="datetime-local"
+                value={exportStart}
+                onChange={(event) => setExportStart(event.target.value)}
+                className="w-40 rounded border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-ring focus:outline-none [color-scheme:dark]"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span>End</span>
+              <input
+                type="datetime-local"
+                value={exportEnd}
+                onChange={(event) => setExportEnd(event.target.value)}
+                className="w-40 rounded border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-ring focus:outline-none [color-scheme:dark]"
+              />
+            </label>
+            <button
+              onClick={exportJournal}
+              disabled={exporting}
+              className="text-xs px-3 py-1 rounded bg-secondary hover:bg-secondary/80 disabled:opacity-50 text-secondary-foreground transition-colors"
+            >
+              {exporting ? "Exporting..." : "Export CSV"}
+            </button>
+            <button
+              onClick={purgeJournal}
+              disabled={purging || entries.length === 0}
+              className="text-xs px-3 py-1 rounded bg-destructive/60 hover:bg-destructive/80 disabled:opacity-50 text-destructive-foreground transition-colors"
+            >
+              {purging ? "Purging..." : "Purge"}
+            </button>
+          </>
+        }
+      />
 
       <main className="px-4 py-6 max-w-5xl mx-auto">
         {loading && (

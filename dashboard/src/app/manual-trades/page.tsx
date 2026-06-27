@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
 import { ManualTrade, ManualTradeSummary } from "@/types";
+import { PageSubNav } from "@/components/PageSubNav";
 import { modeDisplayLabel, readApiError } from "@/lib/api";
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -628,46 +628,37 @@ export default function ManualTradesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      {/* Header */}
-      <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
-            ← Dashboard
-          </Link>
-          <span className="text-slate-700">|</span>
-          <span className="text-white font-semibold text-sm">Trade History</span>
-          {mode !== "alert_only" && (
-            <span className="text-xs text-slate-500 ml-2">({modeDisplayLabel(mode)} mode — notes only)</span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/journal"
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-          >
-            Journal →
-          </Link>
-          {mode === "alert_only" && (
+    <div className="min-h-screen bg-background text-foreground">
+      <PageSubNav
+        currentPage="/manual-trades"
+        actions={
+          <>
+            {mode !== "alert_only" && (
+              <span className="text-xs text-muted-foreground">
+                ({modeDisplayLabel(mode)} mode — notes only)
+              </span>
+            )}
+            {mode === "alert_only" && (
+              <button
+                onClick={() => {
+                  setEditingTrade(undefined);
+                  setShowForm(true);
+                }}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs px-3 py-1.5 rounded transition-colors"
+              >
+                + Add Trade
+              </button>
+            )}
             <button
-              onClick={() => {
-                setEditingTrade(undefined);
-                setShowForm(true);
-              }}
-              className="bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded transition-colors"
+              onClick={exportTrades}
+              disabled={exporting}
+              className="bg-secondary hover:bg-secondary/80 disabled:opacity-50 text-secondary-foreground text-xs px-3 py-1.5 rounded transition-colors"
             >
-              + Add Trade
+              {exporting ? "Exporting..." : "Export JSON"}
             </button>
-          )}
-          <button
-            onClick={exportTrades}
-            disabled={exporting}
-            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs px-3 py-1.5 rounded transition-colors"
-          >
-            {exporting ? "Exporting..." : "Export JSON"}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <main className="px-4 py-6 max-w-6xl mx-auto">
         {loading && (
@@ -687,19 +678,19 @@ export default function ManualTradesPage() {
             {/* Filters */}
             <div className="flex flex-wrap gap-3 mb-4">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500">Symbol:</span>
+                <span className="text-xs text-muted-foreground">Symbol:</span>
                 <input
                   type="text"
                   value={filterSymbol}
                   onChange={(e) => setFilterSymbol(e.target.value)}
                   placeholder="Filter..."
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500 placeholder-slate-600 w-24"
+                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60 w-24"
                 />
                 {symbols.length > 0 && (
                   <select
                     value={filterSymbol}
                     onChange={(e) => setFilterSymbol(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                    className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-ring"
                   >
                     <option value="">All symbols</option>
                     {symbols.map((s) => (
@@ -712,15 +703,15 @@ export default function ManualTradesPage() {
               </div>
 
               <div className="flex items-center gap-1">
-                <span className="text-xs text-slate-500">Status:</span>
+                <span className="text-xs text-muted-foreground">Status:</span>
                 {(["all", "open", "closed"] as const).map((s) => (
                   <button
                     key={s}
                     onClick={() => setFilterStatus(s)}
-                    className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                    className={`text-xs px-2 py-0.5 rounded border transition-colors ${
                       filterStatus === s
-                        ? "bg-slate-600 text-white"
-                        : "bg-slate-800 text-slate-500 hover:text-slate-300"
+                        ? "bg-secondary border-input text-foreground"
+                        : "bg-card border-border text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     {s === "all" ? "All" : s}
@@ -728,7 +719,7 @@ export default function ManualTradesPage() {
                 ))}
               </div>
 
-              <div className="ml-auto text-xs text-slate-500">
+              <div className="ml-auto text-xs text-muted-foreground">
                 {filteredTrades.length} of {trades.length} trades
               </div>
             </div>

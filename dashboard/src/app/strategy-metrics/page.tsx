@@ -13,7 +13,6 @@
  * are now clickable — each opens a MetricDrilldown Sheet showing the
  * underlying records.
  */
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useStrategyMetricsReport, type ReportFilters } from "@/hooks/useData";
@@ -34,6 +33,7 @@ import {
   type LifecycleDrilldownState,
 } from "@/components/strategy-metrics/LifecycleDrilldown";
 import { OpportunityExplorer } from "@/components/strategy-metrics/OpportunityExplorer";
+import { PageSubNav } from "@/components/PageSubNav";
 import type { StrategyMetricsSummary } from "@/types";
 
 function isoDate(d: Date): string {
@@ -160,14 +160,7 @@ export default function StrategyMetricsPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-            Dashboard
-          </Link>
-          <span className="text-sm font-semibold text-foreground">Strategy Metrics</span>
-        </div>
-      </header>
+      <PageSubNav currentPage="/strategy-metrics" />
 
       <main className="mx-auto max-w-7xl space-y-5 px-4 py-5">
         <ReportControls
