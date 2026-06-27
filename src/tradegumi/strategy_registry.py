@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import json
 import logging as log
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from tradegumi import config
 
 # Built-in default/reference strategy — always present even without a folder.
-BUILTIN_STRATEGY: "StrategyEntry" = {
+BUILTIN_STRATEGY: dict = {
     "id": "CTI-v1",
     "label": "CTI v1 (Default)",
     "description": "Base strategy",
@@ -108,7 +107,9 @@ def get_strategies(strategies_dir: Optional[str] = None) -> list[dict]:
     in sorted order. Any warnings are preserved in the response so the
     dashboard can surface them without breaking the UI.
     """
-    strategies_dir = strategies_dir or os.getenv("STRATEGIES_DIR", config.get_strategies_dir())
+    # Always resolve through config.get_strategies_dir() so relative paths
+    # are anchored to the project root, not the process CWD.
+    strategies_dir = strategies_dir or config.get_strategies_dir()
     base = Path(strategies_dir)
 
     folder_strategies = _discover_folder_strategies(base)

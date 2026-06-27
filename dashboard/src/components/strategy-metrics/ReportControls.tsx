@@ -10,7 +10,7 @@
  * when the draft differs from the applied filters (FR-035).
  */
 import { useEffect, useMemo, useState } from "react";
-import { Play, Download, Loader2 } from "lucide-react";
+import { Play, Download, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getStrategies, type StrategyOption } from "@/lib/api";
 import type { ReportFilters } from "@/hooks/useData";
 
 const DECISION_OPTIONS = ["emitted", "rejected", "skipped", "indeterminate"] as const;
@@ -154,8 +155,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ── Strategy Select ────────────────────────────────────────────────────────
 
-import { getStrategies, type StrategyOption } from "@/lib/api";
-import { AlertTriangle } from "lucide-react";
+const STRATEGY_ANY = "all";
 
 function StrategySelect({
   value,
@@ -191,12 +191,12 @@ function StrategySelect({
 
   return (
     <div className="relative">
-      <Select value={value} onValueChange={onChange}>
+      <Select value={value || STRATEGY_ANY} onValueChange={(v) => onChange(v === STRATEGY_ANY ? "" : v)}>
         <SelectTrigger className="w-full">
           <SelectValue placeholder="All" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All</SelectItem>
+          <SelectItem value={STRATEGY_ANY}>All</SelectItem>
           {options.map((opt) => (
             <SelectItem key={opt.id} value={opt.id}>
               {opt.label}
