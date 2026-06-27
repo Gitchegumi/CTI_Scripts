@@ -1,0 +1,6 @@
+{
+  "id": "example-pullback",
+  "label": "Example Pullback Strategy",
+  "description": "Reference strategy.json for the folder layout documentation. Copy this folder and edit the values to add your own strategy.",
+  "signal_type": "pullback"
+}
