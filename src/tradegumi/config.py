@@ -60,6 +60,23 @@ SIGNAL_SETUP_GROUP_WINDOW_MINUTES = int(os.getenv("SIGNAL_SETUP_GROUP_WINDOW_MIN
 SIGNAL_ENTRY_TOLERANCE_ATR = float(os.getenv("SIGNAL_ENTRY_TOLERANCE_ATR", "0.25"))
 SIGNAL_STALE_BARS = int(os.getenv("SIGNAL_STALE_BARS", "3"))
 
+# ── Strategy Registry ───────────────────────────────────────────────────────
+# Base directory for discovered strategy folders.
+# Each subfolder should contain a strategy.json metadata file.
+_STRATEGIES_DIR_DEFAULT = "./strategies"
+
+
+def get_strategies_dir() -> str:
+    """Return the configured strategies directory path.
+
+    Resolves relative paths relative to the project root.
+    """
+    raw = os.getenv("STRATEGIES_DIR", _STRATEGIES_DIR_DEFAULT)
+    path = Path(raw)
+    if not path.is_absolute():
+        path = (_project_root / path).resolve()
+    return str(path)
+
 # TradeGumi loop cadence and lightweight performance logging.
 # Defaults preserve fast live observation and intrabar signal evaluation.
 TRADEGUMI_PRICE_POLL_SECONDS = float(os.getenv("TRADEGUMI_PRICE_POLL_SECONDS", "1"))

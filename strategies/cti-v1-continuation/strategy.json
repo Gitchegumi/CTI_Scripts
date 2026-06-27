@@ -1,0 +1,6 @@
+{
+  "id": "CTI-v1.1-continuation-test",
+  "label": "Continuation Test (CTI v1.1)",
+  "description": "Continuation lifecycle management strategy",
+  "signal_type": "continuation"
+}

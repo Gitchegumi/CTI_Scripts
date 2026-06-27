@@ -312,6 +312,14 @@ class TradeGumiAPIHandler(BaseHTTPRequestHandler):
                 self._send_json([])
             return
 
+        if path.startswith("/api/strategies"):
+            try:
+                from tradegumi.strategy_registry import get_strategies
+                self._send_json(get_strategies())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+
         if path.startswith("/api/strategy-metrics/summary"):
             try:
                 from tradegumi.strategy_metrics import get_summary

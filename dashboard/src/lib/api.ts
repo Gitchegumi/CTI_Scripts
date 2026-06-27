@@ -57,6 +57,18 @@ export function modeDisplayLabel(mode: ApiStatus["mode"] | string | null | undef
   return "Developing";
 }
 
+export interface StrategyOption {
+  id: string;
+  label: string;
+  description?: string;
+  source: "builtin" | "folder";
+  warning?: string;
+}
+
+export async function getStrategies(): Promise<StrategyOption[]> {
+  return apiFetch<StrategyOption[]>("/api/strategies");
+}
+
 export async function getConfig(): Promise<ApiStatus> {
   return apiFetch<ApiStatus>("/api/status");
 }

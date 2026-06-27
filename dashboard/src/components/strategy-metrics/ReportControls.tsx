@@ -9,7 +9,7 @@
  * is validated before running (FR-006), and a "pending changes" hint appears
  * when the draft differs from the applied filters (FR-035).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Play, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,8 +101,7 @@ export function ReportControls({
             onChange={(e) => set("symbol", e.target.value.toUpperCase())} />
         </Field>
         <Field label="Strategy">
-          <Input value={draft.strategy ?? ""} placeholder="All"
-            onChange={(e) => set("strategy", e.target.value)} />
+          <StrategySelect value={draft.strategy ?? ""} onChange={(v) => set("strategy", v)} />
         </Field>
         <Field label="Signal type">
           <Input value={draft.signal_type ?? ""} placeholder="All"
@@ -150,5 +149,71 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+// ── Strategy Select ────────────────────────────────────────────────────────
+
+import { getStrategies, type StrategyOption } from "@/lib/api";
+import { AlertTriangle } from "lucide-react";
+
+function StrategySelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [options, setOptions] = useState<StrategyOption[]>([]);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    getStrategies()
+      .then((opts) => {
+        setOptions(opts);
+        setLoadError(false);
+      })
+      .catch(() => setLoadError(true));
+  }, []);
+
+  // Graceful degradation: fall back to text input if API fails
+  if (loadError) {
+    return (
+      <Input
+        value={value}
+        placeholder="All"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
+  const strategiesWithWarnings = options.filter((o) => !!o.warning);
+
+  return (
+    <div className="relative">
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="All" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">All</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt.id} value={opt.id}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {strategiesWithWarnings.length > 0 && (
+        <span
+          title={strategiesWithWarnings
+            .map((w) => `${w.id}: ${w.warning}`)
+            .join("\n")}
+          className="absolute -top-0.5 -right-0.5 text-destructive"
+        >
+          <AlertTriangle className="size-3" />
+        </span>
+      )}
+    </div>
   );
 }
