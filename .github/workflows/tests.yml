@@ -48,7 +48,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: src
-        run: poetry install --no-interaction --no-ansi --no-root --without back_testing
+        run: poetry install --no-interaction --no-ansi --no-root
 
       - name: Run tests
         working-directory: src
