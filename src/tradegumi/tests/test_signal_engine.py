@@ -7,12 +7,21 @@ from tradegumi.signal_engine import (
     SignalEngine,
     _live_trigger_price,
     _last_closed_candle_window,
-    _pullback_keltner_sequence,
-    _pullback_stoch_rsi,
-    _pullback_trigger,
     classify_trend_decision,
-    classify_pullback_trend_bridge,
 )
+# Pullback decision helpers moved into the example-strategy plugin. Load the
+# strategy modules so tests can call the helpers and monkeypatch the indicator
+# functions in the strategy's own namespace.
+import importlib as _importlib
+from pathlib import Path as _Path
+from tradegumi import config as _config
+from tradegumi.strategy_loader import load_strategy_module
+STRAT_MOD = load_strategy_module(_Path(_config.get_strategies_dir()) / "example-strategy")
+_STRAT_INDICATORS = _importlib.import_module(STRAT_MOD.__name__.rsplit(".", 1)[0] + ".indicators")
+classify_pullback_trend_bridge = _STRAT_INDICATORS.classify_pullback_trend_bridge
+_pullback_keltner_sequence = _STRAT_INDICATORS.pullback_keltner_sequence
+_pullback_stoch_rsi = _STRAT_INDICATORS.pullback_stoch_rsi
+_pullback_trigger = _STRAT_INDICATORS.pullback_trigger
 from tradegumi.price_observations import DEFAULT_PRICE_HISTORY, PriceObservation
 from tradegumi import journal
 from tradegumi.signal_engine import Signal
@@ -159,7 +168,7 @@ def test_signal_engine_data_with_short_indicator_output_reports_data_not_ready(m
     engine = SignalEngine(FakeClient({"M5": candles}))
 
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_stoch_rsi",
+        STRAT_MOD, "calculate_stoch_rsi",
         lambda df, length, k, d: pd.DataFrame({"k": [], "d": []}),
     )
 
@@ -293,11 +302,11 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
     count = len(candles)
 
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_stoch_rsi",
+        STRAT_MOD, "calculate_stoch_rsi",
         lambda df, length, k, d: pd.DataFrame({"k": [20.0] * (count - 1) + [40.0], "d": [30.0] * count}),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_macd",
+        STRAT_MOD, "calculate_macd",
         lambda df, fast, slow, signal: pd.DataFrame({
             "macd": [0.2] * count,
             "signal": [0.1] * count,
@@ -305,7 +314,7 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_keltner_channels",
+        STRAT_MOD, "calculate_keltner_channels",
         lambda df, length, multiplier, mamode: pd.DataFrame({
             "upper": [1.2] * count,
             "mid": [1.1] * count,
@@ -313,16 +322,16 @@ def test_full_trend_valid_candidate_reaches_signal_rule_evaluation(monkeypatch):
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_candlestick_patterns",
+        STRAT_MOD, "calculate_candlestick_patterns",
         lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
-    monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+    monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
     monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
-    monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
     signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
 
@@ -345,11 +354,11 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
     count = len(candles)
 
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_stoch_rsi",
+        STRAT_MOD, "calculate_stoch_rsi",
         lambda df, length, k, d: pd.DataFrame({"k": [20.0] * (count - 1) + [40.0], "d": [30.0] * count}),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_macd",
+        STRAT_MOD, "calculate_macd",
         lambda df, fast, slow, signal: pd.DataFrame({
             "macd": [0.2] * count,
             "signal": [0.1] * count,
@@ -357,7 +366,7 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_keltner_channels",
+        STRAT_MOD, "calculate_keltner_channels",
         lambda df, length, multiplier, mamode: pd.DataFrame({
             "upper": [1.2] * count,
             "mid": [1.1] * count,
@@ -365,15 +374,15 @@ def test_get_signal_reuses_trend_lr_without_refetching_trend_timeframes(monkeypa
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_candlestick_patterns",
+        STRAT_MOD, "calculate_candlestick_patterns",
         lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
     )
-    monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
-    monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
+    monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
     signal, _, reason, _ = engine._get_signal("EURUSD", "Uptrend", (0.01, 0.01, 0.01))
 
@@ -409,11 +418,11 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
     count = len(candles)
 
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_stoch_rsi",
+        STRAT_MOD, "calculate_stoch_rsi",
         lambda df, length, k, d: pd.DataFrame({"k": [40.0] * count, "d": [30.0] * count}),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_macd",
+        STRAT_MOD, "calculate_macd",
         lambda df, fast, slow, signal: pd.DataFrame({
             "macd": [0.2] * count,
             "signal": [0.1] * count,
@@ -421,7 +430,7 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_keltner_channels",
+        STRAT_MOD, "calculate_keltner_channels",
         lambda df, length, multiplier, mamode: pd.DataFrame({
             "upper": [1.2] * count,
             "mid": [1.15] * count,
@@ -429,13 +438,13 @@ def test_valid_data_strategy_rejection_is_not_signal_data_missing(monkeypatch):
         }),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_candlestick_patterns",
+        STRAT_MOD, "calculate_candlestick_patterns",
         lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
     )
-    monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.2)
-    monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 1.0)
-    monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
+    monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 0.2)
+    monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 1.0)
+    monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 0.0)
 
     signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
 
@@ -454,11 +463,11 @@ def test_missing_macd_signal_column_is_indeterminate_not_strategy_rejection(monk
 
     monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * len(df)))
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_stoch_rsi",
+        STRAT_MOD, "calculate_stoch_rsi",
         lambda df, length, k, d: pd.DataFrame({"k": [20.0] * (count - 1) + [40.0], "d": [30.0] * count}),
     )
     monkeypatch.setattr(
-        "tradegumi.signal_engine.calculate_macd",
+        STRAT_MOD, "calculate_macd",
         lambda df, fast, slow, signal: pd.DataFrame({
             "macd": [0.2] * count,
             "histogram": [0.1] * (count - 1) + [0.2],
@@ -653,11 +662,11 @@ class TestDualPathSignals:
         # Price above midline (Uptrend), MACD histogram positive and improving
         last_price = candles[-1].c
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_stoch_rsi",
+            STRAT_MOD, "calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0005] * count,
@@ -667,7 +676,7 @@ class TestDualPathSignals:
         # Price above midline (mid = 1.1, close = last_price > mid)
         mid_val = last_price - 0.0005
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": [mid_val + 0.003] * count,
                 "mid": [mid_val] * count,
@@ -675,16 +684,16 @@ class TestDualPathSignals:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            STRAT_MOD, "calculate_candlestick_patterns",
             lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
         )
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
         monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
-        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
-        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
-        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
         signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
 
@@ -706,11 +715,11 @@ class TestDualPathSignals:
         upper = [last_price + 0.003] * count
         upper[-8] = last_price - 0.001
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_stoch_rsi",
+            STRAT_MOD, "calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": [25.0] * (count - 1) + [35.0], "d": [30.0] * count}),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0005] * count,
@@ -718,7 +727,7 @@ class TestDualPathSignals:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid_val] * count,
@@ -726,16 +735,16 @@ class TestDualPathSignals:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            STRAT_MOD, "calculate_candlestick_patterns",
             lambda df: pd.DataFrame({"CDL_HAMMER": [0] * (count - 1) + [-1]}),
         )
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
         monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lambda df, length: pd.Series([0.01] * count))
-        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
-        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
-        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
         signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend", allow_continuation=False)
 
@@ -754,11 +763,11 @@ class TestDualPathSignals:
         last_price = candles[-1].c
         mid_val = last_price - 0.0005
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_stoch_rsi",
+            STRAT_MOD, "calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0005] * count,
@@ -766,7 +775,7 @@ class TestDualPathSignals:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": [mid_val + 0.003] * count,
                 "mid": [mid_val] * count,
@@ -774,10 +783,10 @@ class TestDualPathSignals:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            STRAT_MOD, "calculate_candlestick_patterns",
             lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
         )
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
         # 1H and 15M strong up, 5M flat/weak (would fail classify_trend_decision)
         def lr_side_effect(df, length):
             if length == 20:  # 1H
@@ -787,11 +796,11 @@ class TestDualPathSignals:
             else:  # 5M — weak
                 return pd.Series([0.001] * len(df))
         monkeypatch.setattr("tradegumi.signal_engine.calculate_linear_regression", lr_side_effect)
-        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
-        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
-        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
         signal, criteria, reason, confidence = engine._get_signal("EURUSD", "Uptrend")
 
@@ -935,11 +944,11 @@ class TestPullbackBridgeAndVersioning:
             pattern_value = 1
 
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_stoch_rsi",
+            STRAT_MOD, "calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": k_values, "d": d_values}),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": hist_values,
                 "signal": [0.0] * count,
@@ -947,7 +956,7 @@ class TestPullbackBridgeAndVersioning:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -955,15 +964,15 @@ class TestPullbackBridgeAndVersioning:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            STRAT_MOD, "calculate_candlestick_patterns",
             lambda df: pd.DataFrame({trigger: [0] * (count - 1) + [pattern_value]}),
         )
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
-        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 1.0)
-        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.0 if macd_blocks else 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 1.0)
-        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 0.0 if macd_blocks else 0.8)
+        monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
     def test_pullback_bridge_allows_current_15m_flat_with_recent_memory(self):
         result = classify_pullback_trend_bridge(
@@ -1256,7 +1265,7 @@ class TestPullbackBridgeAndVersioning:
         upper[-8] = 1.0920
         lower = [1.0800] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1265,7 +1274,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0] * count,
@@ -1292,7 +1301,7 @@ class TestPullbackBridgeAndVersioning:
         lower = [1.1000] * count
         lower[-8] = 1.1080
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1301,7 +1310,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [-0.001] * count,
                 "signal": [0.0] * count,
@@ -1327,7 +1336,7 @@ class TestPullbackBridgeAndVersioning:
         upper = [1.0900] * count
         lower = [1.0700] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1336,7 +1345,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0] * count,
@@ -1362,7 +1371,7 @@ class TestPullbackBridgeAndVersioning:
         upper = [1.1300] * count
         lower = [1.1100] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1371,7 +1380,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [-0.001] * count,
                 "signal": [0.0] * count,
@@ -1397,7 +1406,7 @@ class TestPullbackBridgeAndVersioning:
         upper = [1.0900] * count
         lower = [1.0700] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1406,7 +1415,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [-0.001] * count,
                 "signal": [0.0] * count,
@@ -1431,7 +1440,7 @@ class TestPullbackBridgeAndVersioning:
         upper = [1.1300] * count
         lower = [1.1100] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1440,7 +1449,7 @@ class TestPullbackBridgeAndVersioning:
         )
         
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0] * count,
@@ -1466,7 +1475,7 @@ class TestPullbackBridgeAndVersioning:
         upper[-8] = 1.1020
         lower = [1.0850] * count
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": upper,
                 "mid": [mid] * count,
@@ -1549,11 +1558,11 @@ class TestChopFilter:
         last_price = 1.1000
         mid_val = last_price - 0.0005
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_stoch_rsi",
+            STRAT_MOD, "calculate_stoch_rsi",
             lambda df, length, k, d: pd.DataFrame({"k": [55.0] * count, "d": [50.0] * count}),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_macd",
+            STRAT_MOD, "calculate_macd",
             lambda df, fast, slow, signal: pd.DataFrame({
                 "macd": [0.001] * count,
                 "signal": [0.0005] * count,
@@ -1561,7 +1570,7 @@ class TestChopFilter:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_keltner_channels",
+            STRAT_MOD, "calculate_keltner_channels",
             lambda df, length, multiplier, mamode: pd.DataFrame({
                 "upper": [mid_val + 0.003] * count,
                 "mid": [mid_val] * count,
@@ -1569,15 +1578,15 @@ class TestChopFilter:
             }),
         )
         monkeypatch.setattr(
-            "tradegumi.signal_engine.calculate_candlestick_patterns",
+            STRAT_MOD, "calculate_candlestick_patterns",
             lambda df: pd.DataFrame({"CDL_HAMMER": [0] * count}),
         )
-        monkeypatch.setattr("tradegumi.signal_engine.calculate_atr", lambda df: pd.Series([0.001] * count))
-        monkeypatch.setattr("tradegumi.signal_engine.stoch_rsi_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.macd_histogram_score", lambda *args: 0.9)
-        monkeypatch.setattr("tradegumi.signal_engine.keltner_score", lambda *args: 0.8)
-        monkeypatch.setattr("tradegumi.signal_engine.candlestick_score", lambda *args: 0.0)
-        monkeypatch.setattr("tradegumi.signal_engine.trend_score", lambda *args: 1.0)
+        monkeypatch.setattr(STRAT_MOD, "calculate_atr", lambda df: pd.Series([0.001] * count))
+        monkeypatch.setattr(STRAT_MOD, "stoch_rsi_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "macd_histogram_score", lambda *args: 0.9)
+        monkeypatch.setattr(STRAT_MOD, "keltner_score", lambda *args: 0.8)
+        monkeypatch.setattr(STRAT_MOD, "candlestick_score", lambda *args: 0.0)
+        monkeypatch.setattr(STRAT_MOD, "trend_score", lambda *args: 1.0)
 
     def _emit_signal(self, engine, symbol):
         """Call check_symbol and return the diagnostic, with detailed logging on failure."""

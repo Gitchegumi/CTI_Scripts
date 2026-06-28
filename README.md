@@ -22,21 +22,32 @@ Signal journal exports separate emitted signal outcomes from tradable setup outc
 
 ## Strategy Folders
 
-Strategy metadata lives in subfolders under `strategies/`. The strategy registry
-scans this directory at runtime and populates the dashboard dropdown with every
-folder that contains a valid `strategy.json` file.
+Strategies are **self-contained, executable plugin folders** under `strategies/`.
+TradeGumi core is the runtime framework (market data, trend/chop/shock filters,
+cooldown, diagnostics, risk sizing); each strategy folder owns its *decision*
+logic and is discovered and loaded at runtime without any change to core code.
+`strategies/example-strategy/` is the tracked reference implementation (the CTI
+pullback strategy with continuation management). Backtesting and strategy
+research are **not** part of TradeGumi — they live in QuantPipe.
 
 ### Folder layout
 
 ```text
 strategies/
-├── example-strategy/       # Tracked — reference for docs and tests
-│   └── strategy.json
+├── example-strategy/       # Tracked — reference implementation
+│   ├── strategy.json       #   metadata (id, label, description, signal_type, entrypoint)
+│   ├── strategy.py         #   get_strategy() -> BaseStrategy; owns the signal decision
+│   ├── indicators.py       #   strategy-specific indicators / structure helpers
+│   ├── management.py       #   trade-management helpers (risk/exit, confidence)
+│   └── README.md           #   per-strategy notes
 ├── my-pullback/            # Gitignored — your own strategy (local only)
-│   └── strategy.json
+│   └── strategy.py
 └── my-continuation/        # Gitignored — another local strategy
-    └── strategy.json
+    └── strategy.py
 ```
+
+Only `strategy.json` and `strategy.py` are required; `indicators.py`,
+`management.py`, `tests/`, and any other files are optional and up to the strategy.
 
 ### `strategy.json` fields
 
@@ -46,12 +57,29 @@ strategies/
 | `label`       | No       | Display name in the dashboard dropdown                |
 | `description` | No       | Short description shown in tooltips/metadata         |
 | `signal_type` | No       | Strategy variant tag (e.g. `pullback`, `continuation`) |
+| `entrypoint`  | No       | Strategy module filename (informational; defaults to `strategy.py`) |
+
+### How the runtime discovers and loads strategies
+
+`tradegumi.strategy_loader.load_strategy()` resolves a folder under the configured
+strategies directory (`STRATEGIES_DIR`, default `./strategies`) by folder name or by
+`strategy.json` `id`, imports its `strategy.py` as an isolated synthetic package
+(so `from .indicators import …` works even with a hyphenated folder name), and
+calls the module-level `get_strategy()` factory, which must return a
+`tradegumi.strategy_loader.BaseStrategy`. `SignalEngine` loads its strategy once at
+construction — the bundled `example-strategy` by default, overridable with the
+`TRADEGUMI_STRATEGY` env var (folder name or `id`) — and calls
+`strategy.evaluate(engine, ctx)` for each evaluation (plus the optional
+`strategy.bridge_trend(...)` hook). The separate strategy *registry* still scans
+`strategies/` for `strategy.json` to populate the dashboard dropdown.
 
 ### Adding a new strategy
 
 1. Copy the example folder: `cp -r strategies/example-strategy strategies/my-strategy`
-2. Edit `strategies/my-strategy/strategy.json` with your strategy's metadata
-3. Restart the API server (or refresh the dashboard) — the new strategy appears in the dropdown automatically
+2. Edit `strategies/my-strategy/strategy.json` (unique `id`) and the logic in
+   `strategy.py` / `indicators.py` / `management.py`.
+3. Point the runtime at it with `TRADEGUMI_STRATEGY=my-strategy` (or its `id`) and
+   restart the API server / worker.
 
 Your new folder is **not tracked by git** — only `strategies/example-strategy/` is
 committed. All other sibling folders are gitignored so your private strategies stay

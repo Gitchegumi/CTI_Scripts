@@ -20,17 +20,7 @@ from tradegumi.price_observations import latest_observation
 from tradegumi.strategy_metrics import CriterionResult, EvaluatedOpportunity
 from tradegumi.volatility_shock import VolatilityShockFilter, ShockDetectionResult
 from tradegumi.indicators import (
-    calculate_stoch_rsi,
-    calculate_macd,
-    calculate_keltner_channels,
-    calculate_candlestick_patterns,
     calculate_linear_regression,
-    calculate_atr,
-    stoch_rsi_score,
-    macd_histogram_score,
-    keltner_score,
-    candlestick_score,
-    trend_score,
     candles_to_df,
 )
 
@@ -424,351 +414,6 @@ def _lr_direction(value: object) -> str:
     if numeric < 0:
         return "down"
     return "flat"
-
-
-def classify_pullback_trend_bridge(
-    lr_1h: object,
-    current_lr_15m: object,
-    recent_lr_15m: Sequence[object],
-    trend: str,
-    threshold_1h: float,
-    threshold_15m: float,
-    *,
-    memory_candles: int,
-    strong_opposite_multiplier: float,
-) -> dict:
-    """Evaluate whether recent M15 memory bridges a current pullback flattening.
-
-    Pullback entries need the H1 anchor to remain aligned while allowing the
-    current M15 LR to flatten. A current M15 reading that is strongly opposite
-    the desired direction rejects the bridge even if older memory was aligned.
-
-    Note: trend=None is intentionally not handled here — callers that pass a flat/
-    unknown trend should not be building pullback bridges at all.
-    """
-    desired = "up" if trend == "Uptrend" else "down"
-    opposite = "down" if desired == "up" else "up"
-    try:
-        h1 = float(lr_1h)
-        m15 = float(current_lr_15m)
-    except (TypeError, ValueError):
-        return {"passed": False, "status": "pullback_1h_anchor_failed", "reason": "invalid_lr"}
-
-    h1_aligned = _lr_direction(h1) == desired and abs(h1) >= threshold_1h
-    if config.PULLBACK_REQUIRE_1H_ALIGNMENT and not h1_aligned:
-        return {
-            "passed": False,
-            "status": "pullback_1h_anchor_failed",
-            "lr_1h": h1,
-            "threshold_1h": threshold_1h,
-        }
-
-    strong_opposite_threshold = threshold_15m * strong_opposite_multiplier
-    current_direction = _lr_direction(m15)
-    if current_direction == opposite and abs(m15) >= strong_opposite_threshold:
-        return {
-            "passed": False,
-            "status": "pullback_15m_bridge_strong_opposite",
-            "lr_15m": m15,
-            "strong_opposite_threshold": strong_opposite_threshold,
-        }
-
-    memory_window = list(recent_lr_15m)[-memory_candles:]
-    aligned_memory = []
-    for value in memory_window:
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            continue
-        if _lr_direction(numeric) == desired and abs(numeric) >= threshold_15m:
-            aligned_memory.append(numeric)
-
-    if not aligned_memory:
-        return {
-            "passed": False,
-            "status": "pullback_15m_bridge_no_memory",
-            "recent_lr_15m": memory_window,
-            "threshold_15m": threshold_15m,
-        }
-
-    return {
-        "passed": True,
-        "status": "pullback_15m_bridge_allowed",
-        "lr_1h": h1,
-        "lr_15m": m15,
-        "recent_aligned_count": len(aligned_memory),
-        "recent_lr_15m": memory_window,
-    }
-
-
-def _pullback_structure(df: pd.DataFrame, trend: str) -> dict:
-    """Validate recent M5 structure and protected swing for a pullback."""
-    lookback = max(4, min(config.PULLBACK_STRUCTURE_LOOKBACK_BARS, len(df)))
-    window = df.iloc[-lookback:]
-    highs = [float(v) for v in window["h"].tolist()]
-    lows = [float(v) for v in window["l"].tolist()]
-    last_low = lows[-1]
-    last_high = highs[-1]
-
-    if trend == "Uptrend":
-        prior_lows = lows[:-1]
-        protected_low = min(prior_lows) if prior_lows else last_low
-        has_higher_high = highs[-1] > min(highs[:-1]) if len(highs) > 1 else False
-        has_higher_low = last_low >= protected_low
-        passed = has_higher_high and has_higher_low
-        reason = "pullback_structure_ok" if passed else "pullback_structure_failed"
-        return {
-            "passed": passed,
-            "reason": reason,
-            "protected_level": protected_low,
-            "recent_highs": highs,
-            "recent_lows": lows,
-        }
-
-    prior_highs = highs[:-1]
-    protected_high = max(prior_highs) if prior_highs else last_high
-    has_lower_low = lows[-1] < max(lows[:-1]) if len(lows) > 1 else False
-    has_lower_high = last_high <= protected_high
-    passed = has_lower_low and has_lower_high
-    reason = "pullback_structure_ok" if passed else "pullback_structure_failed"
-    return {
-        "passed": passed,
-        "reason": reason,
-        "protected_level": protected_high,
-        "recent_highs": highs,
-        "recent_lows": lows,
-    }
-
-
-def _pullback_keltner_sequence(
-    df: pd.DataFrame,
-    kc: pd.DataFrame,
-    trend: str,
-    atr: float,
-    kc_upper_col: str,
-    kc_lower_col: str,
-    kc_mid_col: str,
-    macd_current: Optional[float] = None,
-) -> dict:
-    """Validate prior outer-band break followed by a midline pullback or high-value pullback."""
-    lookback = max(2, min(config.PULLBACK_KC_BREAK_LOOKBACK_BARS, len(df)))
-    price_window = df.iloc[-lookback:]
-    kc_window = kc.iloc[-lookback:]
-    midline = float(kc[kc_mid_col].iloc[-1])
-    upper = float(kc[kc_upper_col].iloc[-1])
-    lower = float(kc[kc_lower_col].iloc[-1])
-    channel_width = abs(upper - lower)
-    tolerance_atr_component = float(atr) * config.PULLBACK_KC_MIDLINE_TOLERANCE_ATR
-    tolerance_channel_component = channel_width * config.PULLBACK_KC_MIDLINE_TOLERANCE_CHANNEL_WIDTH
-    tolerance = max(tolerance_atr_component, tolerance_channel_component)
-    trigger_close = float(df["c"].iloc[-1])
-    distance_to_midline = abs(trigger_close - midline)
-    near_midline = distance_to_midline <= tolerance
-
-    if trend == "Uptrend":
-        highs = price_window["h"].iloc[:-1].to_numpy()
-        upper_band = kc_window[kc_upper_col].iloc[:-1].to_numpy()
-        prior_break = bool((highs >= upper_band).any())
-    else:
-        lows = price_window["l"].iloc[:-1].to_numpy()
-        lower_band = kc_window[kc_lower_col].iloc[:-1].to_numpy()
-        prior_break = bool((lows <= lower_band).any())
-
-    is_high_value = False
-    if macd_current is not None:
-        if trend == "Uptrend":
-            is_high_value = bool(prior_break and trigger_close > midline and macd_current > 0)
-        else:
-            is_high_value = bool(prior_break and trigger_close < midline and macd_current < 0)
-
-    passed = prior_break and (near_midline or is_high_value)
-    return {
-        "passed": passed,
-        "reason": "pullback_kc_sequence_ok" if passed else "pullback_kc_sequence_failed",
-        "prior_break": prior_break,
-        "near_midline": near_midline,
-        "is_high_value": bool(is_high_value and not near_midline),
-        "trigger_close": trigger_close,
-        "midline": midline,
-        "distance_to_midline": distance_to_midline,
-        "tolerance": tolerance,
-        "tolerance_atr_component": tolerance_atr_component,
-        "tolerance_channel_component": tolerance_channel_component,
-    }
-
-
-def _pullback_trigger(
-    patterns: pd.DataFrame,
-    trend: str,
-    candles: Optional[pd.DataFrame] = None,
-    value_area_midline: Optional[float] = None,
-    value_area_tolerance: Optional[float] = None,
-    macd_current: Optional[float] = None,
-) -> dict:
-    """Return approved direction-specific pullback trigger candle diagnostics.
-
-    The primary gate requires a recognised candlestick pattern (hammer/
-    engulfing for uptrend, shooting star/engulfing for downtrend) whose shape
-    matches a tight body/long-rejection-wick profile. When that pattern is
-    absent or its shape is marginal, a MACD-histogram momentum fallback is
-    allowed: if the histogram is on the correct side of zero for the trend
-    direction, the trigger is approved as ``macd_momentum`` so valid pullback
-    setups are not blocked solely by a missing exact candlestick label.
-    """
-    base = {
-        "passed": False,
-        "trigger": None,
-        "reason": "pullback_trigger_candle_failed",
-        "pattern": None,
-        "body_to_range": None,
-        "upper_wick": None,
-        "lower_wick": None,
-        "rejection_wick_ratio": None,
-        "rejection_wick_body_ratio": None,
-        "close_position": None,
-        "value_area_relation": None,
-        "momentum_fallback": False,
-    }
-
-    def _macd_supports() -> bool:
-        if macd_current is None:
-            return False
-        return (trend == "Uptrend" and macd_current > 0) or (trend == "Downtrend" and macd_current < 0)
-
-    if patterns.empty:
-        if _macd_supports():
-            return {
-                **base,
-                "passed": True,
-                "trigger": "macd_momentum",
-                "pattern": "MACD_HISTOGRAM",
-                "reason": "pullback_trigger_macd_momentum",
-                "momentum_fallback": True,
-            }
-        return base
-
-    last = patterns.iloc[-1]
-    value = lambda name: last.get(name, 0) if hasattr(last, "get") else 0
-    trigger: Optional[str] = None
-    pattern: Optional[str] = None
-    if trend == "Uptrend":
-        if value("CDL_HAMMER") < 0:
-            trigger = "hammer"
-            pattern = "CDL_HAMMER"
-        elif value("CDL_ENGULFING") < 0:
-            trigger = "bullish_engulfing"
-            pattern = "CDL_ENGULFING"
-    else:
-        if value("CDL_SHOOTINGSTAR") > 0:
-            trigger = "shooting_star"
-            pattern = "CDL_SHOOTINGSTAR"
-        elif value("CDL_ENGULFING") > 0:
-            trigger = "bearish_engulfing"
-            pattern = "CDL_ENGULFING"
-
-    if trigger is None:
-        if _macd_supports():
-            return {
-                **base,
-                "passed": True,
-                "trigger": "macd_momentum",
-                "pattern": "MACD_HISTOGRAM",
-                "reason": "pullback_trigger_macd_momentum",
-                "momentum_fallback": True,
-            }
-        return base
-
-    context = {**base, "trigger": trigger, "pattern": pattern}
-    if candles is None or candles.empty:
-        context.update({"passed": True, "reason": f"pullback_trigger_{trigger}"})
-        return context
-
-    candle = candles.iloc[-1]
-    open_price = float(candle["o"])
-    high = float(candle["h"])
-    low = float(candle["l"])
-    close = float(candle["c"])
-    full_range = max(0.0, high - low)
-    body_size = abs(close - open_price)
-    if full_range <= 0:
-        return context
-
-    upper_wick = max(0.0, high - max(open_price, close))
-    lower_wick = max(0.0, min(open_price, close) - low)
-    rejection_wick = lower_wick if trend == "Uptrend" else upper_wick
-    body_to_range = body_size / full_range
-    rejection_wick_ratio = rejection_wick / full_range
-    rejection_wick_body_ratio = rejection_wick / body_size if body_size > 0 else math.inf
-    close_position = (close - low) / full_range
-    value_area_relation = None
-    if value_area_midline is not None and value_area_tolerance is not None:
-        wick_price = low if trend == "Uptrend" else high
-        close_near = abs(close - float(value_area_midline)) <= float(value_area_tolerance)
-        wick_near = abs(wick_price - float(value_area_midline)) <= float(value_area_tolerance)
-        wick_through = wick_price <= value_area_midline if trend == "Uptrend" else wick_price >= value_area_midline
-        value_area_relation = {
-            "close_near": close_near,
-            "wick_near": wick_near,
-            "wick_through": wick_through,
-        }
-    shape_ok = (
-        body_to_range <= config.PULLBACK_TRIGGER_MAX_BODY_RANGE_RATIO
-        and rejection_wick_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_RANGE_RATIO
-        and rejection_wick_body_ratio >= config.PULLBACK_TRIGGER_MIN_REJECTION_WICK_BODY_RATIO
-    )
-    if not shape_ok and _macd_supports():
-        # Momentum continuation rescue: the candle isn't a textbook rejection
-        # shape, but MACD histogram is on the correct side of zero for the
-        # pullback direction, so allow the trigger to pass.
-        context.update({
-            "passed": True,
-            "reason": f"pullback_trigger_{trigger}_momentum_fallback",
-            "momentum_fallback": True,
-            "body_to_range": body_to_range,
-            "upper_wick": upper_wick,
-            "lower_wick": lower_wick,
-            "rejection_wick_ratio": rejection_wick_ratio,
-            "rejection_wick_body_ratio": rejection_wick_body_ratio,
-            "close_position": close_position,
-            "value_area_relation": value_area_relation,
-        })
-        return context
-    context.update({
-        "passed": bool(shape_ok),
-        "reason": f"pullback_trigger_{trigger}" if shape_ok else "pullback_trigger_candle_failed",
-        "body_to_range": body_to_range,
-        "upper_wick": upper_wick,
-        "lower_wick": lower_wick,
-        "rejection_wick_ratio": rejection_wick_ratio,
-        "rejection_wick_body_ratio": rejection_wick_body_ratio,
-        "close_position": close_position,
-        "value_area_relation": value_area_relation,
-    })
-    return context
-
-
-def _pullback_stoch_rsi(k: float, d: float, k_values: pd.Series, trend: str) -> dict:
-    """Evaluate Stoch RSI exhaustion for a direction-specific pullback."""
-    memory_bars = max(1, int(config.PULLBACK_STOCH_MEMORY_BARS))
-    recent = k_values.iloc[-memory_bars:] if len(k_values) >= memory_bars else k_values
-    if trend == "Uptrend":
-        recent_low = float(recent.min())
-        rising = len(recent) >= 2 and float(recent.iloc[-1]) > float(recent.iloc[-2])
-        passed = (
-            k <= config.PULLBACK_STOCH_OVERSOLD
-            or d <= config.PULLBACK_STOCH_OVERSOLD
-            or (recent_low <= config.PULLBACK_STOCH_OVERSOLD_RECENT and (k > d or rising))
-        )
-        return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_low": recent_low, "k": float(k), "d": float(d), "memory_bars": memory_bars, "recovery_or_roll_down": bool(k > d or rising)}
-
-    recent_high = float(recent.max())
-    falling = len(recent) >= 2 and float(recent.iloc[-1]) < float(recent.iloc[-2])
-    passed = (
-        k >= config.PULLBACK_STOCH_OVERBOUGHT
-        or d >= config.PULLBACK_STOCH_OVERBOUGHT
-        or (recent_high >= config.PULLBACK_STOCH_OVERBOUGHT_RECENT and (k < d or falling))
-    )
-    return {"passed": bool(passed), "reason": "pullback_stoch_rsi_ok" if passed else "pullback_stoch_rsi_failed", "recent_high": recent_high, "k": float(k), "d": float(d), "memory_bars": memory_bars, "recovery_or_roll_down": bool(k < d or falling)}
 
 
 def _timeframe_seconds(timeframe: str) -> int:
@@ -1185,13 +830,20 @@ class SignalEngine:
     # Cooldown tracking: key = f"{symbol}:{trend}", value = last_signal_ts
     _cooldown: dict[str, float] = {}
 
-    def __init__(self, client: ExecutionClient, watchlist: Optional[set[str]] = None, shock_filter: Optional[VolatilityShockFilter] = None):
+    def __init__(self, client: ExecutionClient, watchlist: Optional[set[str]] = None, shock_filter: Optional[VolatilityShockFilter] = None, strategy=None):
         self.client = client
         self.watchlist = watchlist or set(config.EXECUTION_SYMBOLS)
         self.shock_filter = shock_filter or VolatilityShockFilter()
         # Per-instance chop filter state (was class-level; isolation fix)
         self._chop_state: dict[str, dict] = {}
         self._candle_cache: dict[tuple[str, str, int], _CandleCacheEntry] = {}
+        # Strategy plugin owns the signal decision logic. Loaded lazily here to
+        # avoid a circular import (the strategy imports framework types from this
+        # module). Defaults to the bundled example-strategy.
+        if strategy is None:
+            from tradegumi.strategy_loader import load_strategy
+            strategy = load_strategy()
+        self.strategy = strategy
 
     def clear_candle_cache(self) -> None:
         """Clear cached historical candle context after watchlist/provider changes."""
@@ -1572,7 +1224,12 @@ class SignalEngine:
         allow_continuation: bool = True,
         pullback_bridge_status: Optional[str] = None,
     ) -> tuple[Optional[Signal], list[CriterionResult], str, Optional[float]]:
-        """Run the 4-layer signal stack on 5m candles.
+        """Fetch 5m candles, apply the generic candle-close gate, then delegate
+        the signal decision to the loaded strategy plugin.
+
+        The runtime owns market data and the candle-close timing gate; the
+        strategy (``self.strategy``) owns the indicator stack and the
+        continuation/pullback decision via ``StrategyContext`` / ``evaluate``.
 
         Args:
             symbol: Trading symbol
@@ -1582,7 +1239,7 @@ class SignalEngine:
                       Raw/filtered LR values are still passed for shock diagnostics.
 
         Returns:
-            Signal or None
+            (signal, criteria, reason, confidence)
         """
         candles = self._get_cached_candles(symbol, "M5", count=100)
         if not candles:
@@ -1686,497 +1343,19 @@ class SignalEngine:
 
         # Swap ignored — session/timing filters disabled for early development
 
-        # ── Layer 1: StochRSI ────────────────────────────────────────────────
-        window_issue = _signal_window_issue(closed_window, self.SIGNAL_WINDOW_MIN_CANDLES)
-        if window_issue:
-            context = _signal_readiness_issue(
-                raw_candles=candles,
-                closed_candles=closed_window,
-                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
-                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
-                selected_closed_candle=closed_candle,
-            )
-            criteria.append(_signal_data_not_ready_criterion(context))
-            return None, criteria, "signal_stack_data_not_ready", None
-
-        df = candles_to_df(closed_window)
-        df.index = pd.DatetimeIndex([candle.time for candle in closed_window])
-        stoch = calculate_stoch_rsi(df, length=14, k=3, d=3)
-        k_col = _first_matching_column(stoch, lambda name: "k" in name, "stoch_rsi_k")
-        d_col = _first_matching_column(stoch, lambda name: "d" in name, "stoch_rsi_d")
-        stoch, stoch_available, stoch_ready = _usable_indicator_window(
-            stoch,
-            [k_col, d_col],
-            self.SIGNAL_INDICATOR_MIN_WINDOW,
-            closed_candle,
-        )
-        if not stoch_ready:
-            context = _signal_readiness_issue(
-                raw_candles=candles,
-                closed_candles=closed_window,
-                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
-                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
-                available_indicator_window=stoch_available,
-                selected_closed_candle=closed_candle,
-            )
-            criteria.append(_signal_data_not_ready_criterion(context))
-            return None, criteria, "signal_stack_data_not_ready", None
-        k = stoch[k_col].iloc[-1]
-        d = stoch[d_col].iloc[-1]
-        k_prev3 = stoch[k_col].iloc[-4:]
-
-        if trend == "Uptrend":
-            if config.PULLBACK_STOCH_RSI_RELAXED:
-                # CTI-v1.1 pullback: allow curling up from below 40 (not strictly oversold)
-                stoch_ok = (
-                    (k_prev3.min() < 30 and k > d)  # strict cross from oversold
-                    or (k_prev3.min() < 40 and k > d and k < 50)  # curling up from below 40
-                )
-            else:
-                stoch_ok = k_prev3.min() < 30 and k > d
-            stoch_margin = min(30 - float(k_prev3.min()), float(k - d))
-        else:
-            if config.PULLBACK_STOCH_RSI_RELAXED:
-                # CTI-v1.1 pullback: allow rolling down from above 60 (not strictly overbought)
-                stoch_ok = (
-                    (k_prev3.max() > 70 and k < d)  # strict cross from overbought
-                    or (k_prev3.max() > 60 and k < d and k > 50)  # rolling down from above 60
-                )
-            else:
-                stoch_ok = k_prev3.max() > 70 and k < d
-            stoch_margin = min(float(k_prev3.max()) - 70, float(d - k))
-
-        stoch_strength = stoch_rsi_score(
-            k, d, k_prev3.min(), k_prev3.max(), trend
-        )
-
-        # ── Layer 2: MACD histogram ───────────────────────────────────────────
-        macd_df = calculate_macd(df, fast=12, slow=26, signal=9)
-        hist_col = _first_matching_column(macd_df, lambda name: "h" in name, "macd_histogram")
-        macd_line_col = _first_matching_column(
-            macd_df,
-            lambda name: "macd" in name and "h" not in name and "s" not in name,
-            "macd_line",
-        )
-        macd_signal_col = _first_matching_column(macd_df, lambda name: "s" in name and "h" not in name, "macd_signal")
-        macd_df, macd_available, macd_ready = _usable_indicator_window(
-            macd_df,
-            [hist_col, macd_line_col, macd_signal_col],
-            self.SIGNAL_INDICATOR_MIN_WINDOW,
-            closed_candle,
-        )
-        if not macd_ready or len(macd_df[hist_col].iloc[-6:-1]) < 5:
-            context = _signal_readiness_issue(
-                raw_candles=candles,
-                closed_candles=closed_window,
-                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
-                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
-                available_indicator_window=macd_available,
-                selected_closed_candle=closed_candle,
-            )
-            criteria.append(_signal_data_not_ready_criterion(context))
-            return None, criteria, "signal_stack_data_not_ready", None
-        macd_current = macd_df[hist_col].iloc[-1]
-        macd_prev5   = macd_df[hist_col].iloc[-6:-1]
-        macd_line = macd_df[macd_line_col].iloc[-1]
-        macd_signal_val = macd_df[macd_signal_col].iloc[-1]
-
-        if trend == "Uptrend":
-            macd_ok = macd_current > macd_prev5.min()
-            macd_margin = float(macd_current - macd_prev5.min())
-        else:
-            macd_ok = macd_current < macd_prev5.max()
-            macd_margin = float(macd_prev5.max() - macd_current)
-
-        macd_strength = macd_histogram_score(
-            macd_current,
-            macd_prev5.min(),
-            macd_prev5.max(),
-            trend,
-        )
-
-        # ── Layer 3: Keltner Channel — band breach (outer bands) ───────────
-        kc = calculate_keltner_channels(df, length=20, multiplier=1.5, mamode="ema")
-        kc_upper_col = _first_matching_column(kc, lambda name: "u" in name and "l" not in name and "b" not in name, "keltner_upper")
-        kc_lower_col = _first_matching_column(kc, lambda name: "l" in name and "u" not in name and "b" not in name, "keltner_lower")
-        kc_mid_col = _first_matching_column(kc, lambda name: ("b" in name and "u" not in name and "l" not in name) or "m" in name, "keltner_mid")
-        kc, kc_available, kc_ready = _usable_indicator_window(
-            kc,
-            [kc_upper_col, kc_lower_col, kc_mid_col],
-            self.SIGNAL_INDICATOR_MIN_WINDOW,
-            closed_candle,
-        )
-        if not kc_ready:
-            context = _signal_readiness_issue(
-                raw_candles=candles,
-                closed_candles=closed_window,
-                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
-                required_indicator_window=self.SIGNAL_INDICATOR_MIN_WINDOW,
-                available_indicator_window=kc_available,
-                selected_closed_candle=closed_candle,
-            )
-            criteria.append(_signal_data_not_ready_criterion(context))
-            return None, criteria, "signal_stack_data_not_ready", None
-
-        # Compute ATR early for use in Keltner proximity threshold
-        atr_ser = calculate_atr(df)
-        atr = atr_ser.iloc[-1]
-
-        last5_low  = df["l"].iloc[-5:].min()
-        last5_high = df["h"].iloc[-5:].max()
-        kc_upper_last5 = kc[kc_upper_col].iloc[-5:]
-        kc_lower_last5 = kc[kc_lower_col].iloc[-5:]
-
-        if trend == "Uptrend":
-            # CTI-v1.1 pullback: must breach OR come within proximity of lower band
-            channel_width = float(kc_upper_last5.iloc[-1] - kc_lower_last5.iloc[-1])
-            proximity_threshold = min(float(atr) * config.PULLBACK_KC_PROXIMITY_ATR, channel_width * 0.25)
-            kc_ok = last5_low <= kc_lower_last5.min() or last5_low <= kc_lower_last5.min() + proximity_threshold
-            kc_margin = float(kc_lower_last5.min() - last5_low)
-        else:
-            channel_width = float(kc_upper_last5.iloc[-1] - kc_lower_last5.iloc[-1])
-            proximity_threshold = min(float(atr) * config.PULLBACK_KC_PROXIMITY_ATR, channel_width * 0.25)
-            kc_ok = last5_high >= kc_upper_last5.max() or last5_high >= kc_upper_last5.max() - proximity_threshold
-            kc_margin = float(last5_high - kc_upper_last5.max())
-
-        keltner_strength = keltner_score(
-            last5_low, last5_high, kc_lower_last5.min(), kc_upper_last5.max(), trend
-        )
-
-        # ── Layer 4: Candlestick (optional) ──────────────────────────────────
-        patterns_df = calculate_candlestick_patterns(df)
-        usable_patterns = patterns_df.dropna(how="all")
-        if len(usable_patterns) < 5:
-            context = _signal_readiness_issue(
-                raw_candles=candles,
-                closed_candles=closed_window,
-                required_candles=self.SIGNAL_WINDOW_MIN_CANDLES,
-                required_indicator_window=5,
-                available_indicator_window=len(usable_patterns),
-                selected_closed_candle=closed_candle,
-            )
-            criteria.append(_signal_data_not_ready_criterion(context))
-            return None, criteria, "signal_stack_data_not_ready", None
-        recent = patterns_df.iloc[-5:].dropna(how="all")
-        identified = recent.columns[(recent != 0).any(axis=0)].tolist()
-
-        if trend == "Uptrend":
-            bullish_patterns = {"CDL_ENGULFING", "CDL_HAMMER"}
-            candle_ok = bool(set(identified) & bullish_patterns)
-        else:
-            bearish_patterns = {"CDL_ENGULFING", "CDL_SHOOTINGSTAR", "CDL_SPINNINGTOP"}
-            candle_ok = bool(set(identified) & bearish_patterns)
-
-        candle_strength = candlestick_score(patterns_df, trend)
-
-        # ── CTI-v1.1 Dual Path: Try Continuation first, then Pullback ──────
-        # Continuation path: trend aligned, MACD supports, price on correct side of midline, structure OK
-        # No StochRSI required for continuation
-
-        continuation_ok = False
-        continuation_criteria: list[CriterionResult] = []
-
-        # Check continuation: MACD supports direction
-        if trend == "Uptrend":
-            macd_continuation_ok = macd_current > 0
-            macd_continuation_margin = float(macd_current)
-        else:
-            macd_continuation_ok = macd_current < 0
-            macd_continuation_margin = float(abs(macd_current))
-
-        # Check continuation: price on correct side of Keltner midline
-        midline = float(kc[kc_mid_col].iloc[-1])
-        last_close = float(df["c"].iloc[-1])
-        trigger_price = _live_trigger_price(symbol, trend, last_close)
-        if trend == "Uptrend":
-            kc_continuation_ok = trigger_price > midline
-            kc_continuation_margin = trigger_price - midline
-        else:
-            kc_continuation_ok = trigger_price < midline
-            kc_continuation_margin = midline - trigger_price
-
-        # Check continuation: structure (last N candles show HH/HL or LH/LL)
-        # Require at least one strictly progressive bar (not just flat/equal)
-        structure_bars = config.CONTINUATION_STRUCTURE_BARS
-        recent_highs = df["h"].iloc[-structure_bars:].tolist()
-        recent_lows = df["l"].iloc[-structure_bars:].tolist()
-        if trend == "Uptrend":
-            has_higher_high = any(recent_highs[i] > recent_highs[i-1] for i in range(1, len(recent_highs)))
-            has_higher_low = any(recent_lows[i] > recent_lows[i-1] for i in range(1, len(recent_lows)))
-            structure_ok = has_higher_high or has_higher_low
-        else:
-            has_lower_high = any(recent_highs[i] < recent_highs[i-1] for i in range(1, len(recent_highs)))
-            has_lower_low = any(recent_lows[i] < recent_lows[i-1] for i in range(1, len(recent_lows)))
-            structure_ok = has_lower_high or has_lower_low
-
-        # 5M trend alignment check for continuation (configurable)
-        trend_5m_aligned = True
-        if config.CONTINUATION_TREND_REQUIRE_5M:
-            trend_5m_aligned = (trend == "Uptrend" and raw_lr_5m > 0) or (trend == "Downtrend" and raw_lr_5m < 0)
-
-        continuation_all_pass = macd_continuation_ok and kc_continuation_ok and structure_ok and trend_5m_aligned
-
-        continuation_criteria.extend([
-            _criterion("macd", "signal_stack", float(macd_current), "supports direction", bool(macd_continuation_ok), macd_continuation_margin),
-            _criterion("keltner", "signal_stack", {"trigger_price": trigger_price, "closed_candle_close": last_close, "midline": midline}, "correct side of midline", bool(kc_continuation_ok), kc_continuation_margin),
-            _criterion("structure", "signal_stack", {"recent_highs": recent_highs, "recent_lows": recent_lows}, "HH/HL or LH/LL", bool(structure_ok), None),
-            _criterion("trend_5m", "signal_stack", raw_lr_5m, "aligned with bias" if config.CONTINUATION_TREND_REQUIRE_5M else "optional", bool(trend_5m_aligned), abs(raw_lr_5m), required=config.CONTINUATION_TREND_REQUIRE_5M),
-        ])
-
-        if allow_continuation and continuation_all_pass:
-            log.debug("%s continuation signal passed: macd=%s kc=%s structure=%s 5m=%s",
-                      symbol, macd_continuation_ok, kc_continuation_ok, structure_ok, trend_5m_aligned)
-            # Build continuation signal
-            breakdown = {
-                "stoch_rsi": 0.0,  # not used for continuation
-                "macd": macd_strength,
-                "keltner": keltner_strength,
-                "candlestick": 0.0,  # not required for continuation
-                "structure": 1.0 if structure_ok else 0.0,
-            }
-
-            lr_1h = filtered_lr_1h if self.shock_filter.enabled else raw_lr_1h
-            lr_15 = filtered_lr_15m if self.shock_filter.enabled else raw_lr_15m
-            lr_5 = filtered_lr_5m if self.shock_filter.enabled else raw_lr_5m
-            trend_str = trend_score(lr_15, lr_5, trend,
-                                    self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD)
-            breakdown["trend"] = trend_str
-
-            # Weighted confidence for continuation (no stoch/candle requirement)
-            raw_confidence = (
-                breakdown["macd"] * 0.35 +
-                breakdown["keltner"] * 0.25 +
-                breakdown["trend"] * 0.20 +
-                breakdown["structure"] * 0.20
-            )
-            MIN_CONFIDENCE = 0.55
-            if raw_confidence < MIN_CONFIDENCE:
-                log.debug("%s continuation signal rejected: confidence %.1f%% < %.0f%% threshold",
-                          symbol, raw_confidence * 100, MIN_CONFIDENCE * 100)
-                continuation_criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, False, raw_confidence - MIN_CONFIDENCE, "gte"))
-                # Don't return here — fall through to try pullback
-            else:
-                continuation_criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, True, raw_confidence - MIN_CONFIDENCE, "gte"))
-                confidence = round(raw_confidence, 3)
-
-                entry_price = trigger_price
-                setup_condition_first_true_at = closed_candle.time.isoformat() if closed_candle else None
-
-                if trend == "Uptrend":
-                    sl = entry_price - (atr * config.SL_ATR_MULTIPLIER)
-                    tp = entry_price + (atr * config.TP_ATR_MULTIPLIER)
-                else:
-                    sl = entry_price + (atr * config.SL_ATR_MULTIPLIER)
-                    tp = entry_price - (atr * config.TP_ATR_MULTIPLIER)
-
-                sl = round(sl, _price_decimals(entry_price))
-                tp = round(tp, _price_decimals(entry_price))
-
-                return Signal(
-                    symbol=symbol,
-                    direction=trend,
-                    entry_price=round(entry_price, _price_decimals(entry_price)),
-                    stop_loss=sl,
-                    take_profit=tp,
-                    atr=round(atr, 6),
-                    lot_size=0.0,
-                    risk_pct=config.RISK_PER_TRADE * 100,
-                    confidence=confidence,
-                    breakdown=breakdown,
-                    trend_direction=trend,
-                    patterns_found=[],
-                    strategy=CONTINUATION_STRATEGY_VERSION,
-                    signal_type="continuation",
-                    # Indicator snapshot
-                    stochrsi_k=0.0,
-                    stochrsi_d=0.0,
-                    macd_line=macd_line,
-                    macd_signal=macd_signal_val,
-                    macd_histogram=macd_current,
-                    kc_upper=float(kc_upper_last5.iloc[-1]),
-                    kc_mid=midline,
-                    kc_lower=float(kc_lower_last5.iloc[-1]),
-                    # Shock diagnostics
-                    raw_lr_1h=raw_lr_1h,
-                    raw_lr_15m=raw_lr_15m,
-                    raw_lr_5m=raw_lr_5m,
-                    filtered_lr_1h=filtered_lr_1h,
-                    filtered_lr_15m=filtered_lr_15m,
-                    filtered_lr_5m=filtered_lr_5m,
-                    trend_changed_after_filter=trend_changed_after_filter,
-                    volatility_shock_detected=shock_result.detected if shock_result else False,
-                    shock_timeframe=shock_result.timeframe if shock_result else None,
-                    shock_candle_time=shock_result.candle_time if shock_result else None,
-                    shock_true_range=shock_result.true_range if shock_result else None,
-                    shock_atr=shock_result.atr if shock_result else None,
-                    shock_atr_multiple=shock_result.atr_multiple if shock_result else None,
-                    shock_lookback_bars=shock_result.lookback_bars if shock_result else 0,
-                    shock_direction=shock_result.direction if shock_result else "none",
-                    shock_suppression_until=shock_result.suppression_until if shock_result else None,
-                    shock_suppression_candles_remaining=shock_result.suppression_candles_remaining if shock_result else 0,
-                    market_validity_state="invalid" if (shock_result and shock_result.detected) else "valid",
-                    market_validity_reason="market_invalid:volatility_shock" if (shock_result and shock_result.detected) else None,
-                    lr_1h=lr_1h,
-                    lr_15m=lr_15,
-                    lr_5m=lr_5,
-                    signal_price=round(entry_price, _price_decimals(entry_price)),
-                    suggested_entry=round(entry_price, _price_decimals(entry_price)),
-                    entry_tolerance=round(atr * config.SIGNAL_ENTRY_TOLERANCE_ATR, _price_decimals(entry_price)),
-                    setup_condition_first_true_at=setup_condition_first_true_at,
-                ), continuation_criteria, "emitted", confidence
-
-        # ── Pullback Path ────────────────────────────────────────────────────
-        if not config.PULLBACK_ENABLED:
-            return None, criteria, "criteria_failed", None
-
-        structure_result = _pullback_structure(df, trend)
-        keltner_result = _pullback_keltner_sequence(
-            df, kc, trend, float(atr), kc_upper_col, kc_lower_col, kc_mid_col, macd_current=macd_current
-        )
-        trigger_result = _pullback_trigger(
-            patterns_df,
-            trend,
-            df,
-            value_area_midline=keltner_result.get("midline"),
-            value_area_tolerance=keltner_result.get("tolerance"),
-            macd_current=float(macd_current),
-        )
-        stoch_result = _pullback_stoch_rsi(float(k), float(d), stoch[k_col], trend)
-        macd_soft_context = {
-            "histogram": float(macd_current),
-            "line": float(macd_line),
-            "signal": float(macd_signal_val),
-            "hard_blocker": bool(config.PULLBACK_MACD_HARD_BLOCK_ENABLED),
-        }
-        pullback_criteria = [
-            _criterion("stoch_rsi", "signal_stack", {"k": float(k), "d": float(d), **stoch_result}, "pullback exhaustion", bool(stoch_result["passed"]), stoch_margin, reason=stoch_result["reason"], context=stoch_result),
-            _criterion("macd_soft_score", "signal_stack", macd_soft_context, "soft confidence only", bool(macd_ok), macd_margin, required=False, reason="pullback_macd_soft_score", context=macd_soft_context),
-            _criterion("keltner_pullback_sequence", "signal_stack", keltner_result, "prior outer break plus midline pullback", bool(keltner_result["passed"]), None, reason=keltner_result["reason"], context=keltner_result),
-            _criterion("pullback_structure", "signal_stack", structure_result, "HH/HL or LH/LL protected structure", bool(structure_result["passed"]), None, reason=structure_result["reason"], context=structure_result),
-            _criterion("pullback_trigger_candle", "confirmation", trigger_result, "approved pullback trigger", bool(trigger_result["passed"]), None, reason=trigger_result["reason"], context=trigger_result),
-        ]
-        if config.PULLBACK_MACD_HARD_BLOCK_ENABLED:
-            pullback_criteria.append(
-                _criterion(
-                    "pullback_macd_hard_block",
-                    "signal_stack",
-                    macd_soft_context,
-                    "macd supports pullback direction",
-                    bool(macd_ok),
-                    macd_margin,
-                    reason="pullback_macd_hard_block_ok" if macd_ok else "pullback_macd_hard_block_failed",
-                    context=macd_soft_context,
-                )
-            )
-        criteria.extend(pullback_criteria)
-
-        all_pass = (
-            stoch_result["passed"]
-            and keltner_result["passed"]
-            and structure_result["passed"]
-            and trigger_result["passed"]
-            and (not config.PULLBACK_MACD_HARD_BLOCK_ENABLED or macd_ok)
-        )
-        if not all_pass:
-            log.debug("%s pullback signal blocked: stoch=%s kc=%s structure=%s trigger=%s",
-                      symbol, stoch_result["passed"], keltner_result["passed"], structure_result["passed"], trigger_result["passed"])
-            return None, criteria, "criteria_failed", None
-
-        # Layer 2 score breakdown
-        breakdown = {
-            "stoch_rsi": stoch_strength,
-            "macd": max(0.0, macd_strength),
-            "keltner": keltner_strength,
-            "candlestick": candle_strength,
-        }
-
-        # Trend strength component. check_symbol passes these values from
-        # _get_trend so scan cycles do not fetch H1/M15/M5 candles twice.
-        # When trend_lr is provided (remote tuple API), use it directly.
-        # Otherwise fetch the trend candles ourselves (legacy / standalone call).
-        if trend_lr is None:
-            candles_1h  = self._get_cached_candles(symbol, "H1",  count=30)
-            candles_15m = self._get_cached_candles(symbol, "M15", count=60)
-            candles_5m  = self._get_cached_candles(symbol, "M5",  count=24)
-            df_1h = candles_to_df(candles_1h)
-            df_15 = candles_to_df(candles_15m)
-            df_5  = candles_to_df(candles_5m)
-            raw_lr_1h = calculate_linear_regression(df_1h, length=20).iloc[-1]
-            raw_lr_15m = calculate_linear_regression(df_15, length=25).iloc[-1]
-            raw_lr_5m = calculate_linear_regression(df_5,  length=14).iloc[-1]
-            lr_1h = raw_lr_1h
-            lr_15 = raw_lr_15m
-            lr_5 = raw_lr_5m
-        else:
-            lr_1h, lr_15, lr_5 = trend_lr
-        trend_str = trend_score(lr_15, lr_5, trend,
-                                self.LR_15M_THRESHOLD, self.LR_5M_THRESHOLD)
-        breakdown["trend"] = trend_str
-
-        # Weighted confidence (candle optional — lower weight)
-        raw_confidence = (
-            breakdown["stoch_rsi"] * 0.30 +
-            breakdown["macd"] * 0.25 +
-            breakdown["keltner"] * 0.20 +
-            breakdown["trend"] * 0.15 +
-            breakdown["candlestick"] * 0.10
-        )
-        # ── Confidence gate ──────────────────────────────────────────────────
-        # Signals below 55% confidence are too weak to act on
-        MIN_CONFIDENCE = 0.55
-        if raw_confidence < MIN_CONFIDENCE:
-            log.debug("%s signal rejected: confidence %.1f%% < %.0f%% threshold",
-                      symbol, raw_confidence * 100, MIN_CONFIDENCE * 100)
-            criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, False, raw_confidence - MIN_CONFIDENCE, "gte"))
-            return None, criteria, "confidence_failed", raw_confidence
-
-        criteria.append(_criterion("confidence", "confidence", raw_confidence, MIN_CONFIDENCE, True, raw_confidence - MIN_CONFIDENCE, "gte"))
-
-        confidence = round(raw_confidence, 3)
-
-        # ── Risk / Pricing ───────────────────────────────────────────────────
-        # atr already computed at Keltner layer
-        entry_price = trigger_price
-        setup_condition_first_true_at = closed_candle.time.isoformat() if closed_candle else None
-
-        if trend == "Uptrend":
-            sl = entry_price - (atr * config.SL_ATR_MULTIPLIER)
-            tp = entry_price + (atr * config.TP_ATR_MULTIPLIER)
-        else:
-            sl = entry_price + (atr * config.SL_ATR_MULTIPLIER)
-            tp = entry_price - (atr * config.TP_ATR_MULTIPLIER)
-
-        sl = round(sl, _price_decimals(entry_price))
-        tp = round(tp, _price_decimals(entry_price))
-
-        return Signal(
+        # ── Delegate the signal decision to the loaded strategy plugin ───────
+        # The framework has prepared validated candles and run the generic
+        # candle-close gate; the strategy owns the indicator stack and the
+        # continuation/pullback decision.
+        from tradegumi.strategy_loader import StrategyContext
+        ctx = StrategyContext(
             symbol=symbol,
-            direction=trend,
-            entry_price=round(entry_price, _price_decimals(entry_price)),
-            stop_loss=sl,
-            take_profit=tp,
-            atr=round(atr, 6),
-            lot_size=0.0,   # filled by caller via risk.py
-            risk_pct=config.RISK_PER_TRADE * 100,
-            confidence=confidence,
-            breakdown=breakdown,
-            trend_direction=trend,
-            patterns_found=identified,
-            strategy=PULLBACK_STRATEGY_VERSION,
-            signal_type="high_value_pullback" if keltner_result.get("is_high_value", False) else "pullback",
-            pullback_trigger=trigger_result["trigger"],
-            pullback_bridge_status=pullback_bridge_status,
-            pullback_rejection_reason=None,
-            # Indicator snapshot
-            stochrsi_k=k,
-            stochrsi_d=d,
-            macd_line=macd_line,
-            macd_signal=macd_signal_val,
-            macd_histogram=macd_current,
-            kc_upper=float(kc_upper_last5.iloc[-1]),
-            kc_mid=float(kc[kc_mid_col].iloc[-1]),
-            kc_lower=float(kc_lower_last5.iloc[-1]),
-            # Shock diagnostics
+            trend=trend,
+            candles=candles,
+            closed_window=closed_window,
+            closed_candle=closed_candle,
+            criteria=criteria,
+            trend_lr=trend_lr,
             raw_lr_1h=raw_lr_1h,
             raw_lr_15m=raw_lr_15m,
             raw_lr_5m=raw_lr_5m,
@@ -2184,27 +1363,11 @@ class SignalEngine:
             filtered_lr_15m=filtered_lr_15m,
             filtered_lr_5m=filtered_lr_5m,
             trend_changed_after_filter=trend_changed_after_filter,
-            volatility_shock_detected=shock_result.detected if shock_result else False,
-            shock_timeframe=shock_result.timeframe if shock_result else None,
-            shock_candle_time=shock_result.candle_time if shock_result else None,
-            shock_true_range=shock_result.true_range if shock_result else None,
-            shock_atr=shock_result.atr if shock_result else None,
-            shock_atr_multiple=shock_result.atr_multiple if shock_result else None,
-            shock_lookback_bars=shock_result.lookback_bars if shock_result else 0,
-            shock_direction=shock_result.direction if shock_result else "none",
-            shock_suppression_until=shock_result.suppression_until if shock_result else None,
-            shock_suppression_candles_remaining=shock_result.suppression_candles_remaining if shock_result else 0,
-            market_validity_state="invalid" if (shock_result and shock_result.detected) else "valid",
-            market_validity_reason="market_invalid:volatility_shock" if (shock_result and shock_result.detected) else None,
-            lr_1h=lr_1h,
-            lr_15m=lr_15,
-            lr_5m=lr_5,
-            signal_price=round(entry_price, _price_decimals(entry_price)),
-            suggested_entry=round(entry_price, _price_decimals(entry_price)),
-            entry_tolerance=round(atr * config.SIGNAL_ENTRY_TOLERANCE_ATR, _price_decimals(entry_price)),
-            setup_condition_first_true_at=setup_condition_first_true_at,
-            recent_candles=candles,
-        ), criteria, "emitted", confidence
+            shock_result=shock_result,
+            allow_continuation=allow_continuation,
+            pullback_bridge_status=pullback_bridge_status,
+        )
+        return self.strategy.evaluate(self, ctx).as_tuple()
 
     def _indeterminate_diagnostic(
         self,
@@ -2347,34 +1510,18 @@ class SignalEngine:
         pullback_bridge_result: Optional[dict] = None
 
         clean_trend_unusable = trend_decision.get("no_trend_reason") == "insufficient_clean_data"
-        if trend is None and config.PULLBACK_ENABLED and not clean_trend_unusable:
-            try:
-                df_15_for_bridge = candles_to_df(candles_15m)
-                lr_15_series = calculate_linear_regression(df_15_for_bridge, length=25)
-                recent_lr_15 = lr_15_series.dropna().iloc[-config.PULLBACK_15M_MEMORY_CANDLES:].tolist()
-            except (IndexError, KeyError, ValueError):
-                recent_lr_15 = []
-            for candidate_trend in ("Uptrend", "Downtrend"):
-                bridge = classify_pullback_trend_bridge(
-                    lr_1h,
-                    lr_15,
-                    recent_lr_15,
-                    candidate_trend,
-                    self.LR_1H_THRESHOLD,
-                    self.LR_15M_THRESHOLD,
-                    memory_candles=config.PULLBACK_15M_MEMORY_CANDLES,
-                    strong_opposite_multiplier=config.PULLBACK_15M_STRONG_OPPOSITE_MULTIPLIER,
-                )
-                if bridge["passed"]:
-                    trend = candidate_trend
-                    pullback_bridge_result = bridge
-                    trend_decision = {
-                        **trend_decision,
-                        "pullback_bridge": bridge,
-                        "trend_result": "up" if trend == "Uptrend" else "down",
-                        "final_direction": "BUY" if trend == "Uptrend" else "SELL",
-                    }
-                    break
+        if trend is None and not clean_trend_unusable:
+            # Let the strategy salvage a directional bias from recent M15 memory.
+            chosen_trend, bridge = self.strategy.bridge_trend(self, lr_1h, lr_15, candles_15m)
+            if chosen_trend is not None:
+                trend = chosen_trend
+                pullback_bridge_result = bridge
+                trend_decision = {
+                    **trend_decision,
+                    "pullback_bridge": bridge,
+                    "trend_result": "up" if trend == "Uptrend" else "down",
+                    "final_direction": "BUY" if trend == "Uptrend" else "SELL",
+                }
 
         trend_criteria = [
             _criterion("trend_1h", "trend", lr_1h, self.LR_1H_THRESHOLD, abs(lr_1h) >= self.LR_1H_THRESHOLD, abs(lr_1h) - self.LR_1H_THRESHOLD, "abs_gte"),

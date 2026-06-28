@@ -174,8 +174,9 @@ account:
 3. **live** - Only after demo validation. Requires explicit manual mode switch via API
    or dashboard. No automated promotion.
 
-Backtesting data in `src/backtesting/` is advisory only - live forward testing on demo
-is the authoritative validation gate.
+Backtesting, historical simulation, and strategy research are owned by QuantPipe, not
+TradeGumi (legacy assets are frozen under `docs/archive/backtesting/`). Such analysis is
+advisory only - live forward testing on demo is the authoritative validation gate.
 
 Docker Compose is the production deployment standard. Direct `python -m` invocation is
 for local development only.
