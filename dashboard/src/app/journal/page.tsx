@@ -5,6 +5,7 @@ import { readApiError } from "@/lib/api";
 import { PageSubNav } from "@/components/PageSubNav";
 import { isBullishDirection, directionColorClasses } from "@/lib/direction";
 import { statsUseLabel, reachedTargetLabel } from "@/lib/journalLabels";
+import { pickMasterEntry, isManagementEvent, continuationEventSummary } from "@/lib/journalMaster";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -349,9 +350,10 @@ function TradeGroupCard({
   const [noteText, setNoteText] = useState(
     group.entries.find(e => e.notes)?.notes ?? ""
   );
-  // Default master = most recent trigger
+  // Default master = the original opening record. Continuation/management
+  // events never become the Master, so grading stays on the opening record.
   const [masterSignalId, setMasterSignalId] = useState<string>(
-    group.entries[group.entries.length - 1].signal_id
+    pickMasterEntry(group.entries).signal_id
   );
   const { text: dirColor, border: dirBg } = directionColorClasses(group.direction);
   const first   = group.entries[0];
@@ -594,6 +596,58 @@ function TradeGroupCard({
             {multi && <span className="ml-1 font-normal normal-case text-muted-foreground/70">— select master to grade</span>}
           </div>
           {group.entries.map((e, i) => {
+            // Continuation records are management events only: they never become
+            // the Master and are shown with management-event display language.
+            if (isManagementEvent(e)) {
+              const summary = continuationEventSummary(e);
+              return (
+                <div
+                  key={e.signal_id}
+                  className="px-3 py-2 border-t border-slate-800/60 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs"
+                >
+                  <div className="col-span-2 flex items-center justify-between mb-0.5">
+                    <span className="text-muted-foreground">
+                      #{i + 1} — {fmtTime(e.signal_timestamp)}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded border font-medium bg-slate-800 border-slate-600 text-cyan-200">
+                      Management event
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground">Continuation</div>
+                  <div className={summary.valid ? "text-green-300 text-right" : "text-orange-300 text-right break-words whitespace-normal"}>
+                    {summary.label}
+                  </div>
+                  {summary.showUpdatedLevels ? (
+                    <>
+                      <div className="text-muted-foreground">Updated SL / TP</div>
+                      <div className="text-white text-right">
+                        <span className="text-red-300">{e.new_stop_loss != null ? fmtPrice(e.new_stop_loss) : "N/A"}</span>
+                        {" / "}
+                        <span className="text-green-300">{e.new_take_profit != null ? fmtPrice(e.new_take_profit) : "N/A"}</span>
+                      </div>
+                      {(e.old_stop_loss != null || e.old_take_profit != null) && (
+                        <>
+                          <div className="text-muted-foreground">Change</div>
+                          <div className="text-white text-right break-words whitespace-normal">
+                            {e.old_stop_loss != null ? fmtPrice(e.old_stop_loss) : "N/A"} {"->"} {e.new_stop_loss != null ? fmtPrice(e.new_stop_loss) : "N/A"}
+                            {" | "}
+                            {e.old_take_profit != null ? fmtPrice(e.old_take_profit) : "N/A"} {"->"} {e.new_take_profit != null ? fmtPrice(e.new_take_profit) : "N/A"}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-muted-foreground">Result</div>
+                      <div className="text-orange-300 text-right break-words whitespace-normal">
+                        No change applied{summary.rejectionReason ? ` — ${statsUseLabel(summary.rejectionReason)}` : ""}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
+
             const isMaster = e.signal_id === masterSignalId;
             return (
               <div

@@ -63,6 +63,8 @@ Managed exits use current managed SL/TP levels before legacy original levels. A 
 
 Strategy metrics summarize this lifecycle with pullback entries opened, continuation management events observed/accepted/rejected, SL tighten and break-even moves, TP extensions, profit-protected SL wins, opposite-direction warnings, average captured R, and managed-versus-original result deltas.
 
+In the dashboard Signal Journal, the original opening record stays the Master for the grouped record's whole lifecycle, so a newer continuation never replaces it. Continuation rows render as management events only: a valid (accepted) continuation shows the updated stop and target values, while an invalid (rejected) continuation is labeled invalid and shows that no change was applied. Final grading is applied to the original opening record, not to a continuation event.
+
 ## Alert-Only Auto-Grading
 
 Alert-only and Developing-mode signals can be auto-graded from shared price observations after they are journaled. The evaluator does not generate signals, place trades, close positions, or call Oanda directly. It consumes the same `PriceObservation` records published from the backend one-second pricing path that feeds dashboard state.
