@@ -121,8 +121,8 @@ def test_apply_set_mode(restore_config):
 
 def test_apply_rescan_sets_force_rescan(monkeypatch):
     captured = {}
-    monkeypatch.setattr("tradegumi.api_server.get_runtime_state", lambda: {})
-    monkeypatch.setattr("tradegumi.api_server.set_runtime_state", lambda s: captured.update(s))
+    monkeypatch.setattr("tradegumi.api.deps.get_runtime_state", lambda: {})
+    monkeypatch.setattr("tradegumi.api.deps.set_runtime_state", lambda s: captured.update(s))
     assert commands.apply_command({"type": commands.RESCAN, "payload": {}}) is True
     assert captured.get("force_rescan") is True
 
@@ -131,8 +131,8 @@ def test_rescan_preserves_runtime_state_and_config(monkeypatch, restore_config):
     """Regression (specs/021 US2): a forced rescan only raises the force_rescan
     flag — it must merge existing runtime state and leave operator config alone."""
     captured = {}
-    monkeypatch.setattr("tradegumi.api_server.get_runtime_state", lambda: {"loop_count": 7})
-    monkeypatch.setattr("tradegumi.api_server.set_runtime_state", lambda s: captured.update(s))
+    monkeypatch.setattr("tradegumi.api.deps.get_runtime_state", lambda: {"loop_count": 7})
+    monkeypatch.setattr("tradegumi.api.deps.set_runtime_state", lambda s: captured.update(s))
     config.TRADEGUMI_MODE = "demo"
     config.CTI_PHASE = 1
 

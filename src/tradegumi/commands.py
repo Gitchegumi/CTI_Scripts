@@ -145,7 +145,7 @@ def apply_command(cmd: dict) -> bool:
         elif cmd_type == SET_CHALLENGE_TYPE:
             config.CTI_CHALLENGE_TYPE = payload["challenge_type"]
         elif cmd_type == RESCAN:
-            from tradegumi.api_server import get_runtime_state, set_runtime_state
+            from tradegumi.api.deps import get_runtime_state, set_runtime_state
             set_runtime_state({**get_runtime_state(), "force_rescan": True})
         else:
             log.warning("Ignoring unknown command type: %s", cmd_type)

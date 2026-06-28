@@ -57,7 +57,7 @@ from tradegumi.pre_session_scanner import (
     format_watchlist_diff, summarize_availability, evaluate_symbol_availability,
     AVAIL_MARKET_CLOSED,
 )
-from tradegumi.api_server import set_runtime_state, get_runtime_state
+from tradegumi.api.deps import set_runtime_state, get_runtime_state
 from tradegumi.market_data import (
     MODE_STREAMING,
     ObservationDispatcher,

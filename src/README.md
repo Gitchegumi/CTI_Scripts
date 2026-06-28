@@ -127,12 +127,15 @@ Mode can be changed at runtime via the dashboard or API.
 tradegumi/
 ├── main.py                # Entry point, dual-cadence loop, API server start
 ├── config.py              # .env loader + all configuration
-├── api_server.py           # HTTP API (:8199) for dashboard
+├── api_main.py            # API service entrypoint — boots Uvicorn (:8199)
+├── api_app.py             # FastAPI app factory (create_app) for the dashboard API
 ├── callback.py            # Webhook sender for DockeGumi orchestration
 ├── webhook_receiver.py    # Webhook receiver (:8198) for incoming events
 ├── api/
 │   ├── base_client.py     # Abstract ExecutionClient interface
-│   └── oanda_client.py    # Oanda v20 REST implementation
+│   ├── oanda_client.py    # Oanda v20 REST implementation
+│   ├── deps.py            # Shared API deps: runtime state, auth, read-only client
+│   └── routes/            # Per-concern FastAPI routers (status, data, journal, trades, …)
 ├── indicators.py          # pandas_ta wrappers + Layer 2 scoring
 ├── signal_engine.py       # Trend filter + 4-layer stack + confidence
 ├── pre_session_scanner.py # Morning ranked watchlist (Layer 1)

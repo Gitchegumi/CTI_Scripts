@@ -8,7 +8,7 @@ the worker's docker healthcheck (``tradegumi.healthcheck``) and the API's
 """
 import time
 
-import tradegumi.api_server as api_server
+import tradegumi.api.deps as api_server
 import tradegumi.healthcheck as healthcheck
 
 
