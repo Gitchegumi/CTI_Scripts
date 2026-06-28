@@ -9,8 +9,11 @@ separate process from the worker. It must:
   does not exist in the API process), built lazily from config.
 
 These are unit tests of that logic — no live Redis/Postgres/broker required.
+After the FastAPI migration (specs/023-fastapi-api-migration) the cross-process
+state helpers live in ``tradegumi.api.deps``; this module is aliased as
+``api_server`` below so the behavioral assertions stay unchanged.
 """
-import tradegumi.api_server as api_server
+import tradegumi.api.deps as api_server
 
 
 def _reset_state():

@@ -8,7 +8,7 @@ import json
 import pytest
 
 from tradegumi.persistence.redis import RedisCache
-from tradegumi import api_server
+from tradegumi.api import deps as api_server
 
 
 class FakeRedis:
