@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import { WatchlistData, LoopState } from "@/types";
 import { ApiStatus } from "@/lib/api";
 
@@ -58,9 +57,6 @@ export default function Header({ data, lastUpdated, isRefreshing, loopState, api
         <span className="px-2 py-0.5 text-xs font-medium rounded bg-slate-700 text-slate-300">
           {provider}
         </span>
-        <Link href="/strategy-metrics" className="text-xs text-slate-400 hover:text-slate-200 transition-colors">
-          Strategy Metrics
-        </Link>
       </div>
       <div className="flex items-center gap-3 text-xs text-slate-400">
         <span className="font-mono" suppressHydrationWarning>

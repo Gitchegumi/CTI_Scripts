@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import Link from "next/link";
 import { readApiError } from "@/lib/api";
+import { PageSubNav } from "@/components/PageSubNav";
 import { isBullishDirection, directionColorClasses } from "@/lib/direction";
 import { statsUseLabel, reachedTargetLabel } from "@/lib/journalLabels";
 
@@ -305,10 +305,10 @@ function StatsBar({ groups }: { groups: TradeGroup[] }) {
         { label: "Avg R:R",         value: avgRR ?? "—",                           sub: "graded only" },
         { label: "Avg Confidence",  value: avgConf !== null ? `${avgConf}%` : "—", sub: "graded only" },
       ].map(({ label, value, sub }) => (
-        <div key={label} className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-3">
-          <div className="text-slate-500 text-xs">{label}</div>
-          <div className="text-white text-xl font-semibold mt-0.5">{value}</div>
-          <div className="text-slate-600 text-xs mt-0.5">{sub}</div>
+        <div key={label} className="bg-card border border-border rounded-lg px-4 py-3">
+          <div className="text-muted-foreground text-xs">{label}</div>
+          <div className="text-foreground text-xl font-semibold mt-0.5">{value}</div>
+          <div className="text-muted-foreground/70 text-xs mt-0.5">{sub}</div>
         </div>
       ))}
     </div>
@@ -392,11 +392,11 @@ function TradeGroupCard({
               </span>
             )}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{group.strategy ?? "CTI-v1"}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">{group.strategy ?? "CTI-v1"}</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <GradeBadge grade={group.grade} />
-          <span className="text-slate-500 text-xs">{expanded ? "▲" : "▼"}</span>
+          <span className="text-muted-foreground text-xs">{expanded ? "▲" : "▼"}</span>
         </div>
       </button>
 
@@ -405,27 +405,27 @@ function TradeGroupCard({
         const master = group.entries.find(e => e.signal_id === masterSignalId) ?? first;
         return (
           <div className="px-3 pb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs [overflow-wrap:anywhere]">
-            <div className="text-slate-400">Avg Confidence</div>
+            <div className="text-muted-foreground">Avg Confidence</div>
             <div className="text-white text-right">{Math.round(group.avgConfidence * 100)}%</div>
-            <div className="text-slate-400">Entry</div>
+            <div className="text-muted-foreground">Entry</div>
             <div className="text-white text-right">{fmtPrice(master.entry_price)}</div>
-            <div className="text-slate-400">SL / TP</div>
+            <div className="text-muted-foreground">SL / TP</div>
             <div className="text-white text-right">
               <span className="text-red-400">{fmtPrice(master.stop_loss)}</span>
               {" / "}
               <span className="text-green-400">{fmtPrice(master.take_profit)}</span>
             </div>
-            <div className="text-slate-400">R:R</div>
+            <div className="text-muted-foreground">R:R</div>
             <div className="text-white text-right">{master.rr != null ? master.rr.toFixed(1) : "N/A"}</div>
             {master.lifecycle_role && master.lifecycle_role !== "legacy_signal" && (
               <>
-                <div className="text-slate-400">Lifecycle</div>
+                <div className="text-muted-foreground">Lifecycle</div>
                 <div className="text-cyan-200 text-right">{statsUseLabel(master.lifecycle_role)}</div>
               </>
             )}
             {(master.current_stop_loss != null || master.current_take_profit != null) && (
               <>
-                <div className="text-slate-400">Managed SL / TP</div>
+                <div className="text-muted-foreground">Managed SL / TP</div>
                 <div className="text-white text-right">
                   <span className="text-red-300">{master.current_stop_loss != null ? fmtPrice(master.current_stop_loss) : "N/A"}</span>
                   {" / "}
@@ -435,7 +435,7 @@ function TradeGroupCard({
             )}
             {master.lifecycle_role === "management" && (
               <>
-                <div className="text-slate-400">Management</div>
+                <div className="text-muted-foreground">Management</div>
                 <div className={master.management_accepted ? "text-green-300 text-right" : "text-orange-300 text-right break-words whitespace-normal"}>
                   {master.management_accepted ? "Accepted" : statsUseLabel(master.management_rejection_reason || master.management_reason || "Rejected")}
                 </div>
@@ -443,7 +443,7 @@ function TradeGroupCard({
             )}
             {(master.old_stop_loss != null || master.new_stop_loss != null || master.old_take_profit != null || master.new_take_profit != null) && (
               <>
-                <div className="text-slate-400">SL/TP Change</div>
+                <div className="text-muted-foreground">SL/TP Change</div>
                 <div className="text-white text-right">
                   {master.old_stop_loss != null ? fmtPrice(master.old_stop_loss) : "N/A"} {"->"} {master.new_stop_loss != null ? fmtPrice(master.new_stop_loss) : "N/A"}
                   {" | "}
@@ -451,23 +451,23 @@ function TradeGroupCard({
                 </div>
               </>
             )}
-            <div className="text-slate-400">Entry Valid</div>
+            <div className="text-muted-foreground">Entry Valid</div>
             <div className="text-white text-right">
               {master.entry_valid_at_signal == null ? "Unknown" : master.entry_valid_at_signal ? "Yes" : "No"}
             </div>
-            <div className="text-slate-400">Stats Use</div>
+            <div className="text-muted-foreground">Stats Use</div>
             <div className={`${master.usable_for_strategy_stats ? "text-green-300" : "text-orange-300"} text-right break-words whitespace-normal`}>
               {master.usable_for_strategy_stats ? "Included" : statsUseLabel(master.stats_exclusion_reason ?? "Excluded")}
             </div>
             {suppressedPrimeLabel(master) && (
               <>
-                <div className="text-slate-400">Suppressed by this prime</div>
+                <div className="text-muted-foreground">Suppressed by this prime</div>
                 <div className="text-cyan-200 text-right">{suppressedPrimeLabel(master)}</div>
               </>
             )}
             {outcomeLabel(master) && (
               <>
-                <div className="text-slate-400">Outcome</div>
+                <div className="text-muted-foreground">Outcome</div>
                 <div className={master.status === "ambiguous" ? "text-amber-300 text-right" : "text-white text-right"}>
                   {outcomeLabel(master)}
                 </div>
@@ -475,7 +475,7 @@ function TradeGroupCard({
             )}
             {reachedTargetLabel(master) && (
               <>
-                <div className="text-slate-400">Reached Target</div>
+                <div className="text-muted-foreground">Reached Target</div>
                 <div className="text-white text-right">
                   {reachedTargetLabel(master)}
                 </div>
@@ -483,7 +483,7 @@ function TradeGroupCard({
             )}
             {master.managed_result_category && (
               <>
-                <div className="text-slate-400">Managed Result</div>
+                <div className="text-muted-foreground">Managed Result</div>
                 <div className="text-white text-right break-words whitespace-normal">
                   {statsUseLabel(master.managed_result_category)}
                   {master.captured_r != null ? ` (${master.captured_r.toFixed(2)}R)` : ""}
@@ -492,27 +492,27 @@ function TradeGroupCard({
             )}
             {sourceLabel(master.outcome_source) && (
               <>
-                <div className="text-slate-400">Source</div>
+                <div className="text-muted-foreground">Source</div>
                 <div className="text-slate-200 text-right">{sourceLabel(master.outcome_source)}</div>
               </>
             )}
             {master.exit_time && (
               <>
-                <div className="text-slate-400">Exit</div>
+                <div className="text-muted-foreground">Exit</div>
                 <div className="text-white text-right">
-                  {master.exit_price != null ? fmtPrice(master.exit_price) : "N/A"} <span className="text-slate-500">{fmtTime(master.exit_time)}</span>
+                  {master.exit_price != null ? fmtPrice(master.exit_price) : "N/A"} <span className="text-muted-foreground">{fmtTime(master.exit_time)}</span>
                 </div>
               </>
             )}
             {master.manually_overridden && (
               <>
-                <div className="text-slate-400">Manual Override</div>
+                <div className="text-muted-foreground">Manual Override</div>
                 <div className="text-blue-200 text-right">{master.manual_override_reason || "Yes"}</div>
               </>
             )}
             {master.ambiguous_reason && (
               <>
-                <div className="text-slate-400">Ambiguous</div>
+                <div className="text-muted-foreground">Ambiguous</div>
                 <div className="text-amber-300 text-right">{statsUseLabel(master.ambiguous_reason)}</div>
               </>
             )}
@@ -556,10 +556,10 @@ function TradeGroupCard({
 
       {/* ── Notes ── */}
       <div className="px-3 pb-2 border-t border-slate-800 pt-1.5">
-        <div className="text-xs text-slate-500 mb-1">Notes</div>
+        <div className="text-xs text-muted-foreground mb-1">Notes</div>
         <div className="flex items-start gap-2">
           <textarea
-            className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 resize-none"
+            className="flex-1 bg-card border border-border rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-ring resize-none"
             rows={2}
             placeholder="Add notes..."
             value={noteText}
@@ -573,15 +573,15 @@ function TradeGroupCard({
             disabled={noteBusy}
           />
           {noteBusy && (
-            <span className="text-slate-500 text-[10px]">…</span>
+            <span className="text-muted-foreground text-[10px]">…</span>
           )}
         </div>
       </div>
 
       {/* ── Timestamp ── */}
-      <div className="px-3 pb-2 text-xs text-slate-500 border-t border-slate-800 pt-1.5">
+      <div className="px-3 pb-2 text-xs text-muted-foreground border-t border-border pt-1.5">
         {multi
-          ? <>{fmtTime(group.firstTs)} <span className="text-slate-600">→ {fmtTime(group.lastTs)}</span></>
+          ? <>{fmtTime(group.firstTs)} <span className="text-muted-foreground/70">→ {fmtTime(group.lastTs)}</span></>
           : fmtTime(group.firstTs)
         }
       </div>
@@ -589,9 +589,9 @@ function TradeGroupCard({
       {/* ── Drill-down: individual triggers ── */}
       {expanded && (
         <div className="border-t border-slate-800 bg-slate-900/50">
-          <div className="px-3 py-2 text-xs text-slate-500 font-semibold uppercase tracking-wider">
+          <div className="px-3 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider">
             Individual Triggers
-            {multi && <span className="ml-1 font-normal normal-case text-slate-600">— select master to grade</span>}
+            {multi && <span className="ml-1 font-normal normal-case text-muted-foreground/70">— select master to grade</span>}
           </div>
           {group.entries.map((e, i) => {
             const isMaster = e.signal_id === masterSignalId;
@@ -611,18 +611,18 @@ function TradeGroupCard({
                       onChange={() => setMasterSignalId(e.signal_id)}
                       className="accent-blue-500"
                     />
-                    <span className={isMaster ? "text-slate-200" : "text-slate-400"}>
+                    <span className={isMaster ? "text-foreground" : "text-muted-foreground"}>
                       #{i + 1} — {fmtTime(e.signal_timestamp)}
                     </span>
                     {isMaster && <span className="text-blue-400 text-[10px] font-semibold uppercase">master</span>}
                   </label>
                   <GradeBadge grade={displayGrade(e)} />
                 </div>
-                <div className="text-slate-500">Confidence</div>
+                <div className="text-muted-foreground">Confidence</div>
                 <div className="text-white text-right">{Math.round(e.confidence * 100)}%</div>
-                <div className="text-slate-500">Entry</div>
+                <div className="text-muted-foreground">Entry</div>
                 <div className="text-white text-right">{fmtPrice(e.entry_price)}</div>
-                <div className="text-slate-500">SL / TP</div>
+                <div className="text-muted-foreground">SL / TP</div>
                 <div className="text-white text-right">
                   <span className="text-red-400">{fmtPrice(e.stop_loss)}</span>
                   {" / "}
@@ -630,7 +630,7 @@ function TradeGroupCard({
                 </div>
                 {outcomeLabel(e) && (
                   <>
-                    <div className="text-slate-500">Outcome</div>
+                    <div className="text-muted-foreground">Outcome</div>
                     <div className={e.status === "ambiguous" ? "text-amber-300 text-right" : "text-white text-right"}>
                       {outcomeLabel(e)}
                     </div>
@@ -638,7 +638,7 @@ function TradeGroupCard({
                 )}
                 {e.exit_price != null && (
                   <>
-                    <div className="text-slate-500">Exit</div>
+                    <div className="text-muted-foreground">Exit</div>
                     <div className="text-white text-right">{fmtPrice(e.exit_price)}</div>
                   </>
                 )}
@@ -689,8 +689,8 @@ function FilterBar({
             onClick={() => onChange(value)}
             className={`text-xs px-3 py-1 rounded-full border transition-colors ${
               isActive
-                ? "bg-slate-600 border-slate-500 text-white"
-                : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                ? "bg-secondary border-input text-foreground"
+                : "bg-card border-border text-muted-foreground hover:border-input hover:text-foreground"
             }`}
           >
             {label} <span className="opacity-60">({count})</span>
@@ -888,57 +888,53 @@ export default function JournalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
-            ← Dashboard
-          </Link>
-          <span className="text-slate-700">|</span>
-          <span className="text-white font-semibold text-sm">Signal Journal</span>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <span className="text-xs text-slate-600">
-            {totalTrades} trades · {totalSignals} triggers
-          </span>
-          <label className="flex items-center gap-1 text-xs text-slate-500">
-            <span>Start</span>
-            <input
-              type="datetime-local"
-              value={exportStart}
-              onChange={(event) => setExportStart(event.target.value)}
-              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-            />
-          </label>
-          <label className="flex items-center gap-1 text-xs text-slate-500">
-            <span>End</span>
-            <input
-              type="datetime-local"
-              value={exportEnd}
-              onChange={(event) => setExportEnd(event.target.value)}
-              className="w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-            />
-          </label>
-          <button
-            onClick={exportJournal}
-            disabled={exporting}
-            className="text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 transition-colors"
-          >
-            {exporting ? "Exporting..." : "Export CSV"}
-          </button>
-          <button
-            onClick={purgeJournal}
-            disabled={purging || entries.length === 0}
-            className="text-xs px-3 py-1 rounded bg-red-900/60 hover:bg-red-800 disabled:opacity-50 text-red-100 transition-colors"
-          >
-            {purging ? "Purging..." : "Purge"}
-          </button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-background text-foreground">
+      <PageSubNav
+        currentPage="/journal"
+        actions={
+          <>
+            <span className="text-xs text-muted-foreground/70">
+              {totalTrades} trades · {totalSignals} triggers
+            </span>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span>Start</span>
+              <input
+                type="datetime-local"
+                value={exportStart}
+                onChange={(event) => setExportStart(event.target.value)}
+                className="w-40 rounded border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-ring focus:outline-none [color-scheme:dark]"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span>End</span>
+              <input
+                type="datetime-local"
+                value={exportEnd}
+                onChange={(event) => setExportEnd(event.target.value)}
+                className="w-40 rounded border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-ring focus:outline-none [color-scheme:dark]"
+              />
+            </label>
+            <button
+              onClick={exportJournal}
+              disabled={exporting}
+              className="text-xs px-3 py-1 rounded bg-secondary hover:bg-secondary/80 disabled:opacity-50 text-secondary-foreground transition-colors"
+            >
+              {exporting ? "Exporting..." : "Export CSV"}
+            </button>
+            <button
+              onClick={purgeJournal}
+              disabled={purging || entries.length === 0}
+              className="text-xs px-3 py-1 rounded bg-destructive/60 hover:bg-destructive/80 disabled:opacity-50 text-destructive-foreground transition-colors"
+            >
+              {purging ? "Purging..." : "Purge"}
+            </button>
+          </>
+        }
+      />
 
       <main className="px-4 py-6 max-w-5xl mx-auto">
         {loading && (
-          <div className="text-slate-500 text-sm text-center py-20">Loading journal…</div>
+          <div className="text-muted-foreground text-sm text-center py-20">Loading journal…</div>
         )}
         {error && (
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm mb-6">
@@ -960,14 +956,14 @@ export default function JournalPage() {
             <FilterBar active={filter} onChange={setFilter} counts={gradeCounts} />
 
             {dayGroups.length === 0 ? (
-              <div className="text-slate-500 text-sm text-center py-20">
+              <div className="text-muted-foreground text-sm text-center py-20">
                 {entries.length === 0 ? "No signals recorded yet." : "No trades match this filter."}
               </div>
             ) : (
               <div className="space-y-6">
                 {dayGroups.map(([key, { label, groups }]) => (
                   <section key={key}>
-                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                       {label}
                     </h2>
                     <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
