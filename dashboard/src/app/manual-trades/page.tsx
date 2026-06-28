@@ -108,10 +108,10 @@ function StatsCards({ stats }: { stats: ManualTradeSummary | null }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       {cards.map(({ label, value, sub }) => (
-        <div key={label} className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-3">
-          <div className="text-slate-500 text-xs">{label}</div>
-          <div className="text-white text-xl font-semibold mt-0.5">{value}</div>
-          <div className="text-slate-600 text-xs mt-0.5">{sub}</div>
+        <div key={label} className="bg-card border border-border rounded-lg px-4 py-3">
+          <div className="text-muted-foreground text-xs">{label}</div>
+          <div className="text-foreground text-xl font-semibold mt-0.5">{value}</div>
+          <div className="text-muted-foreground/70 text-xs mt-0.5">{sub}</div>
         </div>
       ))}
     </div>
@@ -215,14 +215,14 @@ function TradeFormModal({
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-white font-semibold text-sm">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-foreground font-semibold text-sm">
             {isEdit ? "Edit Trade" : "Add Trade"}
           </h3>
           <button
             onClick={onClose}
-            className="text-slate-500 hover:text-slate-300 text-lg leading-none"
+            className="text-muted-foreground hover:text-foreground text-lg leading-none"
           >
             ×
           </button>
@@ -231,7 +231,7 @@ function TradeFormModal({
         <form onSubmit={handleSubmit} className="px-4 py-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Symbol</label>
+              <label className="block text-xs text-muted-foreground mb-1">Symbol</label>
               <input
                 type="text"
                 value={form.symbol}
@@ -239,16 +239,16 @@ function TradeFormModal({
                 placeholder="EURUSD"
                 required={canEditAll}
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Direction</label>
+              <label className="block text-xs text-muted-foreground mb-1">Direction</label>
               <select
                 value={form.direction}
                 onChange={(e) => updateField("direction", e.target.value)}
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring"
               >
                 <option value="long">Long</option>
                 <option value="short">Short</option>
@@ -259,7 +259,7 @@ function TradeFormModal({
           {mode === "alert_only" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">P&L</label>
+                <label className="block text-xs text-muted-foreground mb-1">P&L</label>
                 <input
                   type="number"
                   step="0.01"
@@ -267,11 +267,11 @@ function TradeFormModal({
                   onChange={(e) => updateField("pnl", e.target.value)}
                   placeholder="Calculated"
                   disabled={!canEditAll}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                  className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">P&L %</label>
+                <label className="block text-xs text-muted-foreground mb-1">P&L %</label>
                 <input
                   type="number"
                   step="0.01"
@@ -279,7 +279,7 @@ function TradeFormModal({
                   onChange={(e) => updateField("pnl_percent", e.target.value)}
                   placeholder="Calculated"
                   disabled={!canEditAll}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                  className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
                 />
               </div>
             </div>
@@ -287,7 +287,7 @@ function TradeFormModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Entry Price</label>
+              <label className="block text-xs text-muted-foreground mb-1">Entry Price</label>
               <input
                 type="number"
                 step="0.00001"
@@ -295,11 +295,11 @@ function TradeFormModal({
                 onChange={(e) => updateField("entry_price", e.target.value)}
                 required={canEditAll}
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Exit Price</label>
+              <label className="block text-xs text-muted-foreground mb-1">Exit Price</label>
               <input
                 type="number"
                 step="0.00001"
@@ -307,39 +307,39 @@ function TradeFormModal({
                 onChange={(e) => updateField("exit_price", e.target.value)}
                 placeholder="Optional"
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Entry Time</label>
+              <label className="block text-xs text-muted-foreground mb-1">Entry Time</label>
               <input
                 type="datetime-local"
                 value={form.entry_time}
                 onChange={(e) => updateField("entry_time", e.target.value)}
                 required={canEditAll}
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 [color-scheme:dark]"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring [color-scheme:dark]"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Exit Time</label>
+              <label className="block text-xs text-muted-foreground mb-1">Exit Time</label>
               <input
                 type="datetime-local"
                 value={form.exit_time}
                 onChange={(e) => updateField("exit_time", e.target.value)}
                 placeholder="Optional"
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600 [color-scheme:dark]"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60 [color-scheme:dark]"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Volume</label>
+              <label className="block text-xs text-muted-foreground mb-1">Volume</label>
               <input
                 type="number"
                 step="0.01"
@@ -347,11 +347,11 @@ function TradeFormModal({
                 onChange={(e) => updateField("volume", e.target.value)}
                 placeholder="Optional"
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Fees</label>
+              <label className="block text-xs text-muted-foreground mb-1">Fees</label>
               <input
                 type="number"
                 step="0.01"
@@ -359,44 +359,44 @@ function TradeFormModal({
                 onChange={(e) => updateField("fees", e.target.value)}
                 placeholder="0.00"
                 disabled={!canEditAll}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+                className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Notes</label>
+            <label className="block text-xs text-muted-foreground mb-1">Notes</label>
             <textarea
               value={form.notes}
               onChange={(e) => updateField("notes", e.target.value)}
               rows={3}
               placeholder="Optional notes about this trade..."
-              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600 resize-none"
+              className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60 resize-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Tags</label>
+            <label className="block text-xs text-muted-foreground mb-1">Tags</label>
             <input
               type="text"
               value={form.tags}
               onChange={(e) => updateField("tags", e.target.value)}
               placeholder="setup, session, review"
-              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 placeholder-slate-600"
+              className="w-full bg-card border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-ring placeholder:text-muted-foreground/60"
             />
           </div>
 
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-sm rounded py-2 transition-colors"
+              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground text-sm rounded py-2 transition-colors"
             >
               {isEdit && !canEditAll ? "Save Notes & Tags" : isEdit ? "Save Changes" : "Add Trade"}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm rounded py-2 transition-colors"
+              className="px-4 bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm rounded py-2 transition-colors"
             >
               Cancel
             </button>
@@ -420,9 +420,9 @@ function DeleteConfirmModal({
 }) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg w-full max-w-sm px-4 py-4">
-        <h3 className="text-white font-semibold text-sm mb-2">Delete Trade?</h3>
-        <p className="text-slate-400 text-sm mb-4">
+      <div className="bg-card border border-border rounded-lg w-full max-w-sm px-4 py-4">
+        <h3 className="text-foreground font-semibold text-sm mb-2">Delete Trade?</h3>
+        <p className="text-muted-foreground text-sm mb-4">
           {trade.symbol} {trade.direction} @ {fmtPrice(trade.entry_price, trade.symbol)}
         </p>
         <div className="flex gap-2">
@@ -434,7 +434,7 @@ function DeleteConfirmModal({
           </button>
           <button
             onClick={onClose}
-            className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm rounded py-2 transition-colors"
+            className="px-4 bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm rounded py-2 transition-colors"
           >
             Cancel
           </button>

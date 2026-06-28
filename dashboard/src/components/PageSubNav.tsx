@@ -16,7 +16,7 @@ export function PageSubNav({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-border px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <header className="border-b border-border px-4 py-3 flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-1">
         <Link
           href="/"
@@ -50,6 +50,6 @@ export function PageSubNav({
       {actions && (
         <div className="flex flex-wrap items-center gap-2">{actions}</div>
       )}
-    </div>
+    </header>
   );
 }
