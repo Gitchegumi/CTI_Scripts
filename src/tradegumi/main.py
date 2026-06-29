@@ -551,6 +551,16 @@ def run(mode: str):
     log.info("TradeGumi starting in %s mode", mode)
     config.validate_config()
 
+    # Validate strategy plugins up front so a broken folder surfaces a clear log
+    # line at startup rather than failing lazily mid-scan (issue #168).
+    from tradegumi.strategy_loader import discover_strategies
+
+    for result in discover_strategies():
+        if result.ok:
+            log.info("Strategy plugin OK: %s (id=%s)", result.folder, result.id)
+        else:
+            log.warning("Strategy plugin INVALID: %s — %s", result.folder, result.error)
+
     # Fail fast if the durable store is unreachable, rather than erroring lazily
     # on the first write mid-loop. get_db() connects and initialises the schema.
     try:

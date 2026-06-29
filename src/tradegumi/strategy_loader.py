@@ -88,6 +88,66 @@ class StrategyDecision:
         return self.signal, self.criteria, self.reason, self.confidence
 
 
+# ── Open-trade / continuation management contract ──────────────────────────────
+# A strategy owns "how continuation or management signals behave". The runtime
+# (``journal``) detects a continuation against an active trade, builds a
+# ``ManagedTradeContext``, calls ``strategy.manage_open_trade``, and persists the
+# returned ``TradeManagementDecision`` — it never decides SL/TP changes itself.
+
+MANAGEMENT_ACCEPTED = "accepted"
+MANAGEMENT_REJECTED_DISABLED = "management_disabled"
+MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS = "insufficient_progress"
+MANAGEMENT_REJECTED_RISK_INCREASE = "risk_increase"
+MANAGEMENT_REJECTED_EXTENSION_CAP = "extension_cap_reached"
+MANAGEMENT_REJECTED_DUPLICATE_EVENT = "duplicate_management_event"
+MANAGEMENT_REJECTED_MISSING_CONTEXT = "missing_management_context"
+MANAGEMENT_NOT_IMPLEMENTED = "management_not_implemented"
+
+
+@dataclass
+class ManagedTradeContext:
+    """Journal-free inputs a strategy needs to manage one active trade.
+
+    The runtime builds this from its persisted trade row + the continuation
+    signal, so the strategy decides SL/TP changes from clean numbers without
+    knowing anything about journal storage.
+    """
+    direction: str                      # normalized "BUY" / "SELL"
+    entry_price: Optional[float]
+    current_stop_loss: Optional[float]
+    current_take_profit: Optional[float]
+    risk_at_entry: Optional[float]
+    price_at_event: Optional[float]
+    tp_extension_count: int = 0
+    already_seen: bool = False          # this continuation already managed the trade
+
+
+@dataclass(frozen=True)
+class TradeManagementDecision:
+    """A strategy's verdict for one continuation against an active trade."""
+
+    accepted: bool
+    reason: str
+    rejection_reason: Optional[str]
+    old_stop_loss: Optional[float]
+    new_stop_loss: Optional[float]
+    old_take_profit: Optional[float]
+    new_take_profit: Optional[float]
+    price_at_event: Optional[float]
+    tp_extended: bool = False
+    sl_tightened: bool = False
+    break_even_moved: bool = False
+
+
+@dataclass
+class StrategyValidation:
+    """Result of validating one strategy folder against the plugin contract."""
+    folder: str
+    id: Optional[str]
+    ok: bool
+    error: Optional[str] = None
+
+
 class BaseStrategy(ABC):
     """Contract every strategy plugin implements.
 
@@ -118,6 +178,24 @@ class BaseStrategy(ABC):
         bridge applies. Default: no bridging.
         """
         return None, None
+
+    def manage_open_trade(self, ctx: "ManagedTradeContext") -> "TradeManagementDecision":
+        """Decide SL/TP changes for an active trade given a continuation signal.
+
+        Strategies that manage open trades (e.g. break-even / profit-protect /
+        TP-extension on continuation) override this. The default declines, so a
+        strategy that only emits entries still loads and runs unchanged.
+        """
+        return TradeManagementDecision(
+            accepted=False,
+            reason=MANAGEMENT_NOT_IMPLEMENTED,
+            rejection_reason=MANAGEMENT_NOT_IMPLEMENTED,
+            old_stop_loss=ctx.current_stop_loss,
+            new_stop_loss=ctx.current_stop_loss,
+            old_take_profit=ctx.current_take_profit,
+            new_take_profit=ctx.current_take_profit,
+            price_at_event=ctx.price_at_event,
+        )
 
 
 def _synthetic_pkg_name(folder: Path) -> str:
@@ -209,6 +287,41 @@ def load_strategy(
         )
     log.debug("Loaded strategy '%s' from %s", getattr(strategy, "id", "?"), folder)
     return strategy
+
+
+def _looks_like_strategy_folder(entry: Path) -> bool:
+    """A subfolder is a strategy candidate if it has strategy.py or strategy.json."""
+    return (entry / "strategy.py").exists() or (entry / "strategy.json").exists()
+
+
+def discover_strategies(strategies_dir: Optional[str] = None) -> list[StrategyValidation]:
+    """Discover every strategy folder and validate it implements the contract.
+
+    Unlike ``strategy_registry`` (which only reads ``strategy.json`` metadata for
+    the dashboard dropdown), this actually loads each folder and confirms it
+    exposes a ``get_strategy()`` factory returning a ``BaseStrategy``. Each folder
+    is reported as ``ok`` or with a useful ``error`` — one bad folder never breaks
+    discovery of the others.
+    """
+    base = Path(strategies_dir or config.get_strategies_dir())
+    results: list[StrategyValidation] = []
+    if not base.is_dir():
+        log.debug("Strategy discovery: base directory does not exist — %s", base)
+        return results
+
+    for entry in sorted(base.iterdir()):
+        if not entry.is_dir() or not _looks_like_strategy_folder(entry):
+            continue
+        try:
+            strategy = load_strategy(entry.name, strategies_dir=str(base))
+            results.append(StrategyValidation(entry.name, getattr(strategy, "id", None), True))
+        except StrategyLoadError as exc:
+            results.append(StrategyValidation(entry.name, None, False, str(exc)))
+        except Exception as exc:  # import errors, bad factories, etc.
+            results.append(
+                StrategyValidation(entry.name, None, False, f"{type(exc).__name__}: {exc}")
+            )
+    return results
 
 
 def default_strategy_module() -> ModuleType:

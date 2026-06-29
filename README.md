@@ -26,28 +26,36 @@ Strategies are **self-contained, executable plugin folders** under `strategies/`
 TradeGumi core is the runtime framework (market data, trend/chop/shock filters,
 cooldown, diagnostics, risk sizing); each strategy folder owns its *decision*
 logic and is discovered and loaded at runtime without any change to core code.
-`strategies/example-strategy/` is the tracked reference implementation (the CTI
-pullback strategy with continuation management). Backtesting and strategy
-research are **not** part of TradeGumi — they live in QuantPipe.
+Two reference strategies are tracked: `strategies/example-strategy/` (the full
+CTI pullback strategy with continuation management) and
+`strategies/macd-momentum/` (a minimal strategy proving the contract with only
+the two required files). Backtesting and strategy research are **not** part of
+TradeGumi — they live in QuantPipe.
+
+See [`docs/strategy-plugins.md`](docs/strategy-plugins.md) for the full folder
+contract and interface reference.
 
 ### Folder layout
 
 ```text
 strategies/
-├── example-strategy/       # Tracked — reference implementation
+├── example-strategy/       # Tracked — full reference implementation
 │   ├── strategy.json       #   metadata (id, label, description, signal_type, entrypoint)
 │   ├── strategy.py         #   get_strategy() -> BaseStrategy; owns the signal decision
 │   ├── indicators.py       #   strategy-specific indicators / structure helpers
-│   ├── management.py       #   trade-management helpers (risk/exit, confidence)
+│   ├── management.py       #   trade-management (manage_open_trade), risk/exit, confidence
 │   └── README.md           #   per-strategy notes
-├── my-pullback/            # Gitignored — your own strategy (local only)
-│   └── strategy.py
-└── my-continuation/        # Gitignored — another local strategy
+├── macd-momentum/          # Tracked — minimal reference (two required files only)
+│   ├── strategy.json
+│   ├── strategy.py
+│   └── README.md
+└── my-strategy/            # Gitignored — your own strategy (local only)
     └── strategy.py
 ```
 
 Only `strategy.json` and `strategy.py` are required; `indicators.py`,
-`management.py`, `tests/`, and any other files are optional and up to the strategy.
+`management.py`, `config.py`, `tests/`, and any other files are optional and up to
+the strategy.
 
 ### `strategy.json` fields
 
@@ -69,9 +77,14 @@ calls the module-level `get_strategy()` factory, which must return a
 `tradegumi.strategy_loader.BaseStrategy`. `SignalEngine` loads its strategy once at
 construction — the bundled `example-strategy` by default, overridable with the
 `TRADEGUMI_STRATEGY` env var (folder name or `id`) — and calls
-`strategy.evaluate(engine, ctx)` for each evaluation (plus the optional
-`strategy.bridge_trend(...)` hook). The separate strategy *registry* still scans
-`strategies/` for `strategy.json` to populate the dashboard dropdown.
+`strategy.evaluate(engine, ctx)` for each evaluation, plus the optional
+`strategy.bridge_trend(...)` and `strategy.manage_open_trade(ctx)` hooks. The last
+owns continuation / open-trade management: core detects a continuation against an
+active trade and persists the outcome, but the strategy decides the SL/TP changes
+(the default declines, so management is opt-in). The separate strategy *registry*
+scans `strategies/` for `strategy.json` to populate the dashboard dropdown, and
+`strategy_loader.discover_strategies()` validates that each folder actually
+implements the interface — the worker logs the result at startup.
 
 ### Adding a new strategy
 
@@ -81,10 +94,10 @@ construction — the bundled `example-strategy` by default, overridable with the
 3. Point the runtime at it with `TRADEGUMI_STRATEGY=my-strategy` (or its `id`) and
    restart the API server / worker.
 
-Your new folder is **not tracked by git** — only `strategies/example-strategy/` is
-committed. All other sibling folders are gitignored so your private strategies stay
-local. The built-in `CTI-v1` entry is always available in the dropdown regardless of
-folder contents.
+Your new folder is **not tracked by git** — only the bundled reference strategies
+(`example-strategy`, `macd-momentum`) are committed. All other sibling folders are
+gitignored so your private strategies stay local. The built-in `CTI-v1` entry is
+always available in the dropdown regardless of folder contents.
 
 If a folder is missing `strategy.json` or contains malformed JSON, it still appears
 in the dropdown with a warning badge (⚠️) so you know something needs fixing.
@@ -92,10 +105,11 @@ in the dropdown with a warning badge (⚠️) so you know something needs fixing
 ### `.gitignore` policy
 
 ```gitignore
-# Strategy folders — only the example is tracked.
+# Strategy folders — only the bundled reference strategies are tracked.
 # Sibling folders (your own strategies) are ignored so they stay local.
 strategies/*
 !strategies/example-strategy/
+!strategies/macd-momentum/
 ```
 
 ## Quick Start
