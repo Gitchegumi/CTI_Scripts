@@ -43,7 +43,13 @@ from tradegumi.signal_engine import (
     _signal_window_issue,
     _usable_indicator_window,
 )
-from tradegumi.strategy_loader import BaseStrategy, StrategyContext, StrategyDecision
+from tradegumi.strategy_loader import (
+    BaseStrategy,
+    ManagedTradeContext,
+    StrategyContext,
+    StrategyDecision,
+    TradeManagementDecision,
+)
 
 from .indicators import (
     classify_pullback_trend_bridge,
@@ -56,6 +62,7 @@ from .management import (
     MIN_CONFIDENCE,
     compute_sl_tp,
     continuation_confidence,
+    manage_open_trade as _manage_open_trade,
     pullback_confidence,
 )
 
@@ -101,6 +108,11 @@ class PullbackStrategy(BaseStrategy):
             if bridge["passed"]:
                 return candidate_trend, bridge
         return None, None
+
+    # ── Open-trade management hook ────────────────────────────────────────────
+    def manage_open_trade(self, ctx: ManagedTradeContext) -> TradeManagementDecision:
+        """Continuation management: break-even → profit-protect → TP extension."""
+        return _manage_open_trade(ctx)
 
     # ── Signal decision ───────────────────────────────────────────────────────
     def evaluate(self, engine, ctx: StrategyContext) -> StrategyDecision:

@@ -59,6 +59,18 @@ from typing import Any, Optional
 
 from tradegumi import config
 from tradegumi.persistence import get_db
+from tradegumi.strategy_loader import (
+    MANAGEMENT_ACCEPTED,
+    MANAGEMENT_REJECTED_DISABLED,
+    MANAGEMENT_REJECTED_DUPLICATE_EVENT,
+    MANAGEMENT_REJECTED_EXTENSION_CAP,
+    MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS,
+    MANAGEMENT_REJECTED_MISSING_CONTEXT,
+    MANAGEMENT_REJECTED_RISK_INCREASE,
+    ManagedTradeContext,
+    TradeManagementDecision,
+    load_strategy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -88,13 +100,11 @@ LIFECYCLE_MANAGEMENT = "management"
 LIFECYCLE_OUTCOME = "outcome"
 LIFECYCLE_WARNING = "warning"
 LIFECYCLE_LEGACY_SIGNAL = "legacy_signal"
-MANAGEMENT_ACCEPTED = "accepted"
+# Continuation-management reason codes (MANAGEMENT_ACCEPTED / MANAGEMENT_REJECTED_*)
+# and the TradeManagementDecision / ManagedTradeContext types now live in the
+# strategy contract (tradegumi.strategy_loader) and are imported above. Only the
+# orchestration-specific code below stays in core.
 MANAGEMENT_REJECTED_NO_ACTIVE_TRADE = "no_active_trade"
-MANAGEMENT_REJECTED_DISABLED = "management_disabled"
-MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS = "insufficient_progress"
-MANAGEMENT_REJECTED_RISK_INCREASE = "risk_increase"
-MANAGEMENT_REJECTED_EXTENSION_CAP = "extension_cap_reached"
-MANAGEMENT_REJECTED_DUPLICATE_EVENT = "duplicate_management_event"
 MANAGED_EXIT_TP_HIT = "tp_hit"
 MANAGED_EXIT_SL_LOSS = "sl_hit_with_loss"
 MANAGED_EXIT_SL_BE = "sl_hit_at_break_even"
@@ -301,23 +311,6 @@ class TradeEntryState:
     current_stop_loss: float
     current_take_profit: float
     risk_at_entry: float
-
-
-@dataclass(frozen=True)
-class TradeManagementDecision:
-    """Decision produced by evaluating one continuation against an active trade."""
-
-    accepted: bool
-    reason: str
-    rejection_reason: Optional[str]
-    old_stop_loss: Optional[float]
-    new_stop_loss: Optional[float]
-    old_take_profit: Optional[float]
-    new_take_profit: Optional[float]
-    price_at_event: Optional[float]
-    tp_extended: bool = False
-    sl_tightened: bool = False
-    break_even_moved: bool = False
 
 
 def _now_iso() -> str:
@@ -946,33 +939,6 @@ def _price_at_management_event(signal: Any, entry: dict[str, Any]) -> Optional[f
     return _coerce_float(_signal_attr(signal, ("signal_price", "current_price", "market_price", "entry_price"), entry.get("entry_price")))
 
 
-def _directional_movement(direction: Any, entry_price: Any, price: Any) -> Optional[float]:
-    """Return favorable movement in price units for a direction."""
-    entry = _coerce_float(entry_price)
-    event_price = _coerce_float(price)
-    if entry is None or event_price is None:
-        return None
-    if _direction_key(direction) == "BUY":
-        return event_price - entry
-    if _direction_key(direction) == "SELL":
-        return entry - event_price
-    return None
-
-
-def _price_from_r(direction: Any, entry_price: float, risk: float, r_value: float) -> float:
-    """Return a direction-aware price offset from entry by an R multiple."""
-    return entry_price + (risk * r_value) if _direction_key(direction) == "BUY" else entry_price - (risk * r_value)
-
-
-def _would_increase_risk(direction: Any, entry_price: float, current_sl: float, proposed_sl: float) -> bool:
-    """Return whether a proposed SL is farther from entry than the current SL."""
-    if abs(entry_price - proposed_sl) > abs(entry_price - current_sl):
-        return True
-    if _direction_key(direction) == "BUY":
-        return proposed_sl < current_sl
-    return proposed_sl > current_sl
-
-
 def _management_event_seen(trade: dict[str, Any], source_signal_id: str) -> bool:
     """Return whether a continuation signal already affected this managed trade."""
     events = trade.get("management_events")
@@ -981,65 +947,40 @@ def _management_event_seen(trade: dict[str, Any], source_signal_id: str) -> bool
     return any(isinstance(event, dict) and event.get("source_signal_id") == source_signal_id for event in events)
 
 
+_active_strategy = None
+
+
+def _get_active_strategy():
+    """Return (and cache) the active strategy plugin for trade management.
+
+    The runtime uses a single configured strategy; load it once and reuse it so
+    every continuation event is managed by the same plugin instance.
+    """
+    global _active_strategy
+    if _active_strategy is None:
+        _active_strategy = load_strategy()
+    return _active_strategy
+
+
 def _evaluate_management_event(trade: dict[str, Any], signal: Any, source_signal_id: str) -> TradeManagementDecision:
-    """Evaluate SL/TP management changes for one continuation signal."""
-    old_sl = _coerce_float(trade.get("current_stop_loss", trade.get("stop_loss")))
-    old_tp = _coerce_float(trade.get("current_take_profit", trade.get("take_profit")))
+    """Delegate continuation management of an active trade to the active strategy.
+
+    Core owns detection and persistence; the *decision* (SL/TP changes) belongs to
+    the strategy. We build a journal-free ``ManagedTradeContext`` from the trade
+    row + signal and hand it to ``strategy.manage_open_trade``.
+    """
     entry_price = _coerce_float(trade.get("entry_price"))
-    risk = _coerce_float(trade.get("risk_at_entry")) or _risk_at_entry(entry_price, trade.get("initial_stop_loss", trade.get("stop_loss")))
-    price = _price_at_management_event(signal, trade)
-    if not bool(config.CONTINUATION_MANAGEMENT_ENABLED):
-        return TradeManagementDecision(False, MANAGEMENT_REJECTED_DISABLED, MANAGEMENT_REJECTED_DISABLED, old_sl, old_sl, old_tp, old_tp, price)
-    if _management_event_seen(trade, source_signal_id):
-        return TradeManagementDecision(False, MANAGEMENT_REJECTED_DUPLICATE_EVENT, MANAGEMENT_REJECTED_DUPLICATE_EVENT, old_sl, old_sl, old_tp, old_tp, price)
-    if old_sl is None or old_tp is None or entry_price is None or risk in (None, 0):
-        return TradeManagementDecision(False, "missing_management_context", "missing_management_context", old_sl, old_sl, old_tp, old_tp, price)
-    movement = _directional_movement(trade.get("direction"), entry_price, price)
-    progress_r = None if movement is None else movement / risk
-    if progress_r is None or progress_r < float(config.CONTINUATION_MANAGEMENT_BE_TRIGGER_R):
-        return TradeManagementDecision(False, MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS, MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS, old_sl, old_sl, old_tp, old_tp, price)
-
-    direction = _direction_key(trade.get("direction"))
-    proposed_sl = old_sl
-    break_even_moved = False
-    sl_tightened = False
-    if progress_r >= float(config.CONTINUATION_MANAGEMENT_PROFIT_PROTECT_TRIGGER_R):
-        proposed_sl = _price_from_r(direction, entry_price, risk, float(config.CONTINUATION_MANAGEMENT_PROFIT_PROTECT_OFFSET_R))
-    elif progress_r >= float(config.CONTINUATION_MANAGEMENT_BE_TRIGGER_R):
-        proposed_sl = entry_price
-        break_even_moved = True
-    if _would_increase_risk(direction, entry_price, old_sl, proposed_sl):
-        return TradeManagementDecision(False, MANAGEMENT_REJECTED_RISK_INCREASE, MANAGEMENT_REJECTED_RISK_INCREASE, old_sl, old_sl, old_tp, old_tp, price)
-    if proposed_sl != old_sl:
-        sl_tightened = True
-
-    max_extensions = int(config.CONTINUATION_MANAGEMENT_MAX_TP_EXTENSIONS)
-    current_extensions = int(trade.get("tp_extension_count") or 0)
-    proposed_tp = old_tp
-    tp_extended = False
-    if current_extensions < max_extensions:
-        target_r = abs(old_tp - entry_price) / risk + float(config.CONTINUATION_MANAGEMENT_TP_EXTENSION_MULTIPLE_R)
-        target_r = min(target_r, float(config.CONTINUATION_MANAGEMENT_MAX_TARGET_R))
-        proposed_tp = _price_from_r(direction, entry_price, risk, target_r)
-        tp_extended = proposed_tp != old_tp
-    elif not sl_tightened:
-        return TradeManagementDecision(False, MANAGEMENT_REJECTED_EXTENSION_CAP, MANAGEMENT_REJECTED_EXTENSION_CAP, old_sl, old_sl, old_tp, old_tp, price)
-
-    accepted = sl_tightened or tp_extended
-    reason = MANAGEMENT_ACCEPTED if accepted else MANAGEMENT_REJECTED_INSUFFICIENT_PROGRESS
-    return TradeManagementDecision(
-        accepted,
-        reason,
-        None if accepted else reason,
-        old_sl,
-        proposed_sl,
-        old_tp,
-        proposed_tp,
-        price,
-        tp_extended=tp_extended,
-        sl_tightened=sl_tightened,
-        break_even_moved=break_even_moved,
+    ctx = ManagedTradeContext(
+        direction=_direction_key(trade.get("direction")),
+        entry_price=entry_price,
+        current_stop_loss=_coerce_float(trade.get("current_stop_loss", trade.get("stop_loss"))),
+        current_take_profit=_coerce_float(trade.get("current_take_profit", trade.get("take_profit"))),
+        risk_at_entry=_coerce_float(trade.get("risk_at_entry")) or _risk_at_entry(entry_price, trade.get("initial_stop_loss", trade.get("stop_loss"))),
+        price_at_event=_price_at_management_event(signal, trade),
+        tp_extension_count=int(trade.get("tp_extension_count") or 0),
+        already_seen=_management_event_seen(trade, source_signal_id),
     )
+    return _get_active_strategy().manage_open_trade(ctx)
 
 
 def _append_management_evidence(

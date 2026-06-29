@@ -184,10 +184,11 @@ coverage/
 *.tmp
 .tmp/
 
-# Strategy folders — only the example is tracked.
+# Strategy folders — only the bundled reference strategies are tracked.
 # Sibling folders (your own strategies) are ignored so they stay local.
 strategies/*
 !strategies/example-strategy/
+!strategies/macd-momentum/
 
 # Private strategy files (legacy patterns)
 *.private.py

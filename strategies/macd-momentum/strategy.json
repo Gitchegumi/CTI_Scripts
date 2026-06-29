@@ -1,0 +1,7 @@
+{
+  "id": "macd-momentum",
+  "label": "MACD Zero-Line Momentum",
+  "description": "Second reference strategy: enters on a MACD histogram zero-line cross aligned with the framework trend. Minimal plugin (no indicators.py/management.py) showing those files are optional and that a new strategy needs no core-code edits.",
+  "signal_type": "momentum",
+  "entrypoint": "strategy.py"
+}

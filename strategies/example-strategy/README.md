@@ -32,6 +32,14 @@ and calls the module-level `get_strategy()` factory. The returned object must be
   confidence)`.
 - `strategy.bridge_trend(engine, lr_1h, lr_15m, candles_15m)` — optional hook to
   salvage a directional bias from recent M15 memory when the trend filter is flat.
+- `strategy.manage_open_trade(ctx)` — optional hook owning **continuation /
+  open-trade management**. When a same-direction continuation fires against an
+  active trade, core hands the strategy a `ManagedTradeContext` and the strategy
+  decides SL/TP changes (break-even → profit-protect → TP extension here),
+  returning a `TradeManagementDecision`. Core persists the result; it never
+  decides the changes itself. The default (`BaseStrategy`) declines, so a
+  strategy that only emits entries needs no management code. The decision logic
+  lives in [`management.py`](management.py).
 
 The framework provides everything else: market data access, the linear-regression
 trend filter, volatility-shock and chop/regime filters, the candle-close gate,
